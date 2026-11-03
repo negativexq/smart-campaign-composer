@@ -59,12 +59,17 @@ services:
   worker:
     <<: *backend
     command: ["/app/worker"]
+    environment:
+      <<: *backend-env
+      PROVIDER_URL: http://mock-provider:8080
     ports:
       - "8082:8080"
     depends_on:
       setup:
         condition: service_completed_successfully
       redis:
+        condition: service_healthy
+      mock-provider:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/readyz"]

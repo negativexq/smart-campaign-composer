@@ -174,3 +174,51 @@ func TestSampleRecipients(t *testing.T) {
 		t.Fatalf("got %d %+v", status, body)
 	}
 }
+
+func TestApproveAndDispatch(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, fastMock())
+	id := campaignWithAudience(t, api)
+	base := "/api/campaigns/" + id
+
+	if status, _ := call(t, api, http.MethodPost, base+"/approve", ""); status != http.StatusConflict {
+		t.Fatalf("approve without content: %d", status)
+	}
+	generate(t, api, id, "")
+	if status, _ := call(t, api, http.MethodPost, base+"/dispatch", ""); status != http.StatusConflict {
+		t.Fatalf("dispatch before approval: %d", status)
+	}
+	status, view := call(t, api, http.MethodPost, base+"/approve", "")
+	if status != http.StatusOK || view["status"] != "APPROVED" || view["approved_at"] == nil {
+		t.Fatalf("approve: %d %+v", status, view)
+	}
+	for range 2 {
+		if status, _ := call(t, api, http.MethodPost, base+"/dispatch", ""); status != http.StatusAccepted {
+			t.Fatalf("dispatch: %d", status)
+		}
+	}
+
+	status, progress := call(t, api, http.MethodGet, base+"/progress", "")
+	if status != http.StatusOK || progress["total"] != float64(18) {
+		t.Fatalf("progress: %d %+v", status, progress)
+	}
+	status, list := call(t, api, http.MethodGet, base+"/deliveries?channel=sms&status=QUEUED", "")
+	rows := list["deliveries"].([]any)
+	if status != http.StatusOK || len(rows) == 0 {
+		t.Fatalf("deliveries: %d %+v", status, list)
+	}
+	row := rows[0].(map[string]any)
+	if row["channel"] != "sms" || row["email"] != nil || row["phone"] != nil {
+		t.Fatalf("row: %+v", row)
+	}
+	if status, _ := call(t, api, http.MethodGet, base+"/deliveries?status=NOPE", ""); status != http.StatusBadRequest {
+		t.Fatalf("bad filter: %d", status)
+	}
+	status, attempts := call(t, api, http.MethodGet, base+"/deliveries/"+row["id"].(string)+"/attempts", "")
+	if status != http.StatusOK || len(attempts["attempts"].([]any)) != 0 {
+		t.Fatalf("attempts: %d %+v", status, attempts)
+	}
+	if status, _ := call(t, api, http.MethodGet, base+"/deliveries/00000000-0000-0000-0000-000000000000/attempts", ""); status != http.StatusNotFound {
+		t.Fatalf("unknown delivery: %d", status)
+	}
+}

@@ -9,12 +9,18 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"sync"
 	"syscall"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel"
 
 	"github.com/negativexq/smart-campaign-composer/internal/db"
+	"github.com/negativexq/smart-campaign-composer/internal/delivery"
 	"github.com/negativexq/smart-campaign-composer/internal/health"
 	"github.com/negativexq/smart-campaign-composer/internal/server"
 	"github.com/negativexq/smart-campaign-composer/internal/telemetry"
@@ -41,6 +47,26 @@ func run() error {
 		return err
 	}
 
+	providerURL, err := server.RequireEnv("PROVIDER_URL")
+	if err != nil {
+		return err
+	}
+	ratePerSecond, err := strconv.Atoi(server.Env("RATE_LIMIT_PER_SECOND", "100"))
+	if err != nil || ratePerSecond <= 0 {
+		return fmt.Errorf("RATE_LIMIT_PER_SECOND must be a positive number")
+	}
+	shutdownTracing, err := telemetry.SetupTracing(ctx, "worker", os.Getenv)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(shutdownCtx); err != nil {
+			slog.Warn("flush traces", "error", err)
+		}
+	}()
+
 	pool, err := db.Connect(ctx, databaseURL)
 	if err != nil {
 		return err
@@ -60,6 +86,18 @@ func run() error {
 		"redis":    func(ctx context.Context) error { return redisClient.Ping(ctx).Err() },
 	})
 	mux.Handle("GET /metrics", promhttp.Handler())
+
+	worker := delivery.New(pool, delivery.NewHTTPSender(providerURL),
+		delivery.NewRedisLimiter(redisClient, ratePerSecond, "delivery"),
+		telemetry.NewMetrics(prometheus.DefaultRegisterer), otel.Tracer("delivery"), delivery.DefaultConfig())
+
+	var running sync.WaitGroup
+	running.Go(func() {
+		if err := worker.Run(ctx); err != nil {
+			slog.Error("delivery loop stopped", "error", err)
+		}
+	})
+	defer running.Wait()
 
 	return server.Run(ctx, ":"+server.Env("OPS_PORT", "8080"), mux)
 }

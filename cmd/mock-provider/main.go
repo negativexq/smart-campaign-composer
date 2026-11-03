@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/negativexq/smart-campaign-composer/internal/health"
+	"github.com/negativexq/smart-campaign-composer/internal/mockprovider"
 	"github.com/negativexq/smart-campaign-composer/internal/server"
 	"github.com/negativexq/smart-campaign-composer/internal/telemetry"
 )
@@ -21,9 +23,32 @@ func main() {
 
 	mux := http.NewServeMux()
 	health.Register(mux, nil)
+	mockprovider.New(behaviorFromEnv()).Register(mux)
 
 	if err := server.Run(ctx, ":"+server.Env("PORT", "8080"), mux); err != nil {
 		slog.Error("mock provider failed", "error", err)
 		os.Exit(1)
 	}
+}
+
+// behaviorFromEnv lets a demo turn the trouble up or off.
+func behaviorFromEnv() mockprovider.Behavior {
+	behavior := mockprovider.DefaultBehavior()
+	for name, target := range map[string]*float64{
+		"MOCK_RATE_LIMIT_RATE":    &behavior.RateLimitRate,
+		"MOCK_SERVER_ERROR_RATE":  &behavior.ServerErrorRate,
+		"MOCK_LOST_RESPONSE_RATE": &behavior.LostResponseRate,
+	} {
+		value := os.Getenv(name)
+		if value == "" {
+			continue
+		}
+		rate, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			slog.Warn("ignoring invalid setting", "name", name, "value", value)
+			continue
+		}
+		*target = rate
+	}
+	return behavior
 }

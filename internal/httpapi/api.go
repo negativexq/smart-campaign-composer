@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
@@ -38,6 +39,11 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 	mux.HandleFunc("POST /api/campaigns/{id}/generate", a.generate)
 	mux.HandleFunc("PUT /api/campaigns/{id}/content", a.saveContent)
 	mux.HandleFunc("GET /api/campaigns/{id}/sample-recipients", a.sampleRecipients)
+	mux.HandleFunc("POST /api/campaigns/{id}/approve", a.approve)
+	mux.HandleFunc("POST /api/campaigns/{id}/dispatch", a.dispatch)
+	mux.HandleFunc("GET /api/campaigns/{id}/progress", a.progress)
+	mux.HandleFunc("GET /api/campaigns/{id}/deliveries", a.deliveries)
+	mux.HandleFunc("GET /api/campaigns/{id}/deliveries/{delivery}/attempts", a.deliveryAttempts)
 	mux.HandleFunc("GET /api/campaigns/{id}/activity", a.activity)
 }
 
@@ -243,6 +249,62 @@ func (a *api) sampleRecipients(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"recipients": samples})
 }
 
+func (a *api) approve(w http.ResponseWriter, r *http.Request) {
+	view, err := a.campaigns.Approve(r.Context(), r.PathValue("id"))
+	var invalid *content.ValidationError
+	if errors.As(err, &invalid) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "These messages no longer fit the limits. Edit them before approving.", "issues": invalid.Issues})
+		return
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// dispatch answers 202 because sending happens afterwards, in the worker.
+func (a *api) dispatch(w http.ResponseWriter, r *http.Request) {
+	view, err := a.campaigns.Dispatch(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, view)
+}
+
+func (a *api) progress(w http.ResponseWriter, r *http.Request) {
+	progress, err := a.campaigns.Progress(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, progress)
+}
+
+func (a *api) deliveries(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	limit, _ := strconv.Atoi(query.Get("limit"))   //nolint:errcheck // anything invalid means the default
+	offset, _ := strconv.Atoi(query.Get("offset")) //nolint:errcheck // anything invalid means the start
+	deliveries, err := a.campaigns.Deliveries(r.Context(), r.PathValue("id"), campaign.DeliveryFilter{
+		Status: query.Get("status"), Channel: query.Get("channel"), Limit: limit, Offset: offset,
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deliveries": deliveries})
+}
+
+func (a *api) deliveryAttempts(w http.ResponseWriter, r *http.Request) {
+	attempts, err := a.campaigns.DeliveryAttempts(r.Context(), r.PathValue("id"), r.PathValue("delivery"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"attempts": attempts})
+}
+
 // decode reads a strict JSON body. An empty body is allowed and means defaults.
 func decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
@@ -276,6 +338,12 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusConflict, "This campaign has moved past drafting and can no longer be edited."
 	case errors.Is(err, campaign.ErrProposalRejected):
 		status, message = http.StatusUnprocessableEntity, "We could not turn this brief into a valid audience: "+err.Error()+". Try naming a city, a time window or cart and purchase behaviour."
+	case errors.Is(err, campaign.ErrNotReviewable):
+		status, message = http.StatusConflict, "This campaign has no messages ready to approve."
+	case errors.Is(err, campaign.ErrNotApproved):
+		status, message = http.StatusConflict, "This campaign must be approved before it can be sent."
+	case errors.Is(err, campaign.ErrUnknownFilter):
+		status, message = http.StatusBadRequest, "This delivery filter does not exist."
 	case errors.Is(err, campaign.ErrInvalidInstruction):
 		status, message = http.StatusBadRequest, "Write an instruction of up to 500 characters."
 	case errors.Is(err, campaign.ErrNoAudience):
