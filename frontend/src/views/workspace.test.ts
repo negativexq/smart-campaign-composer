@@ -20,8 +20,10 @@ const summary = (overrides: Partial<CampaignSummary> = {}): CampaignSummary => (
 });
 
 const activity: ActivityEntry[] = [
-  { campaign_id: "c1", campaign_name: "Cart Recovery", type: "campaign.created", details: {}, occurred_at: "2026-11-03T12:00:00Z" },
+  { campaign_id: "c1", campaign_name: "Cart Recovery", type: "campaign.created", actor_type: "user", actor: "marketer@example.com", details: {}, occurred_at: "2026-11-03T12:00:00Z" },
   {
+    actor_type: "system",
+    actor: null,
     campaign_id: "c1",
     campaign_name: "Cart Recovery",
     type: "segment.proposed",
@@ -65,7 +67,7 @@ function stubApi(routes: Record<string, unknown>) {
 
 async function open(path: string, routes: Record<string, unknown>) {
   navigate(path);
-  const fetchMock = stubApi({ "/api/system": { checks: { database: "ok" } }, "/api/config": { llm_provider: "mock", llm_model: "m" }, ...routes });
+  const fetchMock = stubApi({ "/api/session": { identity: "marketer@example.com" }, "/api/system": { checks: { database: "ok" } }, "/api/config": { llm_provider: "mock", llm_model: "m" }, ...routes });
   const wrapper = mount(App);
   await flushPromises();
   return { wrapper, fetchMock };

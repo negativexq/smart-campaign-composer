@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ActivityEntry } from "../api/campaigns";
-import { describeActivity } from "../lib/activity";
+import { describeActivity, describeActor } from "../lib/activity";
 import { formatDateTime } from "../lib/format";
 
 defineProps<{ entries: ActivityEntry[]; showCampaign?: boolean }>();
@@ -12,6 +12,7 @@ defineProps<{ entries: ActivityEntry[]; showCampaign?: boolean }>();
       <div class="body">
         <strong class="title">{{ describeActivity(entry).title }}</strong>
         <span v-if="describeActivity(entry).detail" class="muted small">{{ describeActivity(entry).detail }}</span>
+        <span class="muted small" data-testid="activity-actor">{{ describeActor(entry) }}</span>
         <a v-if="showCampaign" class="campaign small" :href="`/campaigns/${entry.campaign_id}`" >{{ entry.campaign_name }}</a>
       </div>
       <time class="muted small" :datetime="entry.occurred_at">{{ formatDateTime(entry.occurred_at) }}</time>

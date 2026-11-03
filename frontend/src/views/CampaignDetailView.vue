@@ -204,6 +204,7 @@ onBeforeUnmount(() => stopWatching?.());
           <p data-testid="schedule-description">{{ campaign.schedule.description }}</p>
           <p v-if="campaign.schedule.next_run_at" class="muted small" data-testid="next-run">Next send {{ formatDateTime(campaign.schedule.next_run_at) }}</p>
           <p v-else class="muted small">No more sends are planned.</p>
+          <p v-if="campaign.schedule.created_by" class="muted small" data-testid="schedule-by">Set up by {{ campaign.schedule.created_by }}</p>
           <p v-if="campaign.schedule.runs" class="muted small">Sent {{ campaign.schedule.runs }} {{ campaign.schedule.runs === 1 ? "time" : "times" }} so far. Nobody receives this message twice.</p>
         </div>
         <button v-if="campaign.schedule.next_run_at" class="button button--secondary" type="button" data-testid="cancel-schedule" :disabled="acting" @click="act(() => cancelSchedule(campaignId))">
@@ -227,6 +228,7 @@ onBeforeUnmount(() => stopWatching?.());
         {{ blocker }}
       </ValidationNotice>
       <dl class="facts card">
+        <div><dt class="muted small">Created by</dt><dd data-testid="created-by">{{ campaign.created_by ?? "Not recorded" }}</dd></div>
         <div><dt class="muted small">Created</dt><dd>{{ formatDateTime(campaign.created_at) }}</dd></div>
         <div><dt class="muted small">Last updated</dt><dd>{{ formatDateTime(campaign.updated_at) }}</dd></div>
       </dl>

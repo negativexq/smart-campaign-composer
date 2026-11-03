@@ -12,6 +12,7 @@ import PhonePreview from "./PhonePreview.vue";
 import StatusBadge from "./StatusBadge.vue";
 import SystemHealthCard from "./SystemHealthCard.vue";
 import ValidationNotice from "./ValidationNotice.vue";
+import { describeActor } from "../lib/activity";
 import { systemHealth } from "../lib/systemHealth";
 
 const steps = [
@@ -293,5 +294,16 @@ describe("SystemHealthCard", () => {
   it("does not claim anything when the system cannot be reached", () => {
     systemHealth.value = { status: "unavailable", checks: {} };
     expect(mount(SystemHealthCard).find("[data-testid=system-health-unknown]").exists()).toBe(true);
+  });
+});
+
+describe("describeActor", () => {
+  const entry = { campaign_id: "c", campaign_name: "n", type: "t", occurred_at: "", details: {} };
+
+  it("names a person, the system, or says nobody was recorded", () => {
+    expect(describeActor({ ...entry, actor_type: "user", actor: "ayse" })).toBe("by ayse");
+    expect(describeActor({ ...entry, actor_type: "system", actor: null })).toBe("by the system");
+    expect(describeActor({ ...entry, actor_type: "system", actor: null, details: { scheduled_by: "ayse" } })).toBe("by the system, set up by ayse");
+    expect(describeActor({ ...entry, actor_type: "unknown", actor: null })).toBe("person not recorded");
   });
 });

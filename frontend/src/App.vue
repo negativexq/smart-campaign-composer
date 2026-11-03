@@ -2,11 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { fetchAiConfig, type AiConfig } from "./api/campaigns";
+import { fetchSession } from "./api/session";
 import AiModeBadge from "./components/AiModeBadge.vue";
 import AppShell from "./components/AppShell.vue";
 import CampaignStepper from "./components/CampaignStepper.vue";
 import { campaignStatusMeta } from "./lib/campaignStatus";
 import { currentPath } from "./lib/navigation";
+import { currentUser } from "./lib/session";
 import { refreshSystemHealth, systemHealth } from "./lib/systemHealth";
 import AudienceView from "./views/AudienceView.vue";
 import CampaignDetailView from "./views/CampaignDetailView.vue";
@@ -16,6 +18,7 @@ import ContentView from "./views/ContentView.vue";
 import DesignView from "./views/DesignView.vue";
 import OverviewView from "./views/OverviewView.vue";
 import ReviewView from "./views/ReviewView.vue";
+import SignInView from "./views/SignInView.vue";
 
 const route = computed(() => {
   const path = currentPath.value;
@@ -50,6 +53,12 @@ const steps = [
 
 onMounted(async () => {
   healthTimer = setInterval(refreshSystemHealth, HEALTH_INTERVAL);
+  try {
+    currentUser.value = await fetchSession();
+  } catch {
+    // The API is out of reach. Signing in says so when someone tries.
+    currentUser.value = null;
+  }
   [, aiConfig.value] = await Promise.all([refreshSystemHealth(), fetchAiConfig()]);
 });
 
@@ -57,7 +66,10 @@ onBeforeUnmount(() => clearInterval(healthTimer));
 </script>
 
 <template>
-  <AppShell v-if="route.name === 'design'" active-path="/design" title="Design system" :system-status="status">
+  <p v-if="currentUser === undefined" class="muted" role="status">Loading...</p>
+  <SignInView v-else-if="currentUser === null" />
+
+  <AppShell v-else-if="route.name === 'design'" active-path="/design" title="Design system" :system-status="status">
     <DesignView />
   </AppShell>
 

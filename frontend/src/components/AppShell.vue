@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { Gauge, LayoutGrid, ListChecks, Plus } from "lucide-vue-next";
 
+import { endSession } from "../api/session";
 import type { SystemStatus } from "../api/system";
+import { currentUser } from "../lib/session";
 
 defineProps<{
   activePath: string;
@@ -20,6 +22,14 @@ const groups = [
   },
   { title: "Reference", links: [{ href: "/design", label: "Design system", icon: LayoutGrid }] },
 ];
+
+async function signOut() {
+  try {
+    await endSession();
+  } finally {
+    currentUser.value = null;
+  }
+}
 
 const statusLabels = { checking: "Checking", operational: "Operational", degraded: "Sending affected", unavailable: "Unavailable" };
 </script>
@@ -55,6 +65,10 @@ const statusLabels = { checking: "Checking", operational: "Operational", degrade
           </a>
         </div>
       </nav>
+      <div v-if="currentUser" class="account small">
+        <span class="account-name" data-testid="current-user" :title="currentUser">{{ currentUser }}</span>
+        <button class="sign-out" type="button" data-testid="sign-out" @click="signOut">Sign out</button>
+      </div>
       <div class="system small">
         <span class="dot" :class="`dot--${systemStatus}`" aria-hidden="true"></span>
         <span data-testid="system-status">{{ statusLabels[systemStatus] }}</span>
@@ -169,6 +183,31 @@ const statusLabels = { checking: "Checking", operational: "Operational", degrade
   height: 8px;
   background: var(--color-border-input);
   border-radius: 50%;
+}
+
+.account {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.account-name {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sign-out {
+  justify-self: start;
+  padding: 0;
+  color: var(--color-primary);
+  background: transparent;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
 }
 
 .dot--operational {

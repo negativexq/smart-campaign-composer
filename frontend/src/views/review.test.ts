@@ -263,6 +263,18 @@ describe("campaign page after approval", () => {
     expect(done.wrapper.find("[data-testid=sending-blocked]").exists()).toBe(false);
   });
 
+  it("says who created the campaign and who set up its schedule", async () => {
+    const schedule = { spec: { kind: "once" as const }, description: "Once", next_run_at: "2026-11-09T09:30:00Z", last_run_at: null, runs: 0, created_by: "ayse" };
+    const { wrapper } = await open(routes({ ...ready, status: "SCHEDULED", schedule, created_by: "marketer@example.com" }));
+    expect(wrapper.find("[data-testid=created-by]").text()).toBe("marketer@example.com");
+    expect(wrapper.find("[data-testid=schedule-by]").text()).toContain("ayse");
+  });
+
+  it("does not invent a creator for older campaigns", async () => {
+    const { wrapper } = await open(routes({ ...ready, status: "COMPLETED", created_by: null }));
+    expect(wrapper.find("[data-testid=created-by]").text()).toBe("Not recorded");
+  });
+
   it("reports the outcome honestly once finished", async () => {
     const { wrapper } = await open(routes({ ...ready, status: "COMPLETED_WITH_FAILURES" }, progress));
     expect(wrapper.find("[data-testid=provider-summary]").text()).toContain("15 attempts");

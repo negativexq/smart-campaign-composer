@@ -45,6 +45,7 @@ function stubApi(routes: Record<string, Route | Route[]>) {
 }
 
 const shared = {
+  "GET /api/session": { body: { identity: "marketer@example.com" } },
   "GET /api/system": { body: { checks: { database: "ok" } } },
   "GET /api/config": { body: { llm_provider: "mock", llm_model: "keyword-matcher" } },
   "GET /api/overview": {

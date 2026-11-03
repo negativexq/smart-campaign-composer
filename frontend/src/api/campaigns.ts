@@ -1,4 +1,5 @@
 import { EventStreamParser } from "../lib/sse";
+import { currentUser } from "../lib/session";
 
 export type Condition = { field: string; label: string; value: string };
 export type Assumption = { field: string; note: string };
@@ -21,6 +22,7 @@ export type ScheduleSpec = {
 };
 
 export type CampaignSchedule = {
+  created_by?: string | null;
   spec: ScheduleSpec;
   description: string;
   next_run_at: string | null;
@@ -61,6 +63,7 @@ export type DeliveryAttempt = {
 };
 
 export type Campaign = {
+  created_by?: string | null;
   id: string;
   name: string;
   name_source: "brief" | "ai" | "user";
@@ -97,6 +100,8 @@ export type ActivityEntry = {
   campaign_id: string;
   campaign_name: string;
   type: string;
+  actor_type: string;
+  actor: string | null;
   details: Record<string, unknown>;
   occurred_at: string;
 };
@@ -124,7 +129,7 @@ export class ApiError extends Error {
 const STREAM_LOST = "The connection dropped before the messages were finished. Try again.";
 const UNREACHABLE = "We could not reach the server. Check your connection and try again.";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(path, init);
@@ -132,6 +137,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(UNREACHABLE, 0);
   }
   const body = await response.json().catch(() => null);
+  if (response.status === 401) currentUser.value = null;
   if (!response.ok) {
     throw new ApiError(body?.error ?? UNREACHABLE, response.status, body?.issues);
   }

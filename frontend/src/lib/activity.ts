@@ -28,6 +28,14 @@ function finishDetail(details: Record<string, unknown>) {
   return `${count("accepted")} accepted, ${count("failed")} failed, ${count("unknown")} unknown, ${count("skipped")} skipped`;
 }
 
+// Who an event belongs to. Older records have no name, and that stays visible.
+export function describeActor(entry: ActivityEntry): string {
+  if (entry.actor_type === "user") return `by ${entry.actor}`;
+  if (entry.actor_type !== "system") return "person not recorded";
+  const scheduledBy = entry.details.scheduled_by;
+  return scheduledBy ? `by the system, set up by ${scheduledBy}` : "by the system";
+}
+
 // Turns an audit event into a sentence. Events this version does not know still
 // show up, because the trail must never silently lose a record.
 export function describeActivity(entry: ActivityEntry): { title: string; detail: string } {
