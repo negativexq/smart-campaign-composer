@@ -101,7 +101,7 @@ onMounted(async () => {
 
     <template v-if="hasProposal">
       <section class="section">
-        <h2>Who gets this campaign</h2>
+        <h2>Segment rule</h2>
         <AudienceSteps :campaign="campaign" />
       </section>
 

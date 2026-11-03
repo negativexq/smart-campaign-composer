@@ -126,9 +126,9 @@ The example brief ran through the app with OpenAI's `gpt-6-luna`: the audience, 
 
 That run showed one limit. Every percentage in a brief must appear in every message, so a brief naming 10% and 90% cannot pass even when the model picks sensibly. Generation then stops with nothing stored, and an instruction naming the discount settles it, while the review page keeps pointing out the difference. A brief with two real offers has to be written as separate campaigns.
 
-## The audience rule is shown as sentences with counts
+## The audience rule is shown as a breakdown
 
-The marketer reads each condition as a sentence and sees how many people it leaves, counted by applying the conditions one at a time at the audience's own timestamp. The raw rule stays out of the interface because it adds nothing a marketer can act on. A discount is not a condition, so it sits with the message settings and only exists once someone adds it.
+The marketer checks the rule in a breakdown table: from the main audience down through each condition, with what was selected, the brief's wording for it and how many people remain. Counts apply the conditions one at a time at the audience's own timestamp. The raw JSON rule stays out of the interface because it adds nothing a marketer can act on. A discount is not a condition, so it sits with the message settings and only exists once someone adds it.
 
 ## Each condition shows the words it came from
 

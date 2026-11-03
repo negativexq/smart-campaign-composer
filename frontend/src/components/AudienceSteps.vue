@@ -8,17 +8,6 @@ const props = defineProps<{ campaign: Campaign }>();
 const breakdown = ref<AudienceBreakdown | null>(null);
 const failed = ref(false);
 
-const sentences: Record<string, (value: string) => string> = {
-  city: (value) => `Lives in ${value}`,
-  language: (value) => `Prefers ${value}`,
-  cart_added_within_days: (value) => `Added something to their cart in the last ${value}`,
-  no_purchase_since_cart: () => "Has not bought anything since that cart",
-  purchased_within_days: (value) => `Bought something in the last ${value}`,
-  not_purchased_within_days: (value) => `Has not bought anything in the last ${value}`,
-  not_messaged_within_days: (value) => `Has had no campaign message from us in the last ${value}`,
-};
-
-const sentence = (condition: Condition) => sentences[condition.field]?.(condition.value) ?? `${condition.label} ${condition.value}`;
 const formatCount = (count: number) => count.toLocaleString("en-US");
 const assumptions = computed(() => props.campaign.proposal?.assumptions ?? []);
 // Older proposals were made before quotes existed, so they have nothing to say here.
@@ -28,43 +17,43 @@ const evidence = computed(() => props.campaign.proposal?.evidence);
 function sourceOf(condition: Condition): { quotes: string[]; text: string } {
   const quotes = (evidence.value ?? []).filter((entry) => entry.field === condition.field).map((entry) => entry.quote);
   if (quotes.length) return { quotes, text: "" };
-  if (condition.field === "not_messaged_within_days" && props.campaign.not_messaged_within_days) return { quotes, text: "You chose this in Options." };
+  if (condition.field === "not_messaged_within_days" && props.campaign.not_messaged_within_days) return { quotes, text: "From Options" };
   if (!evidence.value || assumptions.value.some((assumption) => assumption.field === condition.field)) return { quotes, text: "" };
-  return { quotes, text: "AI added this. It is not in what you wrote, so please check it." };
+  return { quotes, text: "Added by AI, not in your brief" };
 }
 
-const steps = computed(() => {
-  let before = breakdown.value?.everyone;
-  return props.campaign.conditions.map((condition) => {
-    const remaining = breakdown.value?.steps.find((step) => step.field === condition.field)?.remaining;
-    const removed = before !== undefined && remaining !== undefined ? before - remaining : undefined;
-    before = remaining;
-    return {
-      field: condition.field,
-      text: sentence(condition),
-      source: sourceOf(condition),
-      notes: assumptions.value.filter((assumption) => assumption.field === condition.field),
-      remaining,
-      removed,
-    };
-  });
+const percentOfAll = (count: number) => `${((count / (breakdown.value?.everyone || 1)) * 100).toFixed(1)}%`;
+
+/** A discount is part of the brief too, but it shapes the message rather than the audience. */
+const discount = computed(() => {
+  const { offer_percent: percent, brief } = props.campaign;
+  return percent ? `${percent}%` : (brief.match(/%\s*\d+|\d+\s*%/)?.[0] ?? "");
 });
 
-const otherNotes = computed(() => assumptions.value.filter((assumption) => !props.campaign.conditions.some((condition) => condition.field === assumption.field)));
-const unsupported = computed(() => props.campaign.proposal?.unsupported_conditions ?? []);
-const consent = computed(() =>
-  props.campaign.channels.map((channel) => {
-    const name = channel === "sms" ? "SMS" : "email";
-    const missing = props.campaign.audience.total - props.campaign.audience[channel as "sms" | "email"];
-    return missing ? `${formatCount(missing)} of these people have not agreed to ${name}, so they get no ${name}.` : `Everyone here has agreed to ${name}.`;
-  }),
-);
-const proposedBy = computed(() => (props.campaign.provider === "mock" ? "the built-in test model" : props.campaign.model));
+/** The dimension each condition cuts by, so a person can check what was picked for it. */
+const dimensions: Record<string, { name: string; window?: boolean }> = {
+  city: { name: "City" },
+  language: { name: "Language" },
+  cart_added_within_days: { name: "Added to cart", window: true },
+  no_purchase_since_cart: { name: "Bought after that" },
+  purchased_within_days: { name: "Purchased", window: true },
+  not_purchased_within_days: { name: "No purchase", window: true },
+  not_messaged_within_days: { name: "No message from us", window: true },
+};
 
-function share(count: number | undefined) {
-  const everyone = breakdown.value?.everyone;
-  return count === undefined || !everyone ? "0%" : `${(count / everyone) * 100}%`;
-}
+const steps = computed(() =>
+  props.campaign.conditions.map((condition) => ({
+    field: condition.field,
+    rule: `${condition.label} ${condition.value}`,
+    dimension: dimensions[condition.field]?.name ?? condition.label,
+    selected: dimensions[condition.field]?.window ? `Last ${condition.value}` : condition.value,
+    source: sourceOf(condition),
+    notes: assumptions.value.filter((assumption) => assumption.field === condition.field),
+    remaining: breakdown.value?.steps.find((step) => step.field === condition.field)?.remaining,
+  })),
+);
+
+const otherNotes = computed(() => assumptions.value.filter((assumption) => !props.campaign.conditions.some((condition) => condition.field === assumption.field)));
 
 watch(
   () => [props.campaign.id, props.campaign.audience_as_of],
@@ -86,55 +75,58 @@ watch(
 <template>
   <div class="audience-steps">
     <p v-if="!campaign.conditions.length" class="muted">No condition could be applied from this brief.</p>
-    <ol v-else class="steps">
-      <li v-if="breakdown" class="step" data-testid="audience-step">
-        <div class="line">
-          <span>All customers</span>
-          <strong class="count">{{ formatCount(breakdown.everyone) }}</strong>
-        </div>
-        <div class="bar" aria-hidden="true"><span :style="{ width: '100%' }"></span></div>
-      </li>
-      <li v-for="step in steps" :key="step.field" class="step" data-testid="audience-step">
-        <p v-if="step.source.quotes.length" class="source small" data-testid="step-source">
-          <span class="muted">Because you wrote </span>
-          <template v-for="(quote, index) in step.source.quotes" :key="quote">
-            <span v-if="index" class="muted">&nbsp;and&nbsp;</span>
-            <q class="quote">{{ quote }}</q>
-          </template>
-        </p>
-        <p v-else-if="step.source.text" class="source muted small" data-testid="step-source">{{ step.source.text }}</p>
-        <div class="line">
-          <span class="text">
-            {{ step.text }}
-            <span v-if="step.notes.length" class="assumption small">Assumption, please check</span>
-          </span>
-          <span v-if="step.remaining !== undefined" class="tally">
-            <strong class="count">{{ formatCount(step.remaining) }} left</strong>
-            <span v-if="step.removed" class="muted small">{{ formatCount(step.removed) }} removed</span>
-          </span>
-        </div>
-        <div v-if="breakdown" class="bar" aria-hidden="true"><span :style="{ width: share(step.remaining) }"></span></div>
-        <p v-for="note in step.notes" :key="note.note" class="muted small" data-testid="assumption-note">{{ note.note }}</p>
-      </li>
-      <li v-for="condition in unsupported" :key="condition" class="step" data-testid="unsupported-step">
-        <p class="source small"><span class="muted">Your brief also asks for</span> <strong class="quote">{{ condition }}</strong></p>
-        <div class="line">
-          <span class="text">No filter can do this, so it is not applied</span>
-          <span class="assumption small">Blocks approval</span>
-        </div>
-      </li>
-    </ol>
-    <p v-for="note in otherNotes" :key="note.field" class="muted small" data-testid="assumption-note">{{ note.note }}</p>
-    <p v-if="failed" class="muted small" data-testid="breakdown-unavailable">The step-by-step counts could not be loaded. The conditions above still apply.</p>
-    <section v-if="campaign.proposal" class="guards" data-testid="rule-guards">
-      <h3 class="guards-title small">What the app makes sure of</h3>
-      <ul class="muted small">
-        <li>The AI's answer must fit the filters the app allows. It is never run as a database query.</li>
-        <li v-if="evidence">Quotes are checked word for word against what you wrote.</li>
-        <li v-for="line in consent" :key="line">{{ line }}</li>
-        <li v-if="proposedBy" data-testid="rule-origin">Proposed by {{ proposedBy }}. Only the conditions listed here are applied.</li>
-      </ul>
-    </section>
+    <template v-else>
+      <p class="rule" data-testid="segment-rule">
+        <template v-for="(step, index) in steps" :key="step.field">
+          <span v-if="index" class="muted small">AND</span>
+          <code class="condition">{{ step.rule }}</code>
+        </template>
+      </p>
+      <div class="matrix">
+        <table>
+          <thead>
+            <tr class="muted small">
+              <th scope="col">Breakdown</th>
+              <th scope="col">Selected</th>
+              <th scope="col">In the brief</th>
+              <th scope="col" class="number">People</th>
+              <th scope="col" class="number share">Share</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="breakdown" data-testid="audience-step">
+              <td>Main audience</td>
+              <td><strong>All customers</strong></td>
+              <td class="muted">–</td>
+              <td class="number"><strong class="count">{{ formatCount(breakdown.everyone) }}</strong></td>
+              <td class="number share muted">100%</td>
+            </tr>
+            <tr v-for="step in steps" :key="step.field" data-testid="audience-step">
+              <td>{{ step.dimension }}</td>
+              <td><strong>{{ step.selected }}</strong></td>
+              <td>
+                <template v-if="step.source.quotes.length">
+                  <span class="found" aria-hidden="true">✓ </span><span data-testid="step-source">{{ step.source.quotes.join(", ") }}</span>
+                </template>
+                <span v-else-if="step.source.text" :class="step.source.text === 'From Options' ? 'muted' : 'assumption'" data-testid="step-source">{{ step.source.text }}</span>
+                <span v-for="note in step.notes" :key="note.note" class="assumption small" data-testid="assumption-note">{{ note.note }}</span>
+              </td>
+              <td class="number"><strong v-if="step.remaining !== undefined" class="count">{{ formatCount(step.remaining) }}</strong></td>
+              <td class="number share muted"><template v-if="step.remaining !== undefined">{{ percentOfAll(step.remaining) }}</template></td>
+            </tr>
+            <tr v-if="discount" data-testid="message-row">
+              <td>Discount</td>
+              <td><strong>{{ discount }}</strong></td>
+              <td class="muted">Goes in the message, not a filter</td>
+              <td class="number muted">–</td>
+              <td class="number share muted">–</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+    <p v-for="note in otherNotes" :key="note.field" class="assumption small" data-testid="assumption-note">{{ note.note }}</p>
+    <p v-if="failed" class="muted small" data-testid="breakdown-unavailable">The counts could not be loaded. The rule above still applies.</p>
   </div>
 </template>
 
@@ -142,97 +134,71 @@ watch(
 .audience-steps {
   display: grid;
   gap: var(--space-3);
-}
-
-.steps {
-  display: grid;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.step {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.step:first-child {
-  padding-top: 0;
-}
-
-.source {
-  margin: 0;
-  white-space: pre-wrap;
-}
-
-.quote {
-  color: var(--color-text);
-  font-weight: 500;
-}
-
-.guards {
-  display: grid;
-  gap: var(--space-1);
-}
-
-.guards-title {
-  margin: 0;
-  font-weight: 500;
-}
-
-.guards ul {
-  display: grid;
-  gap: var(--space-1);
-  margin: 0;
-  padding-left: var(--space-4);
-}
-
-.line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-1) var(--space-4);
-}
-
-.text {
-  display: flex;
-  flex: 1 1 240px;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 var(--space-2);
   min-width: 0;
 }
 
-.assumption {
-  color: var(--color-warning);
+.rule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.condition {
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  font-family: inherit;
   font-weight: 500;
 }
 
-.tally {
-  display: flex;
-  flex-shrink: 0;
-  align-items: baseline;
-  gap: var(--space-2);
+.matrix {
+  overflow-x: auto;
 }
 
-.count {
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: var(--space-2) var(--space-3) var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+th:last-child,
+td:last-child {
+  padding-right: 0;
+}
+
+.number {
+  text-align: right;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
-.bar {
-  height: 4px;
-  overflow: hidden;
-  border-radius: 2px;
-  background: var(--color-surface-subtle);
+.found {
+  color: var(--color-success);
 }
 
-.bar span {
+@media (max-width: 480px) {
+  .share {
+    display: none;
+  }
+}
+
+.assumption {
   display: block;
-  height: 100%;
-  border-radius: 2px;
-  background: var(--color-primary);
+  color: var(--color-warning);
+}
+
+.count {
+  font-weight: 600;
 }
 </style>

@@ -135,7 +135,6 @@ describe("audience page", () => {
     const text = wrapper.text();
 
     expect(text.indexOf("İstanbul")).toBeLessThan(text.indexOf("1,284"));
-    expect(text).toContain("Assumption, please check");
     expect(wrapper.find("[data-testid=assumption-note]").text()).toContain("30 days is assumed");
   });
 
@@ -151,11 +150,14 @@ describe("audience page", () => {
 
     expect(steps[0].text()).toContain("All customers");
     expect(steps[0].text()).toContain("5,000");
-    expect(steps[1].text()).toContain("Lives in İstanbul");
-    expect(steps[1].text()).toContain("2,000 left");
-    expect(steps[1].text()).toContain("3,000 removed");
-    expect(steps[2].text()).toContain("Added something to their cart in the last 30 days");
-    expect(steps[2].text()).toContain("1,284 left");
+    expect(steps[1].text()).toContain("City");
+    expect(steps[1].text()).toContain("İstanbul");
+    expect(steps[1].text()).toContain("2,000");
+    expect(steps[2].text()).toContain("Added to cart");
+    expect(steps[2].text()).toContain("Last 30 days");
+    expect(steps[1].text()).toContain("40.0%");
+    expect(wrapper.find("[data-testid=segment-rule]").text()).toBe("City is İstanbulANDAdded to cart in the last 30 days");
+    expect(steps[2].text()).toContain("1,284");
     expect(wrapper.text()).not.toContain("cart_added_within_days");
   });
 
@@ -177,13 +179,18 @@ describe("audience page", () => {
     await flushPromises();
     const sources = wrapper.findAll("[data-testid=step-source]").map((source) => source.text());
 
-    expect(sources[0]).toBe("Because you wrote İstanbul'daki müşteriler");
-    expect(sources).toContain("AI added this. It is not in what you wrote, so please check it.");
-    expect(sources).toContain("You chose this in Options.");
+    expect(sources[0]).toBe("İstanbul'daki müşteriler");
+    expect(sources).toContain("Added by AI, not in your brief");
+    expect(sources).toContain("From Options");
     expect(sources.length).toBe(3); // the assumed window has its own label
-    expect(wrapper.find("[data-testid=unsupported-step]").text()).toContain("VIP");
-    expect(wrapper.find("[data-testid=rule-guards]").text()).toContain("never run as a database query");
-    expect(wrapper.find("[data-testid=rule-guards]").text()).toContain("384 of these people have not agreed to SMS");
+  });
+
+  it("lists a discount from the brief without counting it as a filter", async () => {
+    const { wrapper } = await open({ "GET /api/campaigns/c1": { body: { ...campaign, brief: "Istanbul cart reminder with %30 off" } } });
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid=message-row]").text()).toContain("%30");
+    expect(wrapper.find("[data-testid=message-row]").text()).toContain("not a filter");
   });
 
   it("makes no claim about quotes for a proposal made before they existed", async () => {
@@ -191,7 +198,6 @@ describe("audience page", () => {
     await flushPromises();
 
     expect(wrapper.find("[data-testid=step-source]").exists()).toBe(false);
-    expect(wrapper.text()).not.toContain("word for word");
   });
 
   it("still lists the conditions when the counts cannot be loaded", async () => {
@@ -201,9 +207,9 @@ describe("audience page", () => {
     });
     await flushPromises();
 
-    expect(wrapper.text()).toContain("Lives in İstanbul");
+    expect(wrapper.text()).toContain("City is İstanbul");
     expect(wrapper.find("[data-testid=breakdown-unavailable]").exists()).toBe(true);
-    expect(wrapper.text()).not.toContain(" left");
+    expect(wrapper.findAll("[data-testid=audience-step]").every((step) => !step.find(".count").exists())).toBe(true);
   });
 
   it("explains blockers and why it cannot continue", async () => {
