@@ -21,7 +21,7 @@ const groups = [
   { title: "Reference", links: [{ href: "/design", label: "Design system", icon: LayoutGrid }] },
 ];
 
-const statusLabels = { checking: "Checking", operational: "Operational", unavailable: "Unavailable" };
+const statusLabels = { checking: "Checking", operational: "Operational", degraded: "Sending affected", unavailable: "Unavailable" };
 </script>
 
 <template>
@@ -173,6 +173,10 @@ const statusLabels = { checking: "Checking", operational: "Operational", unavail
 
 .dot--operational {
   background: var(--color-success);
+}
+
+.dot--degraded {
+  background: var(--color-warning);
 }
 
 .dot--unavailable {

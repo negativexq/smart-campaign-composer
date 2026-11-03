@@ -1,8 +1,9 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Campaign, Progress } from "../api/campaigns";
 import { currentPath, navigate } from "../lib/navigation";
+import { systemHealth } from "../lib/systemHealth";
 import CampaignDetailView from "./CampaignDetailView.vue";
 import ReviewView from "./ReviewView.vue";
 
@@ -34,6 +35,26 @@ const progress: Progress = {
 
 type Route = { status?: number; body: unknown };
 
+class FakeEventSource {
+  static last: FakeEventSource | null = null;
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
+  listeners: Record<string, (event: MessageEvent<string>) => void> = {};
+  constructor(public url: string) {
+    FakeEventSource.last = this;
+  }
+  addEventListener(name: string, listener: (event: MessageEvent<string>) => void) {
+    this.listeners[name] = listener;
+  }
+  close() {
+    this.closed = true;
+  }
+  emit(name: string, data: unknown) {
+    this.listeners[name]({ data: JSON.stringify(data) } as MessageEvent<string>);
+  }
+}
+
 function stub(routes: Record<string, Route>) {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const route = routes[`${init?.method ?? "GET"} ${url}`] ?? { status: 404, body: { error: "not stubbed" } };
@@ -48,9 +69,14 @@ function called(fetchMock: ReturnType<typeof stub>, method: string, url: string)
   return fetchMock.mock.calls.filter(([calledUrl, init]) => calledUrl === url && init?.method === method);
 }
 
+beforeEach(() => {
+  FakeEventSource.last = null;
+  vi.stubGlobal("EventSource", FakeEventSource);
+});
+
 afterEach(() => {
   navigate("/");
-  vi.useRealTimers();
+  systemHealth.value = null;
   vi.unstubAllGlobals();
 });
 
@@ -177,21 +203,64 @@ describe("campaign page after approval", () => {
     expect(called(fetchMock, "DELETE", "/api/campaigns/c1/schedule")).toHaveLength(1);
   });
 
-  it("updates while sending and stops when it ends", async () => {
-    vi.useFakeTimers();
-    const sending = routes({ ...ready, status: "DISPATCHING" }, { ...progress, processed: 3 });
-    const { wrapper, fetchMock } = await open(sending);
+  it("follows sending as it happens and closes the stream when it ends", async () => {
+    const all = routes({ ...ready, status: "DISPATCHING" }, { ...progress, processed: 3 });
+    const { wrapper } = await open(all);
     expect(wrapper.find("[data-testid=progress-count]").text()).toContain("3 of 18");
+    const stream = FakeEventSource.last!;
+    expect(stream.url).toBe("/api/campaigns/c1/events");
 
-    sending["GET /api/campaigns/c1"] = { body: { ...ready, status: "COMPLETED" } };
-    sending["GET /api/campaigns/c1/progress"] = { body: progress };
-    await vi.advanceTimersByTimeAsync(2100);
+    stream.emit("update", { status: "DISPATCHING", progress: { ...progress, processed: 9 } });
+    await flushPromises();
+    expect(wrapper.find("[data-testid=progress-count]").text()).toContain("9 of 18");
+
+    all["GET /api/campaigns/c1"] = { body: { ...ready, status: "COMPLETED" } };
+    stream.emit("update", { status: "COMPLETED", progress });
+    stream.emit("end", {});
     await flushPromises();
     expect(wrapper.find("[data-testid=progress-count]").exists()).toBe(false);
+    expect(wrapper.text()).toContain("Completed");
+    expect(stream.closed).toBe(true);
+  });
 
-    const reads = fetchMock.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(10000);
-    expect(fetchMock.mock.calls.length).toBe(reads);
+  it("does not open a stream for a campaign that cannot change", async () => {
+    await open(routes({ ...ready, status: "COMPLETED" }, progress));
+    expect(FakeEventSource.last).toBeNull();
+  });
+
+  it("closes the stream when leaving the page", async () => {
+    const { wrapper } = await open(routes({ ...ready, status: "SCHEDULED" }));
+    wrapper.unmount();
+    expect(FakeEventSource.last?.closed).toBe(true);
+  });
+
+  it("keeps following when sending starts", async () => {
+    const { wrapper } = await open({ ...routes({ ...ready, status: "APPROVED" }), "POST /api/campaigns/c1/dispatch": { status: 202, body: {} } });
+    const stream = FakeEventSource.last;
+    await wrapper.find("[data-testid=send-now]").trigger("click");
+    await flushPromises();
+    expect(FakeEventSource.last).toBe(stream);
+    expect(stream?.closed).toBe(false);
+  });
+
+  it("says when live updates stop and when they return", async () => {
+    const { wrapper } = await open(routes({ ...ready, status: "DISPATCHING" }, progress));
+    FakeEventSource.last!.onerror!();
+    await flushPromises();
+    expect(wrapper.find("[data-testid=live-disconnected]").exists()).toBe(true);
+    FakeEventSource.last!.onopen!();
+    await flushPromises();
+    expect(wrapper.find("[data-testid=live-disconnected]").exists()).toBe(false);
+  });
+
+  it("says what holds up sending, only while sending", async () => {
+    systemHealth.value = { status: "degraded", checks: { database: "ok", worker: "down", redis: "ok" } };
+    const { wrapper } = await open(routes({ ...ready, status: "DISPATCHING" }, progress));
+    expect(wrapper.find("[data-testid=sending-blocked]").text()).toContain("Sending worker is down");
+    expect(wrapper.find("[data-testid=sending-blocked]").text()).not.toContain("Rate limiter");
+
+    const done = await open(routes({ ...ready, status: "COMPLETED" }, progress));
+    expect(done.wrapper.find("[data-testid=sending-blocked]").exists()).toBe(false);
   });
 
   it("reports the outcome honestly once finished", async () => {

@@ -4,6 +4,7 @@ package health
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -35,6 +36,34 @@ func Register(mux *http.ServeMux, checks map[string]Check) {
 		}
 		writeJSON(w, code, result)
 	})
+}
+
+// RegisterSystem adds a summary of the whole system for people. It always answers
+// 200 because a dependency being down is the answer here, and it stays apart from
+// /readyz: a stopped worker must not make the API look unready to its orchestrator.
+func RegisterSystem(mux *http.ServeMux, path string, checks map[string]Check) {
+	mux.HandleFunc("GET "+path, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, run(r.Context(), checks))
+	})
+}
+
+// HTTPCheck asks another process whether it is alive.
+func HTTPCheck(url string) Check {
+	return func(ctx context.Context) error {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return fmt.Errorf("build request: %w", err)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			return fmt.Errorf("call: %w", err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			return fmt.Errorf("answered %d", response.StatusCode)
+		}
+		return nil
+	}
 }
 
 func run(ctx context.Context, checks map[string]Check) readiness {

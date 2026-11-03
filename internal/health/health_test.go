@@ -97,3 +97,35 @@ func TestReadinessTimesOutHangingCheck(t *testing.T) {
 		t.Fatalf("hanging check blocked readiness for %v", elapsed)
 	}
 }
+
+func TestSystemSummaryAlwaysAnswersAndNamesWhatIsDown(t *testing.T) {
+	t.Parallel()
+	alive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer alive.Close()
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
+	defer broken.Close()
+	gone := httptest.NewServer(http.NotFoundHandler())
+	gone.Close()
+
+	mux := http.NewServeMux()
+	health.RegisterSystem(mux, "/api/system", map[string]health.Check{
+		"worker":   health.HTTPCheck(alive.URL),
+		"provider": health.HTTPCheck(broken.URL),
+		"redis":    health.HTTPCheck(gone.URL),
+	})
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/system", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status %d", recorder.Code)
+	}
+	var body struct {
+		Status string            `json:"status"`
+		Checks map[string]string `json:"checks"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status == "ok" || body.Checks["worker"] != "ok" || body.Checks["provider"] != "down" || body.Checks["redis"] != "down" {
+		t.Fatalf("body: %+v", body)
+	}
+}

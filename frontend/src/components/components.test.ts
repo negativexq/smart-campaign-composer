@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import ApprovalSummary from "./ApprovalSummary.vue";
 import AudienceRule from "./AudienceRule.vue";
@@ -10,7 +10,9 @@ import MessageEditor from "./MessageEditor.vue";
 import MetricCard from "./MetricCard.vue";
 import PhonePreview from "./PhonePreview.vue";
 import StatusBadge from "./StatusBadge.vue";
+import SystemHealthCard from "./SystemHealthCard.vue";
 import ValidationNotice from "./ValidationNotice.vue";
+import { systemHealth } from "../lib/systemHealth";
 
 const steps = [
   { id: "brief", label: "Brief" },
@@ -272,5 +274,24 @@ describe("DeliveryTimeline", () => {
     const wrapper = mount(DeliveryTimeline, { props: { events: [] } });
 
     expect(wrapper.text()).toContain("No delivery activity yet");
+  });
+});
+
+describe("SystemHealthCard", () => {
+  afterEach(() => {
+    systemHealth.value = null;
+  });
+
+  it("names what is down and what that means", () => {
+    systemHealth.value = { status: "degraded", checks: { database: "ok", redis: "down" } };
+    const wrapper = mount(SystemHealthCard);
+    expect(wrapper.find("[data-testid=health-database]").text()).toBe("Up");
+    expect(wrapper.find("[data-testid=health-redis]").text()).toContain("Messages wait");
+    expect(wrapper.find("[data-testid=health-worker]").exists()).toBe(false);
+  });
+
+  it("does not claim anything when the system cannot be reached", () => {
+    systemHealth.value = { status: "unavailable", checks: {} };
+    expect(mount(SystemHealthCard).find("[data-testid=system-health-unknown]").exists()).toBe(true);
   });
 });

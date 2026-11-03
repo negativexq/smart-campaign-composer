@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -10,8 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel"
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
@@ -67,9 +70,35 @@ func run(logger *slog.Logger) error {
 
 	mux := http.NewServeMux()
 	health.Register(mux, map[string]health.Check{"postgres": pool.Ping})
+	system, err := systemChecks(pool)
+	if err != nil {
+		return err
+	}
+	health.RegisterSystem(mux, "/api/system", system)
 	mux.Handle("GET /metrics", promhttp.Handler())
 	httpapi.Register(mux, campaigns, provider, metrics)
 
 	slog.Info("llm provider selected", "provider", provider.Name(), "model", provider.Model())
 	return server.Run(ctx, ":"+server.Env("PORT", "8080"), telemetry.Middleware(metrics, logger, mux))
+}
+
+// systemChecks covers what a marketer depends on, including processes the API does
+// not need itself. Anything not configured is left out rather than reported as down.
+func systemChecks(pool *pgxpool.Pool) (map[string]health.Check, error) {
+	checks := map[string]health.Check{"database": pool.Ping}
+	if url := os.Getenv("REDIS_URL"); url != "" {
+		options, err := redis.ParseURL(url)
+		if err != nil {
+			return nil, fmt.Errorf("parse REDIS_URL: %w", err)
+		}
+		client := redis.NewClient(options)
+		checks["redis"] = func(ctx context.Context) error { return client.Ping(ctx).Err() }
+	}
+	if url := os.Getenv("WORKER_HEALTH_URL"); url != "" {
+		checks["worker"] = health.HTTPCheck(url)
+	}
+	if url := os.Getenv("PROVIDER_HEALTH_URL"); url != "" {
+		checks["provider"] = health.HTTPCheck(url)
+	}
+	return checks, nil
 }

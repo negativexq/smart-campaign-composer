@@ -45,6 +45,10 @@ services:
   api:
     <<: *backend
     command: ["/app/api"]
+    environment:
+      <<: *backend-env
+      WORKER_HEALTH_URL: http://worker:8080/healthz
+      PROVIDER_HEALTH_URL: http://mock-provider:8080/healthz
     ports:
       - "8081:8080"
     depends_on:

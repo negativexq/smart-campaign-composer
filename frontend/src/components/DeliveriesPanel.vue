@@ -16,6 +16,8 @@ const REASONS: Record<string, string> = {
   timeout: "No response from the provider",
   rate_limited: "Rate limited by the provider",
   rate_limiter_unavailable: "Waiting for the rate limiter",
+  provider_unreachable: "Provider cannot be reached",
+  lease_expired: "A worker stopped while sending",
 };
 const OUTCOMES: Record<string, string> = {
   accepted: "Accepted",

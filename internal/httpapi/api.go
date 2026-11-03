@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +19,11 @@ import (
 	"github.com/negativexq/smart-campaign-composer/internal/telemetry"
 )
 
-const maxBodyBytes = 64 << 10
+const (
+	maxBodyBytes = 64 << 10
+	liveInterval = time.Second
+	keepAlive    = 15 * time.Second
+)
 
 type api struct {
 	campaigns *campaign.Service
@@ -45,6 +50,7 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 	mux.HandleFunc("POST /api/campaigns/{id}/schedule", a.schedule)
 	mux.HandleFunc("DELETE /api/campaigns/{id}/schedule", a.cancelSchedule)
 	mux.HandleFunc("GET /api/campaigns/{id}/progress", a.progress)
+	mux.HandleFunc("GET /api/campaigns/{id}/events", a.events)
 	mux.HandleFunc("GET /api/campaigns/{id}/deliveries", a.deliveries)
 	mux.HandleFunc("GET /api/campaigns/{id}/deliveries/{delivery}/attempts", a.deliveryAttempts)
 	mux.HandleFunc("GET /api/campaigns/{id}/activity", a.activity)
@@ -225,6 +231,14 @@ func (s *eventStream) send(event string, data any) {
 	}
 }
 
+// comment keeps idle connections open through proxies.
+func (s *eventStream) comment(text string) {
+	fmt.Fprintf(s.w, ": %s\n\n", text) //nolint:errcheck // see send
+	if err := s.controller.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		slog.Debug("flush comment", "error", err)
+	}
+}
+
 func (a *api) saveContent(w http.ResponseWriter, r *http.Request) {
 	var body content.Content
 	if !decode(w, r, &body) {
@@ -310,6 +324,55 @@ func (a *api) progress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, progress)
+}
+
+// events streams a campaign's state until it can no longer change. Workers may run
+// anywhere, so the database is the source: every process reads the same truth and a
+// reconnecting client starts from the current state with nothing to replay.
+func (a *api) events(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	state, changing, err := a.campaigns.Live(r.Context(), id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	a.metrics.SSEConnections.Inc()
+	defer a.metrics.SSEConnections.Dec()
+	stream := newEventStream(w, r)
+	stream.send("update", state)
+	last, _ := json.Marshal(state) //nolint:errcheck // a failure only means one extra update
+
+	ticker := time.NewTicker(liveInterval)
+	defer ticker.Stop()
+	quietSince := time.Now()
+	for changing {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+		}
+		state, stillChanging, err := a.campaigns.Live(r.Context(), id)
+		if err != nil {
+			// The client keeps showing the last state until the database is back.
+			if r.Context().Err() == nil {
+				slog.WarnContext(r.Context(), "read live state", "error", err)
+			}
+			continue
+		}
+		changing = stillChanging
+		encoded, err := json.Marshal(state)
+		if err == nil && bytes.Equal(encoded, last) {
+			if time.Since(quietSince) >= keepAlive {
+				stream.comment("keep-alive")
+				quietSince = time.Now()
+			}
+			continue
+		}
+		last, quietSince = encoded, time.Now()
+		stream.send("update", state)
+	}
+	stream.send("end", struct{}{})
 }
 
 func (a *api) deliveries(w http.ResponseWriter, r *http.Request) {

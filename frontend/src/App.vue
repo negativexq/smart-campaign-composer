@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { fetchAiConfig, type AiConfig } from "./api/campaigns";
-import { fetchSystemStatus, type SystemStatus } from "./api/system";
 import AiModeBadge from "./components/AiModeBadge.vue";
 import AppShell from "./components/AppShell.vue";
 import CampaignStepper from "./components/CampaignStepper.vue";
 import { campaignStatusMeta } from "./lib/campaignStatus";
 import { currentPath } from "./lib/navigation";
+import { refreshSystemHealth, systemHealth } from "./lib/systemHealth";
 import AudienceView from "./views/AudienceView.vue";
 import CampaignDetailView from "./views/CampaignDetailView.vue";
 import CampaignsView from "./views/CampaignsView.vue";
@@ -33,7 +33,9 @@ const route = computed(() => {
   if (detail) return { name: "detail", id: detail[1] };
   return { name: "not-found", id: "" };
 });
-const status = ref<SystemStatus | "checking">("checking");
+const HEALTH_INTERVAL = 15000;
+const status = computed(() => systemHealth.value?.status ?? "checking");
+let healthTimer: ReturnType<typeof setInterval> | undefined;
 const aiConfig = ref<AiConfig | null>(null);
 
 const wizardStatus = ref("DRAFT");
@@ -47,8 +49,11 @@ const steps = [
 ];
 
 onMounted(async () => {
-  [status.value, aiConfig.value] = await Promise.all([fetchSystemStatus(), fetchAiConfig()]);
+  healthTimer = setInterval(refreshSystemHealth, HEALTH_INTERVAL);
+  [, aiConfig.value] = await Promise.all([refreshSystemHealth(), fetchAiConfig()]);
 });
+
+onBeforeUnmount(() => clearInterval(healthTimer));
 </script>
 
 <template>

@@ -65,7 +65,7 @@ function stubApi(routes: Record<string, unknown>) {
 
 async function open(path: string, routes: Record<string, unknown>) {
   navigate(path);
-  const fetchMock = stubApi({ "/readyz": {}, "/api/config": { llm_provider: "mock", llm_model: "m" }, ...routes });
+  const fetchMock = stubApi({ "/api/system": { checks: { database: "ok" } }, "/api/config": { llm_provider: "mock", llm_model: "m" }, ...routes });
   const wrapper = mount(App);
   await flushPromises();
   return { wrapper, fetchMock };
@@ -110,7 +110,7 @@ describe("campaign list", () => {
   beforeEach(() => vi.useFakeTimers());
 
   async function settle() {
-    await vi.runAllTimersAsync();
+    await vi.advanceTimersByTimeAsync(1000);
     await flushPromises();
   }
 

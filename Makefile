@@ -1,6 +1,6 @@
 COMPOSE_TEST := docker compose -f compose.test.yaml
 
-.PHONY: test test-go test-frontend test-local test-e2e test-env-up test-env-down up down
+.PHONY: test test-go test-frontend test-local test-e2e test-chaos test-env-up test-env-down up down
 
 ## test: run all tests in containers (needs only Docker, no API key)
 test: test-go test-frontend
@@ -18,6 +18,10 @@ test-local: test-env-up
 ## test-e2e: run the acceptance test against a stack started with `make up`
 test-e2e:
 	go test -tags=e2e -count=1 ./tests/e2e/...
+
+## test-chaos: kill and stop services under a running stack and check nothing is lost (takes a few minutes)
+test-chaos:
+	go test -tags=chaos -count=1 -timeout=15m -v ./tests/chaos/...
 
 test-env-up:
 	$(COMPOSE_TEST) up -d --wait postgres redis

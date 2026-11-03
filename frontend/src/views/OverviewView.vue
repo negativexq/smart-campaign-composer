@@ -5,6 +5,7 @@ import { errorMessage, getOverview, type Overview } from "../api/campaigns";
 import ActivityTimeline from "../components/ActivityTimeline.vue";
 import CampaignTable from "../components/CampaignTable.vue";
 import MetricCard from "../components/MetricCard.vue";
+import SystemHealthCard from "../components/SystemHealthCard.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 
 const overview = ref<Overview | null>(null);
@@ -58,6 +59,11 @@ onMounted(async () => {
         </div>
       </section>
     </template>
+
+    <section class="section">
+      <h2>System</h2>
+      <SystemHealthCard />
+    </section>
   </div>
 </template>
 

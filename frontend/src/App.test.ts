@@ -8,7 +8,7 @@ function stubReadiness(response: Partial<Response> | Error) {
   const fetchMock =
     response instanceof Error
       ? vi.fn().mockRejectedValue(response)
-      : vi.fn().mockResolvedValue(response);
+      : vi.fn(async (url: string) => (url === "/api/system" ? { json: async () => ({ checks: { database: "ok" } }), ...response } : response));
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
@@ -67,8 +67,24 @@ describe("App", () => {
     const wrapper = mount(App);
     await flushPromises();
 
-    expect(fetchMock).toHaveBeenCalledWith("/readyz");
+    expect(fetchMock).toHaveBeenCalledWith("/api/system");
     expect(wrapper.find("[data-testid=system-status]").text()).toBe("Operational");
+  });
+
+  it("says sending is affected when only the worker is down", async () => {
+    stubReadiness({ ok: true, json: async () => ({ checks: { database: "ok", worker: "down" } }) });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid=system-status]").text()).toBe("Sending affected");
+  });
+
+  it("shows the system as unavailable when the database is down", async () => {
+    stubReadiness({ ok: true, json: async () => ({ checks: { database: "down", worker: "ok" } }) });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid=system-status]").text()).toBe("Unavailable");
   });
 
   it("shows the system as unavailable when the API reports a problem", async () => {

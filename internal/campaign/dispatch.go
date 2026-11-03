@@ -217,6 +217,27 @@ type Progress struct {
 }
 
 // Progress adds up a campaign's deliveries.
+// LiveState is what a page watching a campaign needs to stay current.
+type LiveState struct {
+	Status   string   `json:"status"`
+	Progress Progress `json:"progress"`
+}
+
+// Live reads the current state. It says whether the state can still change on its
+// own, which is only true from approval until sending ends.
+func (s *Service) Live(ctx context.Context, id string) (LiveState, bool, error) {
+	view, err := s.load(ctx, id)
+	if err != nil {
+		return LiveState{}, false, err
+	}
+	progress, err := s.Progress(ctx, id)
+	if err != nil {
+		return LiveState{}, false, err
+	}
+	changing := view.Status == statusApproved || view.Status == statusScheduled || view.Status == statusDispatching
+	return LiveState{view.Status, progress}, changing, nil
+}
+
 func (s *Service) Progress(ctx context.Context, id string) (Progress, error) {
 	if _, err := s.load(ctx, id); err != nil {
 		return Progress{}, err

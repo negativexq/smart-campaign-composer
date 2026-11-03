@@ -1,12 +1,14 @@
 package httpapi_test
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
 	"github.com/negativexq/smart-campaign-composer/internal/content"
@@ -252,5 +254,90 @@ func TestScheduling(t *testing.T) {
 	}
 	if status, _ := call(t, api, http.MethodDelete, path, ""); status != http.StatusConflict {
 		t.Fatalf("cancel again: %d", status)
+	}
+}
+
+// nextEvent reads one server-sent event, skipping comments.
+func nextEvent(t *testing.T, reader *bufio.Reader) sseEvent {
+	t.Helper()
+	var event sseEvent
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read stream: %v", err)
+		}
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			event.name = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event.data); err != nil {
+				t.Fatalf("decode event: %v", err)
+			}
+		case line == "" && event.name != "":
+			return event
+		}
+	}
+}
+
+func TestEventsFollowACampaignWhileItCanChange(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, fastMock())
+	id := campaignWithAudience(t, api)
+	generate(t, api, id, "")
+	call(t, api, http.MethodPost, "/api/campaigns/"+id+"/approve", "")
+	base := "/api/campaigns/" + id
+	if status, body := call(t, api, http.MethodPost, base+"/schedule", `{"kind":"weekly","days":["mon"],"time":"09:30","timezone":"UTC"}`); status != http.StatusOK {
+		t.Fatalf("schedule: %d %+v", status, body)
+	}
+
+	server := httptest.NewServer(api)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+base+"/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if !strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("content type: %s", response.Header.Get("Content-Type"))
+	}
+	reader := bufio.NewReader(response.Body)
+
+	first := nextEvent(t, reader)
+	if first.name != "update" || first.data["status"] != "SCHEDULED" || first.data["progress"] == nil {
+		t.Fatalf("first event: %+v", first)
+	}
+	if status, _ := call(t, api, http.MethodDelete, base+"/schedule", ""); status != http.StatusOK {
+		t.Fatalf("cancel: %d", status)
+	}
+	second := nextEvent(t, reader)
+	if second.name != "update" || second.data["status"] != "APPROVED" {
+		t.Fatalf("change was not pushed: %+v", second)
+	}
+}
+
+func TestEventsEndForACampaignThatCannotChange(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, fastMock())
+	id := campaignWithAudience(t, api)
+	recorder := httptest.NewRecorder()
+	api.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/campaigns/"+id+"/events", nil))
+	events := readEvents(t, recorder.Body.String())
+	if len(events) != 2 || events[0].name != "update" || events[1].name != "end" {
+		t.Fatalf("events: %+v", events)
+	}
+}
+
+func TestEventsForAnUnknownCampaignAreAnOrdinaryError(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, fastMock())
+	if status, _ := call(t, api, http.MethodGet, "/api/campaigns/00000000-0000-0000-0000-000000000000/events", ""); status != http.StatusNotFound {
+		t.Fatalf("status %d", status)
 	}
 }

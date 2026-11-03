@@ -45,7 +45,7 @@ function stubApi(routes: Record<string, Route | Route[]>) {
 }
 
 const shared = {
-  "GET /readyz": { body: {} },
+  "GET /api/system": { body: { checks: { database: "ok" } } },
   "GET /api/config": { body: { llm_provider: "mock", llm_model: "keyword-matcher" } },
   "GET /api/overview": {
     body: { counts: { total: 0, drafts: 0, active: 0, completed: 0, failed: 0 }, recent_campaigns: [], recent_activity: [] },

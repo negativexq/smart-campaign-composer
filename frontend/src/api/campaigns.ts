@@ -226,6 +226,31 @@ export async function getDeliveryAttempts(id: string, delivery: string): Promise
   return (await request<{ attempts: DeliveryAttempt[] }>(path)).attempts;
 }
 
+export type LiveState = {
+  status: string;
+  progress: Progress;
+};
+
+export type LiveHandlers = {
+  onUpdate: (state: LiveState) => void;
+  onEnd: () => void;
+  onConnection: (connected: boolean) => void;
+};
+
+// Follows a campaign until the server says it can no longer change. The browser
+// reconnects by itself, and the first event after that is the current state.
+export function watchCampaign(id: string, handlers: LiveHandlers): () => void {
+  const source = new EventSource(`/api/campaigns/${encodeURIComponent(id)}/events`);
+  source.onopen = () => handlers.onConnection(true);
+  source.onerror = () => handlers.onConnection(false);
+  source.addEventListener("update", (event) => handlers.onUpdate(JSON.parse((event as MessageEvent<string>).data) as LiveState));
+  source.addEventListener("end", () => {
+    source.close();
+    handlers.onEnd();
+  });
+  return () => source.close();
+}
+
 export type GenerationHandlers = {
   onDelta: (field: MessageField, text: string) => void;
   onReset: () => void;

@@ -8,9 +8,11 @@ import {
   getActivity,
   getCampaign,
   getProgress,
+  watchCampaign,
   type ActivityEntry,
   type Campaign,
   type MessageField,
+  type LiveState,
   type Progress,
 } from "../api/campaigns";
 import ActivityTimeline from "../components/ActivityTimeline.vue";
@@ -24,12 +26,11 @@ import OriginTag from "../components/OriginTag.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { isDraftStatus } from "../lib/campaignStatus";
 import { formatDateTime } from "../lib/format";
+import { sendingBlockers } from "../lib/systemHealth";
 
 const props = defineProps<{ campaignId: string }>();
 
 type Tab = "overview" | "audience" | "content" | "deliveries" | "activity";
-
-const POLL_INTERVAL = 2000;
 
 const campaign = ref<Campaign | null>(null);
 const activity = ref<ActivityEntry[] | null>(null);
@@ -40,7 +41,8 @@ const progress = ref<Progress | null>(null);
 const refreshKey = ref(0);
 const acting = ref(false);
 const actionError = ref("");
-let pollTimer: ReturnType<typeof setTimeout> | undefined;
+const disconnected = ref(false);
+let stopWatching: (() => void) | null = null;
 
 const tabs = computed(() => {
   const list: { id: Tab; label: string }[] = [
@@ -74,19 +76,29 @@ async function refresh() {
   refreshKey.value++;
 }
 
-// Reads aggregates from the database, so it costs the same however many messages
-// are moving. It keeps going through a failed read and stops when sending ends.
-function schedulePoll() {
-  clearTimeout(pollTimer);
-  if (!isLive.value) return;
-  pollTimer = setTimeout(async () => {
-    try {
-      await refresh();
-    } catch {
-      // The next read tries again.
-    }
-    schedulePoll();
-  }, POLL_INTERVAL);
+async function onLiveUpdate(state: LiveState) {
+  const changed = state.status !== campaign.value?.status;
+  progress.value = state.progress;
+  refreshKey.value++;
+  if (!changed) return;
+  try {
+    await refresh();
+  } catch {
+    // The status is still right, and the next change reads the rest again.
+    if (campaign.value) campaign.value = { ...campaign.value, status: state.status };
+  }
+}
+
+function watchIfChanging() {
+  if (stopWatching || !["APPROVED", "SCHEDULED", "DISPATCHING"].includes(campaign.value?.status ?? "")) return;
+  stopWatching = watchCampaign(props.campaignId, {
+    onUpdate: onLiveUpdate,
+    onConnection: (connected) => (disconnected.value = !connected),
+    onEnd: () => {
+      stopWatching = null;
+      disconnected.value = false;
+    },
+  });
 }
 
 async function act(action: () => Promise<unknown>) {
@@ -95,7 +107,7 @@ async function act(action: () => Promise<unknown>) {
   try {
     await action();
     await refresh();
-    schedulePoll();
+    watchIfChanging();
   } catch (failure) {
     actionError.value = errorMessage(failure);
   } finally {
@@ -125,10 +137,10 @@ onMounted(async () => {
   } catch {
     // The rest of the page is still useful without the counts.
   }
-  schedulePoll();
+  watchIfChanging();
 });
 
-onBeforeUnmount(() => clearTimeout(pollTimer));
+onBeforeUnmount(() => stopWatching?.());
 </script>
 
 <template>
@@ -177,6 +189,13 @@ onBeforeUnmount(() => clearTimeout(pollTimer));
     </div>
 
     <ValidationNotice v-if="actionError" tone="error" title="This did not go through">{{ actionError }}</ValidationNotice>
+    <ValidationNotice v-if="disconnected" tone="warning" title="Live updates stopped" data-testid="live-disconnected">
+      These numbers may be out of date. We keep trying to reconnect, and sending does not depend on this page.
+    </ValidationNotice>
+    <ValidationNotice v-if="isLive && sendingBlockers.length" tone="warning" title="Sending is held up" data-testid="sending-blocked">
+      <span v-for="blocker in sendingBlockers" :key="blocker.id" class="blocker"><strong>{{ blocker.label }} is down.</strong> {{ blocker.effect }}</span>
+      Nothing is lost, and sending continues when it is back.
+    </ValidationNotice>
 
     <section v-if="tab === 'overview'" id="panel-overview" class="panel" role="tabpanel" aria-labelledby="tab-overview">
       <section v-if="campaign.schedule" class="schedule card" data-testid="schedule-card">
@@ -277,6 +296,10 @@ onBeforeUnmount(() => clearTimeout(pollTimer));
   gap: var(--space-2);
   justify-items: start;
   min-width: 240px;
+}
+
+.blocker {
+  display: block;
 }
 
 .actions {
