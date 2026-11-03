@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/negativexq/smart-campaign-composer/internal/campaign"
@@ -197,6 +198,59 @@ func TestActivityTellsHowTheAudienceChanged(t *testing.T) {
 	for _, unknown := range []string{"not-a-uuid", "00000000-0000-0000-0000-000000000000"} {
 		if _, err := h.service.Activity(ctx, unknown); !errors.Is(err, campaign.ErrNotFound) {
 			t.Errorf("%s: %v", unknown, err)
+		}
+	}
+}
+
+func TestListFiltersByChannelAndAgeAndSorts(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, step{output: validProposal})
+	ctx := context.Background()
+	for _, row := range []struct {
+		brief    string
+		channels []string
+		age      string
+	}{
+		{"Beta recent email", []string{"email"}, "1 day"},
+		{"Alpha both", []string{"sms", "email"}, "10 days"},
+		{"Carrot old sms", []string{"sms"}, "40 days"},
+	} {
+		id := h.createWithStatus(t, row.brief, "DRAFT")
+		if _, err := h.pool.Exec(ctx, `UPDATE campaigns SET channels = $2, name = $3, created_at = now() - $4::interval WHERE id = $1`, id, row.channels, row.brief, row.age); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tests := []struct {
+		name   string
+		filter campaign.ListFilter
+		want   []string
+	}{
+		{"newest first by default", campaign.ListFilter{}, []string{"Beta recent email", "Alpha both", "Carrot old sms"}},
+		{"oldest first", campaign.ListFilter{Sort: "oldest"}, []string{"Carrot old sms", "Alpha both", "Beta recent email"}},
+		{"by name", campaign.ListFilter{Sort: "name"}, []string{"Alpha both", "Beta recent email", "Carrot old sms"}},
+		{"uses sms, alone or not", campaign.ListFilter{Channel: "sms"}, []string{"Alpha both", "Carrot old sms"}},
+		{"uses email, alone or not", campaign.ListFilter{Channel: "email"}, []string{"Beta recent email", "Alpha both"}},
+		{"created recently", campaign.ListFilter{CreatedWithinDays: 30}, []string{"Beta recent email", "Alpha both"}},
+		{"everything together", campaign.ListFilter{Channel: "sms", CreatedWithinDays: 30, Sort: "name"}, []string{"Alpha both"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := h.service.List(ctx, tt.filter)
+			if err != nil {
+				t.Fatalf("list: %v", err)
+			}
+			names := []string{}
+			for _, summary := range got {
+				names = append(names, summary.Name)
+			}
+			if !slices.Equal(names, tt.want) {
+				t.Fatalf("got %v, want %v", names, tt.want)
+			}
+		})
+	}
+	for _, bad := range []campaign.ListFilter{{Channel: "fax"}, {Sort: "name; DROP TABLE campaigns"}, {CreatedWithinDays: -1}} {
+		if _, err := h.service.List(ctx, bad); !errors.Is(err, campaign.ErrUnknownFilter) {
+			t.Errorf("%+v: %v", bad, err)
 		}
 	}
 }
