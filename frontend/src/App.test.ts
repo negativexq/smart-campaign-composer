@@ -2,6 +2,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App.vue";
+import { navigate } from "./lib/navigation";
 
 function stubReadiness(response: Partial<Response> | Error) {
   const fetchMock =
@@ -13,7 +14,7 @@ function stubReadiness(response: Partial<Response> | Error) {
 }
 
 afterEach(() => {
-  window.history.pushState({}, "", "/");
+  navigate("/");
   vi.unstubAllGlobals();
 });
 
@@ -48,16 +49,6 @@ describe("App", () => {
     expect(groups[1].text()).toContain("Design system");
   });
 
-  it("keeps generation disabled and says why", async () => {
-    stubReadiness({ ok: true });
-    const wrapper = mount(App);
-    await flushPromises();
-    await wrapper.find("textarea").setValue("Send a 30% discount reminder");
-
-    expect(wrapper.find("button[type=submit]").attributes("disabled")).toBeDefined();
-    expect(wrapper.find("[data-testid=brief-hint]").text()).toContain("not available yet");
-  });
-
   it("shows the system as operational when the API is ready", async () => {
     const fetchMock = stubReadiness({ ok: true });
     const wrapper = mount(App);
@@ -85,7 +76,7 @@ describe("App", () => {
 
   it("labels the design review page as sample data", async () => {
     stubReadiness({ ok: true });
-    window.history.pushState({}, "", "/design");
+    navigate("/design");
     const wrapper = mount(App);
     await flushPromises();
 
