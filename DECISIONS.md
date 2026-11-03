@@ -130,6 +130,11 @@ That run showed one limit. Every percentage in a brief must appear in every mess
 
 The marketer checks the rule in a breakdown table: from the main audience down through each condition, with what was selected, the brief's wording for it and how many people remain. Counts apply the conditions one at a time at the audience's own timestamp. The raw JSON rule stays out of the interface because it adds nothing a marketer can act on. A discount is not a condition, so it sits with the message settings and only exists once someone adds it.
 
+## Approval freezes the audience counts
+
+Counts used to be recalculated whenever a page opened, so a later consent change could move the number on a finished campaign. Approval now stores the counts and the step-by-step breakdown with the version, and the Audience tab says "snapshot" only when one exists. What was really sent stays a separate figure read from the delivery records, because consent is checked again at send time.
+
+
 ## Each condition shows the words it came from
 
 The model returns, for each filter, the exact words of the brief or refinement behind it. The backend keeps a quote only if it really appears in that text, ignoring case and spacing, and a filter without one is shown as added by the AI. A false quote costs only the explanation, so it does not reject the proposal. The check proves the words were written, not that the filter means the same thing, which is what human approval is for.

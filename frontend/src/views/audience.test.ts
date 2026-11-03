@@ -185,14 +185,6 @@ describe("audience page", () => {
     expect(sources.length).toBe(3); // the assumed window has its own label
   });
 
-  it("lists a discount from the brief without counting it as a filter", async () => {
-    const { wrapper } = await open({ "GET /api/campaigns/c1": { body: { ...campaign, brief: "Istanbul cart reminder with %30 off" } } });
-    await flushPromises();
-
-    expect(wrapper.find("[data-testid=message-row]").text()).toContain("%30");
-    expect(wrapper.find("[data-testid=message-row]").text()).toContain("not a filter");
-  });
-
   it("makes no claim about quotes for a proposal made before they existed", async () => {
     const { wrapper } = await open({ "GET /api/campaigns/c1": { body: campaign } });
     await flushPromises();

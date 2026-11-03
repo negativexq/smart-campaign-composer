@@ -2,6 +2,7 @@ package campaign
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -96,7 +97,15 @@ func (s *Service) Approve(ctx context.Context, id string) (View, error) {
 		return View{}, &content.ValidationError{Issues: issues}
 	}
 
-	if _, err := tx.Exec(ctx, `UPDATE campaign_versions SET approved_at = now() WHERE campaign_id = $1 AND version = $2`, id, view.Version); err != nil {
+	breakdown, err := segment.Narrow(ctx, tx, view.Proposal.Segment, view.AudienceAsOf)
+	if err != nil {
+		return View{}, err
+	}
+	snapshot, err := json.Marshal(AudienceSnapshot{Counts: view.Audience, Breakdown: breakdown})
+	if err != nil {
+		return View{}, fmt.Errorf("encode audience snapshot: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE campaign_versions SET approved_at = now(), audience_snapshot = $3 WHERE campaign_id = $1 AND version = $2`, id, view.Version, snapshot); err != nil {
 		return View{}, fmt.Errorf("approve version: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1`, id, statusApproved); err != nil {

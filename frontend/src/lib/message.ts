@@ -58,6 +58,12 @@ export function smsSegments(text: string): SmsSegments {
   return { encoding: "GSM-7", segments: units <= 160 ? 1 : Math.ceil(units / 153) };
 }
 
+/** The discount a campaign offers, from the form or else from its brief. */
+export function campaignDiscount(campaign: { offer_percent?: number | null; brief: string }): string {
+  if (campaign.offer_percent) return `${campaign.offer_percent}%`;
+  return campaign.brief.match(/%\s*\d+|\d+\s*%/)?.[0] ?? "";
+}
+
 /** Says how many people a channel misses and why, since consent is the only reason. */
 export function reachHint(total: number, reached: number, channel: string): string {
   const missed = Math.max(total - reached, 0);

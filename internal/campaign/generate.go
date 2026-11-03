@@ -480,6 +480,9 @@ func (s *Service) AudienceBreakdown(ctx context.Context, id string) (segment.Bre
 	if view.Proposal == nil {
 		return segment.Breakdown{}, ErrNoAudience
 	}
+	if view.AudienceSnapshot != nil {
+		return view.AudienceSnapshot.Breakdown, nil
+	}
 	return segment.Narrow(ctx, s.db, view.Proposal.Segment, view.AudienceAsOf)
 }
 

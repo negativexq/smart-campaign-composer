@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { countCharacters, findUnknownVariables, reachHint, renderMessage, smsSegments } from "./message";
+import { countCharacters, findUnknownVariables, reachHint, renderMessage, smsSegments, campaignDiscount } from "./message";
 
 describe("countCharacters", () => {
   it("counts Turkish letters as one character each", () => {
@@ -72,5 +72,13 @@ describe("reachHint", () => {
   it("names who is missed and why", () => {
     expect(reachHint(467, 330, "SMS")).toBe("137 not reachable: no SMS consent");
     expect(reachHint(10, 10, "email")).toBe("Everyone matching consented to email");
+  });
+});
+
+describe("campaignDiscount", () => {
+  it("prefers the form, falls back to the brief and may be empty", () => {
+    expect(campaignDiscount({ offer_percent: 25, brief: "30% off" })).toBe("25%");
+    expect(campaignDiscount({ offer_percent: null, brief: "Send %30 off" })).toBe("%30");
+    expect(campaignDiscount({ brief: "Remind them" })).toBe("");
   });
 });

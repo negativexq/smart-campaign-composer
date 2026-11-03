@@ -88,6 +88,7 @@ type View struct {
 	Conditions            []segment.Condition `json:"conditions"`
 	Audience              segment.Counts      `json:"audience"`
 	AudienceAsOf          time.Time           `json:"audience_as_of,omitzero"`
+	AudienceSnapshot      *AudienceSnapshot   `json:"audience_snapshot,omitempty"`
 	Blockers              []string            `json:"blockers"`
 	Content               *StoredContent      `json:"content,omitempty"`
 	// ContentLimits is how long {{first_name}} can get in this audience.
@@ -573,7 +574,9 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 		return view, nil
 	}
 	view.Conditions = segment.Describe(view.Proposal.Segment)
-	if view.Audience, err = segment.Count(ctx, s.db, view.Proposal.Segment, view.AudienceAsOf); err != nil {
+	if view.AudienceSnapshot != nil {
+		view.Audience = view.AudienceSnapshot.Counts
+	} else if view.Audience, err = segment.Count(ctx, s.db, view.Proposal.Segment, view.AudienceAsOf); err != nil {
 		return View{}, err
 	}
 	// Reachable means on a channel this campaign uses.
@@ -614,14 +617,15 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 		storedText   []byte
 		audienceAsOf *time.Time
 		approvedAt   *time.Time
+		snapshot     []byte
 	)
 	err := s.db.QueryRow(ctx, `
-		SELECT c.name, c.name_source, c.brief, c.status, c.channels, c.tone, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at
+		SELECT c.name, c.name_source, c.brief, c.status, c.channels, c.tone, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.Channels, &view.Tone, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt)
+		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.Channels, &view.Tone, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt, &snapshot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}
@@ -644,6 +648,12 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 	if approvedAt != nil {
 		view.ApprovedAt = *approvedAt
 	}
+	if snapshot != nil {
+		view.AudienceSnapshot = &AudienceSnapshot{}
+		if err := json.Unmarshal(snapshot, view.AudienceSnapshot); err != nil {
+			return View{}, fmt.Errorf("decode audience snapshot: %w", err)
+		}
+	}
 	view.Proposal = &segment.Proposal{}
 	if err := json.Unmarshal(encoded, view.Proposal); err != nil {
 		return View{}, fmt.Errorf("decode stored proposal: %w", err)
@@ -656,6 +666,12 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 		view.Content = &stored
 	}
 	return view, nil
+}
+
+// AudienceSnapshot is the audience as a person approved it.
+type AudienceSnapshot struct {
+	Counts    segment.Counts    `json:"counts"`
+	Breakdown segment.Breakdown `json:"breakdown"`
 }
 
 type blocker struct {

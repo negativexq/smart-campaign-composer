@@ -1,12 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed } from "vue";
 
-import { getAudienceBreakdown, type AudienceBreakdown, type Campaign, type Condition } from "../api/campaigns";
+import type { AudienceBreakdown, Campaign, Condition } from "../api/campaigns";
 
-const props = defineProps<{ campaign: Campaign }>();
-
-const breakdown = ref<AudienceBreakdown | null>(null);
-const failed = ref(false);
+const props = defineProps<{ campaign: Campaign; breakdown: AudienceBreakdown | null; failed: boolean; hideRule?: boolean }>();
 
 const formatCount = (count: number) => count.toLocaleString("en-US");
 const assumptions = computed(() => props.campaign.proposal?.assumptions ?? []);
@@ -22,13 +19,7 @@ function sourceOf(condition: Condition): { quotes: string[]; text: string } {
   return { quotes, text: "Added by AI, not in your brief" };
 }
 
-const percentOfAll = (count: number) => `${((count / (breakdown.value?.everyone || 1)) * 100).toFixed(1)}%`;
-
-/** A discount is part of the brief too, but it shapes the message rather than the audience. */
-const discount = computed(() => {
-  const { offer_percent: percent, brief } = props.campaign;
-  return percent ? `${percent}%` : (brief.match(/%\s*\d+|\d+\s*%/)?.[0] ?? "");
-});
+const percentOfAll = (count: number) => `${((count / (props.breakdown?.everyone || 1)) * 100).toFixed(1)}%`;
 
 /** The dimension each condition cuts by, so a person can check what was picked for it. */
 const dimensions: Record<string, { name: string; window?: boolean }> = {
@@ -49,34 +40,19 @@ const steps = computed(() =>
     selected: dimensions[condition.field]?.window ? `Last ${condition.value}` : condition.value,
     source: sourceOf(condition),
     notes: assumptions.value.filter((assumption) => assumption.field === condition.field),
-    remaining: breakdown.value?.steps.find((step) => step.field === condition.field)?.remaining,
+    remaining: props.breakdown?.steps.find((step) => step.field === condition.field)?.remaining,
   })),
 );
 
 const otherNotes = computed(() => assumptions.value.filter((assumption) => !props.campaign.conditions.some((condition) => condition.field === assumption.field)));
 
-watch(
-  () => [props.campaign.id, props.campaign.audience_as_of],
-  async () => {
-    const asked = props.campaign.audience_as_of;
-    breakdown.value = null;
-    failed.value = false;
-    try {
-      const loaded = await getAudienceBreakdown(props.campaign.id);
-      if (asked === props.campaign.audience_as_of) breakdown.value = loaded;
-    } catch {
-      if (asked === props.campaign.audience_as_of) failed.value = true;
-    }
-  },
-  { immediate: true },
-);
 </script>
 
 <template>
   <div class="audience-steps">
     <p v-if="!campaign.conditions.length" class="muted">No condition could be applied from this brief.</p>
     <template v-else>
-      <p class="rule" data-testid="segment-rule">
+      <p v-if="!hideRule" class="rule" data-testid="segment-rule">
         <template v-for="(step, index) in steps" :key="step.field">
           <span v-if="index" class="muted small">AND</span>
           <code class="condition">{{ step.rule }}</code>
@@ -113,13 +89,6 @@ watch(
               </td>
               <td class="number"><strong v-if="step.remaining !== undefined" class="count">{{ formatCount(step.remaining) }}</strong></td>
               <td class="number share muted"><template v-if="step.remaining !== undefined">{{ percentOfAll(step.remaining) }}</template></td>
-            </tr>
-            <tr v-if="discount" data-testid="message-row">
-              <td>Discount</td>
-              <td><strong>{{ discount }}</strong></td>
-              <td class="muted">Goes in the message, not a filter</td>
-              <td class="number muted">–</td>
-              <td class="number share muted">–</td>
             </tr>
           </tbody>
         </table>

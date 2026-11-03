@@ -7,6 +7,7 @@ import CampaignName from "../components/CampaignName.vue";
 import MetricCard from "../components/MetricCard.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { reachHint } from "../lib/message";
+import { useAudienceBreakdown } from "../lib/useAudienceBreakdown";
 
 const props = defineProps<{ campaignId: string }>();
 const emit = defineEmits<{ status: [status: string] }>();
@@ -19,6 +20,7 @@ const refinement = ref("");
 const editingBrief = ref(false);
 const editedBrief = ref("");
 
+const { breakdown, failed: breakdownFailed } = useAudienceBreakdown(() => campaign.value);
 const hasProposal = computed(() => Boolean(campaign.value?.proposal));
 const blocked = computed(() => Boolean(campaign.value?.blockers.length));
 const asOf = computed(() =>
@@ -102,7 +104,7 @@ onMounted(async () => {
     <template v-if="hasProposal">
       <section class="section">
         <h2>Segment rule</h2>
-        <AudienceSteps :campaign="campaign" />
+        <AudienceSteps :campaign="campaign" :breakdown="breakdown" :failed="breakdownFailed" />
       </section>
 
       <ValidationNotice v-for="blocker in campaign.blockers" :key="blocker" tone="warning" title="This blocks approval">

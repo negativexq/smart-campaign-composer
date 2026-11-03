@@ -82,6 +82,7 @@ export type Campaign = {
   conditions: Condition[];
   audience: Audience;
   audience_as_of?: string;
+  audience_snapshot?: { counts: Audience; breakdown: AudienceBreakdown };
   provider?: string;
   model?: string;
   blockers: string[];

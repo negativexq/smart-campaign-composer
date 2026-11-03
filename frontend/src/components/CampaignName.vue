@@ -4,7 +4,7 @@ import { nextTick, ref } from "vue";
 import { errorMessage, renameCampaign, type Campaign } from "../api/campaigns";
 import OriginTag from "./OriginTag.vue";
 
-const props = defineProps<{ as: "h1" | "h2"; campaign: Campaign }>();
+const props = defineProps<{ as: "h1" | "h2"; campaign: Campaign; hideOrigin?: boolean }>();
 const emit = defineEmits<{ renamed: [campaign: Campaign] }>();
 
 const editing = ref(false);
@@ -46,7 +46,7 @@ async function save() {
     </form>
     <div v-else class="show">
       <component :is="as" class="text">{{ campaign.name }}</component>
-      <OriginTag v-if="campaign.name_source === 'ai'" origin="ai" />
+      <OriginTag v-if="campaign.name_source === 'ai' && !hideOrigin" origin="ai" />
       <button class="rename small" type="button" data-testid="rename" @click="start">Rename</button>
     </div>
   </div>

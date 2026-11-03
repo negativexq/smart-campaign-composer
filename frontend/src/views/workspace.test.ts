@@ -200,6 +200,7 @@ describe("campaign detail", () => {
 
     await wrapper.find("#tab-audience").trigger("click");
     expect(wrapper.find("#panel-audience").text()).toContain("İstanbul");
+    expect(wrapper.find("[data-testid=audience-final]").exists()).toBe(false);
     expect(wrapper.find("#tab-audience").attributes("aria-selected")).toBe("true");
 
     await wrapper.find("#tab-activity").trigger("click");
@@ -235,12 +236,19 @@ describe("campaign name", () => {
 
   const routes = { "/api/campaigns/c1": campaign, "/api/campaigns/c1/activity": { activity } };
 
-  it("heads the detail page, marks a suggestion and keeps the brief visible", async () => {
+  it("heads the detail page and opens the overview with the brief", async () => {
     const { wrapper } = await open("/campaigns/c1", routes);
 
     expect(wrapper.find("h1").text()).toBe("Cart Recovery");
-    expect(wrapper.find("[data-testid=campaign-name]").text()).toContain("AI suggested");
+    expect(wrapper.find("[data-testid=campaign-name]").text()).not.toContain("AI suggested");
     expect(wrapper.find("[data-testid=brief-text]").text()).toBe("Istanbul cart reminder");
+    expect(wrapper.find("#panel-overview").element.firstElementChild?.getAttribute("aria-label")).toBe("Campaign brief");
+  });
+
+  it("marks a suggested name while the campaign is being set up", async () => {
+    const { wrapper } = await open("/campaigns/c1/edit", routes);
+
+    expect(wrapper.find("[data-testid=campaign-name]").text()).toContain("AI suggested");
   });
 
   it("does not call a name someone chose a suggestion", async () => {

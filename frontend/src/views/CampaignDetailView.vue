@@ -16,7 +16,7 @@ import {
   type Progress,
 } from "../api/campaigns";
 import ActivityTimeline from "../components/ActivityTimeline.vue";
-import AudienceSteps from "../components/AudienceSteps.vue";
+import AudienceReport from "../components/AudienceReport.vue";
 import CampaignName from "../components/CampaignName.vue";
 import CampaignStatusBadge from "../components/CampaignStatusBadge.vue";
 import DeliveriesPanel from "../components/DeliveriesPanel.vue";
@@ -28,7 +28,7 @@ import ValidationNotice from "../components/ValidationNotice.vue";
 import { isDraftStatus } from "../lib/campaignStatus";
 import { formatDateTime } from "../lib/format";
 import { sendingBlockers } from "../lib/systemHealth";
-import { reachHint } from "../lib/message";
+import { campaignDiscount, reachHint } from "../lib/message";
 
 const props = defineProps<{ campaignId: string }>();
 
@@ -151,7 +151,7 @@ onBeforeUnmount(() => stopWatching?.());
 
     <header class="head">
       <div class="title">
-        <CampaignName as="h1" :campaign="campaign" @renamed="onRenamed" />
+        <CampaignName as="h1" :campaign="campaign" hide-origin @renamed="onRenamed" />
         <CampaignStatusBadge :status="campaign.status" />
       </div>
       <a
@@ -195,6 +195,10 @@ onBeforeUnmount(() => stopWatching?.());
     </ValidationNotice>
 
     <section v-if="tab === 'overview'" id="panel-overview" class="panel" role="tabpanel" aria-labelledby="tab-overview">
+      <section class="brief card" aria-label="Campaign brief">
+        <span class="muted small">Brief</span>
+        <p data-testid="brief-text">{{ campaign.brief }}</p>
+      </section>
       <section v-if="campaign.schedule" class="schedule card" data-testid="schedule-card">
         <div class="schedule-body">
           <span class="muted small">Schedule</span>
@@ -209,10 +213,6 @@ onBeforeUnmount(() => stopWatching?.());
         </button>
       </section>
       <DeliveryProgress v-if="progress?.total" :progress="progress" :live="isLive" />
-      <section class="brief card" aria-label="Campaign brief">
-        <span class="muted small">Brief</span>
-        <p data-testid="brief-text">{{ campaign.brief }}</p>
-      </section>
       <template v-if="campaign.proposal">
         <div class="metrics">
           <MetricCard label="Matching customers" :value="campaign.audience.total" />
@@ -235,16 +235,8 @@ onBeforeUnmount(() => stopWatching?.());
     </section>
 
     <section v-else-if="tab === 'audience'" id="panel-audience" class="panel" role="tabpanel" aria-labelledby="tab-audience">
-      <template v-if="campaign.proposal">
-        <AudienceSteps :campaign="campaign" />
-        <div class="metrics">
-          <MetricCard label="Matching customers" :value="campaign.audience.total" />
-          <MetricCard v-if="campaign.channels.includes('sms')" label="Reachable by SMS" :value="campaign.audience.sms" :hint="reachHint(campaign.audience.total, campaign.audience.sms, 'SMS')" />
-          <MetricCard v-if="campaign.channels.includes('email')" label="Reachable by email" :value="campaign.audience.email" :hint="reachHint(campaign.audience.total, campaign.audience.email, 'email')" />
-        </div>
-      </template>
+      <AudienceReport v-if="campaign.proposal" :campaign="campaign" :progress="progress" />
       <p v-else class="muted">No audience conditions yet.</p>
-      <p v-if="campaign.audience_as_of" class="muted small">Counted on {{ formatDateTime(campaign.audience_as_of) }}.</p>
     </section>
 
     <section v-else-if="tab === 'content' && campaign.content" id="panel-content" class="panel" role="tabpanel" aria-labelledby="tab-content">
@@ -252,6 +244,7 @@ onBeforeUnmount(() => stopWatching?.());
       <ValidationNotice v-for="warning in campaign.content_warnings" :key="warning.field + warning.reason" tone="warning" title="Differs from the brief">
         {{ warning.message }}
       </ValidationNotice>
+      <p v-if="campaignDiscount(campaign)" class="muted small" data-testid="content-discount">Discount in these messages: <strong>{{ campaignDiscount(campaign) }}</strong></p>
       <article v-if="campaign.channels.includes('sms')" class="message card" data-testid="content-sms">
         <div class="message-head"><h2>SMS</h2><OriginTag :origin="originOf('sms')" /></div>
         <p class="message-text">{{ campaign.content.sms }}</p>
