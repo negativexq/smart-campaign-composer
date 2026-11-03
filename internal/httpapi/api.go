@@ -23,14 +23,47 @@ type api struct {
 func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provider) {
 	a := &api{campaigns, provider}
 	mux.HandleFunc("GET /api/config", a.config)
+	mux.HandleFunc("GET /api/overview", a.overview)
+	mux.HandleFunc("GET /api/campaigns", a.list)
 	mux.HandleFunc("POST /api/campaigns", a.create)
 	mux.HandleFunc("GET /api/campaigns/{id}", a.get)
 	mux.HandleFunc("POST /api/campaigns/{id}/segment", a.proposeSegment)
 	mux.HandleFunc("GET /api/campaigns/{id}/audience", a.audience)
+	mux.HandleFunc("GET /api/campaigns/{id}/activity", a.activity)
 }
 
 func (a *api) config(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"llm_provider": a.provider.Name(), "llm_model": a.provider.Model()})
+}
+
+func (a *api) overview(w http.ResponseWriter, r *http.Request) {
+	overview, err := a.campaigns.Overview(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, overview)
+}
+
+func (a *api) list(w http.ResponseWriter, r *http.Request) {
+	campaigns, err := a.campaigns.List(r.Context(), campaign.ListFilter{
+		Group: r.URL.Query().Get("group"),
+		Query: r.URL.Query().Get("q"),
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"campaigns": campaigns})
+}
+
+func (a *api) activity(w http.ResponseWriter, r *http.Request) {
+	entries, err := a.campaigns.Activity(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"activity": entries})
 }
 
 func (a *api) create(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +139,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, campaign.ErrInvalidBrief):
 		status, message = http.StatusBadRequest, "Write a brief of up to 2000 characters."
+	case errors.Is(err, campaign.ErrUnknownGroup):
+		status, message = http.StatusBadRequest, "This campaign filter does not exist."
 	case errors.Is(err, campaign.ErrNotFound):
 		status, message = http.StatusNotFound, "This campaign does not exist."
 	case errors.Is(err, campaign.ErrNotEditable):

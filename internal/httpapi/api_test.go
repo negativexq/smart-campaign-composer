@@ -182,6 +182,38 @@ func TestProviderFailuresBecomeHonestResponses(t *testing.T) {
 	}
 }
 
+func TestWorkspaceEndpoints(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, ai.NewMock())
+	id := createCampaign(t, api, exampleBrief)
+	call(t, api, http.MethodPost, "/api/campaigns/"+id+"/segment", `{}`)
+
+	status, overview := call(t, api, http.MethodGet, "/api/overview", "")
+	if status != http.StatusOK || overview["counts"].(map[string]any)["drafts"].(float64) != 1 {
+		t.Fatalf("overview: %d %v", status, overview)
+	}
+
+	status, drafts := call(t, api, http.MethodGet, "/api/campaigns?group=drafts&q=sepete", "")
+	if status != http.StatusOK || len(drafts["campaigns"].([]any)) != 1 {
+		t.Fatalf("list: %d %v", status, drafts)
+	}
+	status, completed := call(t, api, http.MethodGet, "/api/campaigns?group=completed", "")
+	if status != http.StatusOK || len(completed["campaigns"].([]any)) != 0 {
+		t.Fatalf("empty list: %d %v", status, completed)
+	}
+	if status, _ := call(t, api, http.MethodGet, "/api/campaigns?group=nope", ""); status != http.StatusBadRequest {
+		t.Fatalf("unknown group: %d", status)
+	}
+
+	status, activity := call(t, api, http.MethodGet, "/api/campaigns/"+id+"/activity", "")
+	if status != http.StatusOK || len(activity["activity"].([]any)) != 2 {
+		t.Fatalf("activity: %d %v", status, activity)
+	}
+	if status, _ := call(t, api, http.MethodGet, "/api/campaigns/nope/activity", ""); status != http.StatusNotFound {
+		t.Fatalf("unknown campaign: %d", status)
+	}
+}
+
 func TestConfigNamesTheProviderForTheBadge(t *testing.T) {
 	t.Parallel()
 	status, response := call(t, newAPI(t, ai.NewMock()), http.MethodGet, "/api/config", "")

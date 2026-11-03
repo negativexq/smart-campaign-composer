@@ -72,6 +72,8 @@ type View struct {
 	Audience     segment.Counts      `json:"audience"`
 	AudienceAsOf time.Time           `json:"audience_as_of,omitzero"`
 	Blockers     []string            `json:"blockers"`
+	CreatedAt    time.Time           `json:"created_at"`
+	UpdatedAt    time.Time           `json:"updated_at"`
 }
 
 // Service runs campaign operations.
@@ -169,10 +171,22 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 	for _, blocker := range blockersFor(proposal, counts) {
 		s.metrics.ValidationFailures.WithLabelValues(stageAudience, blocker.reason).Inc()
 	}
-	if err := s.saveProposal(ctx, id, request.Brief, proposal, counts, asOf, attempts); err != nil {
+	if err := s.saveProposal(ctx, id, request.Brief, proposal, counts, asOf, attempts, proposalTrigger(input)); err != nil {
 		return View{}, err
 	}
 	return s.Get(ctx, id)
+}
+
+// proposalTrigger says why a proposal was made, for the audit trail.
+func proposalTrigger(input ProposeInput) string {
+	switch {
+	case input.Brief != nil:
+		return "brief_edit"
+	case input.Refinement != "":
+		return "refinement"
+	default:
+		return "brief"
+	}
 }
 
 func (s *Service) generateProposal(ctx context.Context, request ai.SegmentRequest) (segment.Proposal, int, error) {
@@ -284,7 +298,7 @@ func (s *Service) cities(ctx context.Context) ([]string, error) {
 	return cities, nil
 }
 
-func (s *Service) saveProposal(ctx context.Context, id, brief string, proposal segment.Proposal, counts segment.Counts, asOf time.Time, attempts int) error {
+func (s *Service) saveProposal(ctx context.Context, id, brief string, proposal segment.Proposal, counts segment.Counts, asOf time.Time, attempts int, trigger string) error {
 	encoded, err := json.Marshal(proposal)
 	if err != nil {
 		return fmt.Errorf("encode proposal: %w", err)
@@ -308,7 +322,7 @@ func (s *Service) saveProposal(ctx context.Context, id, brief string, proposal s
 		return fmt.Errorf("save version: %w", err)
 	}
 	if err := recordAudit(ctx, tx, id, eventSegmentChosen, map[string]any{
-		"provider": s.provider.Name(), "model": s.provider.Model(), "attempts": attempts,
+		"trigger": trigger, "provider": s.provider.Name(), "model": s.provider.Model(), "attempts": attempts,
 		"audience": counts, "assumptions": len(proposal.Assumptions),
 		"unsupported_conditions": len(proposal.UnsupportedConditions),
 	}); err != nil {
@@ -365,12 +379,12 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 		audienceAsOf *time.Time
 	)
 	err := s.db.QueryRow(ctx, `
-		SELECT c.brief, c.status, v.version, v.llm_provider, v.llm_model, v.segment, v.audience_as_of
+		SELECT c.brief, c.status, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.audience_as_of
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1`, parsed).Scan(&view.Brief, &view.Status, &version, &provider, &model, &encoded, &audienceAsOf)
+		WHERE c.id = $1`, parsed).Scan(&view.Brief, &view.Status, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &audienceAsOf)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}
