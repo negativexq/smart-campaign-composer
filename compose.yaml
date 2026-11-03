@@ -65,6 +65,8 @@ services:
   worker:
     <<: *backend
     command: ["/app/worker"]
+    # Longer than delivery.MaxDrain, so a stop never kills a message being recorded.
+    stop_grace_period: 30s
     environment:
       <<: *backend-env
       PROVIDER_URL: http://mock-provider:8080

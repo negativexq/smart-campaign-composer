@@ -220,6 +220,29 @@ describe("audience page", () => {
     expect(sources.length).toBe(3); // the assumed window has its own label
   });
 
+  it("shows what the model left out of the audience", async () => {
+    const { wrapper } = await open({
+      "GET /api/campaigns/c1": { body: { ...campaign, proposal: { ...campaign.proposal!, not_audience: ["Instagram"] } } },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Not used for the audience");
+    expect(wrapper.text()).toContain("Instagram");
+  });
+
+  it("says when a refinement was not done, without blocking approval", async () => {
+    const { wrapper } = await open({
+      "GET /api/campaigns/c1": {
+        body: { ...campaign, proposal: { ...campaign.proposal!, not_applied: ['Nothing changed for your request: "make it 14 days".'] } },
+      },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Not done");
+    expect(wrapper.text()).toContain("make it 14 days");
+    expect(wrapper.text()).not.toContain("This blocks approval");
+  });
+
   it("makes no claim about quotes for a proposal made before they existed", async () => {
     const { wrapper } = await open({ "GET /api/campaigns/c1": { body: campaign } });
     await flushPromises();

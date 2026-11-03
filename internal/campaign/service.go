@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -327,7 +328,7 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 		request.Refinement = ""
 	} else if input.Refinement != "" && stored.Proposal != nil {
 		current := *stored.Proposal
-		current.Unmatched = nil
+		current.Unmatched, current.NotApplied = nil, nil
 		if request.Current, err = json.Marshal(current); err != nil {
 			return View{}, fmt.Errorf("encode current proposal: %w", err)
 		}
@@ -354,6 +355,9 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 	}
 
 	s.checkEvidence(&proposal, request, stored.Proposal)
+	if request.Refinement != "" {
+		noteNotApplied(&proposal, stored, brief, request)
+	}
 
 	asOf := s.now()
 	counts, err := s.evaluateAudience(ctx, proposal.Segment, asOf)
@@ -448,6 +452,22 @@ func checkUpdatedBrief(proposal *segment.Proposal, request ai.SegmentRequest) er
 	}
 	proposal.UpdatedBrief = updated
 	return nil
+}
+
+// noteNotApplied compares the result with what a refinement asked, so a request the
+// model passed over is seen whether or not the model admits it.
+func noteNotApplied(proposal *segment.Proposal, stored View, brief string, request ai.SegmentRequest) {
+	unchanged := brief == stored.Brief && stored.Proposal != nil &&
+		reflect.DeepEqual(proposal.Segment, stored.Proposal.Segment) &&
+		slices.Equal(proposal.UnsupportedConditions, stored.Proposal.UnsupportedConditions)
+	if unchanged {
+		proposal.NotApplied = append(proposal.NotApplied, fmt.Sprintf("Nothing changed for your request: %q.", request.Refinement))
+		return
+	}
+	result := strings.Join(slices.Concat([]string{brief}, proposal.UnsupportedConditions, proposal.NotApplied), "\n")
+	for _, missing := range content.MissingFromInstruction(result, request.Refinement, request.Cities) {
+		proposal.NotApplied = append(proposal.NotApplied, fmt.Sprintf("Your request mentions %s, but the result does not.", missing))
+	}
 }
 
 // checkAgainstBrief compares the rule with the brief it will be saved with, which
@@ -652,6 +672,7 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 	}
 	if view.Content != nil {
 		view.ContentWarnings = append(view.ContentWarnings, content.CheckDiscounts(view.Content.Content, view.writingBrief())...)
+		view.ContentWarnings = append(view.ContentWarnings, view.Content.NotApplied...)
 	}
 	return view, nil
 }

@@ -60,10 +60,15 @@ var (
 const freeToDraft = `(status IN ('DRAFT', 'READY_FOR_REVIEW', 'GENERATION_FAILED')
 	OR (status = 'GENERATING' AND updated_at < now() - interval '` + abandonedInterval + `'))`
 
+const reasonNotApplied = "not_applied"
+
 // StoredContent is the campaign's messages and which of them a person changed.
 type StoredContent struct {
 	content.Content
 	Edited []string `json:"edited"`
+	// NotApplied holds one note per channel on what the last instruction asked for
+	// and the messages do not do. Writing that channel again replaces its note.
+	NotApplied []content.Issue `json:"not_applied,omitempty"`
 }
 
 // GenerateInput steers a generation. Instruction is optional. Channel rewrites
@@ -88,6 +93,7 @@ type Generation struct {
 	instruction string
 	channel     string
 	cities      []string
+	reported    []string
 }
 
 // StartGeneration checks the campaign can get content and claims it, so that
@@ -311,7 +317,12 @@ func (g *Generation) validate(ctx context.Context, output []byte, offerSource st
 			err = &content.ValidationError{Issues: issues}
 		} else if issues := content.CheckFacts(generated, g.factSource(), g.cities); len(issues) > 0 {
 			err = &content.ValidationError{Issues: issues}
+		} else if issues := content.CheckTargeting(generated, g.view.Proposal.Segment.Windows(), g.view.writingBrief()+"\n"+g.instruction); len(issues) > 0 {
+			err = &content.ValidationError{Issues: issues}
 		}
+	}
+	if err == nil {
+		g.reported = content.ReportedNotApplied(output)
 	}
 	var invalid *content.ValidationError
 	if errors.As(err, &invalid) {
@@ -357,9 +368,9 @@ func (g *Generation) merged(generated content.Content) StoredContent {
 		generated.EmailTemplate = stored.EmailTemplate
 	}
 	if g.channel == "" {
-		return StoredContent{Content: generated, Edited: []string{}}
+		return StoredContent{Content: generated, Edited: []string{}, NotApplied: g.notApplied(generated)}
 	}
-	merged := StoredContent{Content: generated, Edited: []string{}}
+	merged := StoredContent{Content: generated, Edited: []string{}, NotApplied: append(g.notApplied(generated), notesExcept(stored.NotApplied, g.channel)...)}
 	if g.channel == "sms" {
 		merged.Content = stored.Content
 		merged.SMS = generated.SMS
@@ -372,6 +383,43 @@ func (g *Generation) merged(generated content.Content) StoredContent {
 		}
 	}
 	return merged
+}
+
+// notApplied says what the instruction asked for and these messages do not do:
+// what the model admits, and what comparing the text with the instruction shows.
+func (g *Generation) notApplied(generated content.Content) []content.Issue {
+	channels := g.view.Channels
+	if g.channel != "" {
+		channels = []string{g.channel}
+	}
+	notes := []content.Issue{}
+	for _, channel := range channels {
+		text, field := generated.SMS, content.FieldSMS
+		if channel == "email" {
+			text = strings.Join([]string{generated.EmailSubject, generated.EmailPreheader, generated.EmailHeadline, generated.EmailBody, generated.EmailCTALabel, generated.EmailCTAURL}, "\n")
+			field = content.FieldEmailBody
+		}
+		parts := slices.Clone(g.reported)
+		// A number the model already explained needs no second note.
+		for _, missing := range content.MissingFromInstruction(text+"\n"+strings.Join(g.reported, "\n"), g.instruction, g.cities) {
+			parts = append(parts, fmt.Sprintf("Your instruction mentions %s, but this message does not.", missing))
+		}
+		if len(parts) > 0 {
+			notes = append(notes, content.Issue{Field: field, Reason: reasonNotApplied, Message: strings.Join(parts, " ")})
+		}
+	}
+	return notes
+}
+
+// notesExcept keeps the notes of every channel but this one.
+func notesExcept(notes []content.Issue, channel string) []content.Issue {
+	kept := []content.Issue{}
+	for _, note := range notes {
+		if (note.Field == content.FieldSMS) != (channel == "sms") {
+			kept = append(kept, note)
+		}
+	}
+	return kept
 }
 
 func (g *Generation) save(ctx context.Context, generated content.Content, attempts int, usage ai.Usage) error {
@@ -461,7 +509,16 @@ func (s *Service) SaveContent(ctx context.Context, id string, edited content.Con
 	if len(changed) == 0 {
 		return view, nil
 	}
-	encoded, err := json.Marshal(StoredContent{Content: edited, Edited: mergeEdited(view.Content.Edited, changed)})
+	// A person who edits a channel has dealt with what the model left undone there.
+	notes := view.Content.NotApplied
+	for _, field := range changed {
+		channel := "email"
+		if field == content.FieldSMS {
+			channel = "sms"
+		}
+		notes = notesExcept(notes, channel)
+	}
+	encoded, err := json.Marshal(StoredContent{Content: edited, Edited: mergeEdited(view.Content.Edited, changed), NotApplied: notes})
 	if err != nil {
 		return View{}, fmt.Errorf("encode content: %w", err)
 	}

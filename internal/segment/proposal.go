@@ -71,6 +71,12 @@ type Proposal struct {
 	// Unmatched is what the brief mentions and the rule leaves out. Only
 	// CheckAgainstBrief writes it, so a model cannot clear it.
 	Unmatched []string `json:"unmatched,omitempty"`
+	// NotApplied is what a refinement asked for and the result does not do, from the
+	// model and from comparing the result with the request. Shown, never blocking.
+	NotApplied []string `json:"not_applied,omitempty"`
+	// NotAudience is what the model says the brief names without it being about who
+	// receives the message. It lifts a block on those words, so it is always shown.
+	NotAudience []string `json:"not_audience,omitempty"`
 }
 
 // ValidationError lists everything wrong with a proposal, in words that work
@@ -107,6 +113,8 @@ func ParseProposal(raw []byte, cities []string) (Proposal, error) {
 		Assumptions           []Assumption `json:"assumptions"`
 		Evidence              []Evidence   `json:"evidence"`
 		UnsupportedConditions []string     `json:"unsupported_conditions"`
+		NotApplied            []string     `json:"not_applied"`
+		NotAudience           []string     `json:"not_audience"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -127,6 +135,8 @@ func ParseProposal(raw []byte, cities []string) (Proposal, error) {
 		Assumptions:           decoded.Assumptions,
 		Evidence:              decoded.Evidence,
 		UnsupportedConditions: cleanConditions(decoded.UnsupportedConditions),
+		NotApplied:            cleanConditions(decoded.NotApplied),
+		NotAudience:           cleanConditions(decoded.NotAudience),
 	}
 	if proposal.Assumptions == nil {
 		proposal.Assumptions = []Assumption{}
@@ -303,6 +313,17 @@ func days(count int) string {
 	return fmt.Sprintf("%d days", count)
 }
 
+// Windows lists the lengths of time the rule selects on, in days.
+func (s Spec) Windows() []int {
+	windows := []int{}
+	for _, days := range []*int{s.CartAddedWithinDays, s.PurchasedWithinDays, s.NotPurchasedWithinDays, s.NotMessagedWithinDays} {
+		if days != nil {
+			windows = append(windows, *days)
+		}
+	}
+	return windows
+}
+
 // JSONSchema is the output format requested from LLM providers. It only shapes
 // the output; ParseProposal stays the authority, since numeric ranges and the
 // city list cannot be enforced here.
@@ -355,6 +376,16 @@ func JSONSchema() map[string]any {
 						"quote": map[string]any{"type": "string", "description": "Copied character for character, never translated"},
 					},
 				},
+			},
+			"not_audience": map[string]any{
+				"type":        "array",
+				"description": "Names of places, brands or products in the brief that say nothing about who receives the message",
+				"items":       map[string]any{"type": "string"},
+			},
+			"not_applied": map[string]any{
+				"type":        "array",
+				"description": "Anything the refinement asked for that this answer does not do, and why",
+				"items":       map[string]any{"type": "string"},
 			},
 			"unsupported_conditions": map[string]any{
 				"type":        "array",

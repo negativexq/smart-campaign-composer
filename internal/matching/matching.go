@@ -4,6 +4,7 @@
 package matching
 
 import (
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -69,9 +70,9 @@ var (
 	beforeExclusion = []string{"except", "excluding", "outside", "without"}
 )
 
-// Provinces lets a city be recognised even when no user lives there yet, so a brief
-// naming one is not read as naming no city. Names that are also everyday words
-// (Van, Ordu, Muş, Ağrı, Kars, Aydın, Batman) are left out on purpose.
+// provinces lets a bare city name be recognised even when no user lives there yet.
+// Names that are also everyday words (Van, Ordu, Kars) are left to Places, which
+// needs the sentence to use them as a place.
 var provinces = []string{
 	"Adana", "Adıyaman", "Afyon", "Aksaray", "Amasya", "Ankara", "Antalya", "Ardahan", "Artvin", "Balıkesir",
 	"Bartın", "Bayburt", "Bilecik", "Bingöl", "Bitlis", "Bolu", "Burdur", "Bursa", "Çanakkale", "Çankırı",
@@ -121,6 +122,83 @@ func excludedAt(tokens []string, index int) bool {
 		}
 	}
 	return index > 0 && slices.Contains(beforeExclusion, tokens[index-1])
+}
+
+var (
+	placeEndings = regexp.MustCompile(`(\p{Lu}\p{L}+)['’](?:da|de|ta|te|daki|deki|taki|teki|li|lı|lu|lü)(?:[^\p{L}]|$)`)
+	placeAfter   = regexp.MustCompile(`(?:^|[^\p{L}])(?:in|from)\s+(\p{Lu}\p{L}+)`)
+	placeBefore  = regexp.MustCompile(`(\p{Lu}\p{L}+)\s+(?:customers?|users?|people|shoppers?|m[üu]şteri\p{L}*|kullan[ıi]c[ıi]\p{L}*)`)
+
+	// Words a sentence uses like a place that are times, languages or plain words.
+	notPlaces = []string{
+		"ocak", "subat", "mart", "nisan", "mayis", "haziran", "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik",
+		"pazartesi", "sali", "carsamba", "persembe", "cuma", "cumartesi", "pazar", "ramazan", "bayram", "yilbasi",
+		"january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
+		"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+		"english", "turkish", "ingilizce", "turkce",
+		"all", "our", "the", "these", "those", "any", "some", "my", "your", "tum", "butun", "her", "bazi", "bu", "su", "o", "degerli", "sevgili",
+		// A sentence starting with a command capitalises it: "Remind users".
+		"remind", "notify", "email", "message", "text", "send", "tell", "reach", "target", "contact", "alert", "invite", "thank", "ask", "inform", "help", "show", "offer", "give", "find", "welcome", "only",
+	}
+)
+
+// Places finds what a sentence uses as a place or a group of people but known does
+// not list: Paris'teki, Van'da, in Berlin, Tokyo customers. It reads how the name is
+// used, so unlike a list it holds for places nobody thought of. A capitalised
+// qualifier such as "Mobile users" reads the same way, and is equally something
+// a rule must not silently drop.
+func Places(text string, known []string) []string {
+	skip := slices.Concat(notPlaces, keysOf(known), keysOf(provinces))
+	found := []string{}
+	for _, pattern := range []*regexp.Regexp{placeEndings, placeAfter, placeBefore} {
+		for _, match := range pattern.FindAllStringSubmatch(text, -1) {
+			if !slices.Contains(skip, Key(match[1])) && !slices.Contains(found, match[1]) && len(Cities(match[1], known)) == 0 {
+				found = append(found, match[1])
+			}
+		}
+	}
+	return found
+}
+
+var audienceWord = regexp.MustCompile(`^(customers?|users?|people|shoppers?|residents?|musteri|kullanici|yasayan|oturan|insan)`)
+
+// NamesAudience reports whether the text uses this name for the people themselves:
+// "İzmir kullanıcıları", "Paris'teki müşteriler", "people in Berlin".
+func NamesAudience(text, name string) bool {
+	tokens := Tokens(text)
+	key := Key(name)
+	for index, token := range tokens {
+		if token != key && !(strings.HasPrefix(token, key) && slices.Contains(citySuffixes, token[len(key):])) {
+			continue
+		}
+		next := index + 1
+		// The ending after an apostrophe is a token of its own: Paris'teki.
+		if next < len(tokens) && slices.Contains(citySuffixes, tokens[next]) {
+			next++
+		}
+		if next < len(tokens) && audienceWord.MatchString(tokens[next]) {
+			return true
+		}
+		if index >= 2 && tokens[index-1] == "in" && audienceWord.MatchString(tokens[index-2]) {
+			return true
+		}
+	}
+	return false
+}
+
+// OnlyPeople reports whether the text is nothing but a word for people, which
+// says who a message is for without narrowing them down.
+func OnlyPeople(text string) bool {
+	tokens := Tokens(text)
+	return len(tokens) == 1 && audienceWord.MatchString(tokens[0])
+}
+
+func keysOf(words []string) []string {
+	keys := make([]string, 0, len(words))
+	for _, word := range words {
+		keys = append(keys, Key(word))
+	}
+	return keys
 }
 
 // Duration is a length of time the text gives, in days. A month is not a fixed

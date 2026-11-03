@@ -228,7 +228,7 @@ onBeforeUnmount(() => controller?.abort());
     </ValidationNotice>
     <ValidationNotice v-if="saveError" tone="error" title="Your changes were not saved">{{ saveError }}</ValidationNotice>
     <template v-if="!generating && !dirty">
-      <ValidationNotice v-for="warning in warnings" :key="warning.field + warning.reason" tone="warning" title="Differs from the brief">
+      <ValidationNotice v-for="warning in warnings" :key="warning.field + warning.reason" tone="warning" :title="warning.reason === 'not_applied' ? 'Not done' : 'Differs from the brief'">
         {{ warning.message }}
       </ValidationNotice>
     </template>

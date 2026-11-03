@@ -78,7 +78,7 @@ export type Campaign = {
   offer_percent?: number | null;
   not_messaged_within_days?: number | null;
   version: number;
-  proposal?: { assumptions: Assumption[]; evidence?: Evidence[] | null; unsupported_conditions: string[] };
+  proposal?: { not_applied?: string[] | null; not_audience?: string[] | null; assumptions: Assumption[]; evidence?: Evidence[] | null; unsupported_conditions: string[] };
   conditions: Condition[];
   audience: Audience;
   audience_as_of?: string;

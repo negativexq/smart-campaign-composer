@@ -108,7 +108,10 @@ func (e *ValidationError) Error() string {
 // ParseGenerated decodes and validates untrusted model output. Discount
 // mismatches fail here: a model must not invent or drop an offer.
 func ParseGenerated(raw []byte, limits Limits, offerSource string) (Content, error) {
-	var decoded Content
+	var decoded struct {
+		Content
+		NotApplied []string `json:"not_applied"`
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&decoded); err != nil {
@@ -117,13 +120,31 @@ func ParseGenerated(raw []byte, limits Limits, offerSource string) (Content, err
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return Content{}, malformed("trailing content after the object")
 	}
-	decoded = limits.Keep(decoded)
-	decoded.EmailTemplate = ""
-	issues := append(CheckMessages(decoded, limits), CheckDiscounts(decoded, offerSource)...)
+	generated := limits.Keep(decoded.Content)
+	generated.EmailTemplate = ""
+	issues := append(CheckMessages(generated, limits), CheckDiscounts(generated, offerSource)...)
 	if len(issues) > 0 {
 		return Content{}, &ValidationError{Issues: issues}
 	}
-	return decoded, nil
+	return generated, nil
+}
+
+// ReportedNotApplied reads what a model says it did not do. It is only ever shown,
+// so an output that says nothing or cannot be read simply reports nothing.
+func ReportedNotApplied(raw []byte) []string {
+	var decoded struct {
+		NotApplied []string `json:"not_applied"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil
+	}
+	reported := []string{}
+	for _, note := range decoded.NotApplied {
+		if note = strings.TrimSpace(note); note != "" {
+			reported = append(reported, note)
+		}
+	}
+	return reported
 }
 
 func malformed(detail string) *ValidationError {
@@ -326,18 +347,18 @@ func AddsOffersOrLinks(text string, sources ...string) bool {
 func CheckFacts(c Content, source string, cities []string) []Issue {
 	named := matching.Cities(source, cities)
 	numbers := matching.Numbers(source)
+	sourceKey := matching.Key(source)
 	issues := []Issue{}
-	for _, field := range []struct{ name, text string }{
-		{FieldSMS, c.SMS},
-		{FieldEmailSubject, c.EmailSubject},
-		{FieldEmailPreheader, c.EmailPreheader},
-		{FieldEmailHeadline, c.EmailHeadline},
-		{FieldEmailBody, c.EmailBody},
-		{FieldEmailCTALabel, c.EmailCTALabel},
-	} {
+	for _, field := range textFields(c) {
 		for _, mention := range matching.Cities(field.text, cities) {
 			if !slices.ContainsFunc(named, func(other matching.CityMention) bool { return other.City == mention.City }) {
 				issues = append(issues, Issue{field.name, "invented_city", fmt.Sprintf("It mentions %s, which is not in the brief.", mention.City)})
+				break
+			}
+		}
+		for _, place := range matching.Places(field.text, cities) {
+			if !strings.Contains(sourceKey, matching.Key(place)) {
+				issues = append(issues, Issue{field.name, "invented_city", fmt.Sprintf("It mentions %s, which is not in the brief.", place)})
 				break
 			}
 		}
@@ -349,6 +370,63 @@ func CheckFacts(c Content, source string, cities []string) []Issue {
 		}
 	}
 	return issues
+}
+
+func textFields(c Content) []struct{ name, text string } {
+	return []struct{ name, text string }{
+		{FieldSMS, c.SMS},
+		{FieldEmailSubject, c.EmailSubject},
+		{FieldEmailPreheader, c.EmailPreheader},
+		{FieldEmailHeadline, c.EmailHeadline},
+		{FieldEmailBody, c.EmailBody},
+		{FieldEmailCTALabel, c.EmailCTALabel},
+	}
+}
+
+// CheckTargeting refuses generated text that tells a person how they were picked,
+// by stating a length of time the rule selects on. The same length may be said when
+// the marketer gives it a second time, because then it is also about the offer.
+func CheckTargeting(c Content, windows []int, source string) []Issue {
+	stated := matching.Durations(source)
+	issues := []Issue{}
+	for _, field := range textFields(c) {
+		for _, duration := range matching.Durations(field.text) {
+			index := slices.IndexFunc(windows, duration.Contains)
+			if index < 0 {
+				continue
+			}
+			mentions := 0
+			for _, other := range stated {
+				if other.Contains(windows[index]) {
+					mentions++
+				}
+			}
+			if mentions < 2 {
+				issues = append(issues, Issue{field.name, "reveals_targeting", "It tells the person how they were picked. Write about the offer, and leave out how long ago they did something."})
+				break
+			}
+		}
+	}
+	return issues
+}
+
+// MissingFromInstruction lists the numbers and cities an instruction names that the
+// message does not, which is how a skipped instruction shows without asking the model.
+func MissingFromInstruction(message, instruction string, cities []string) []string {
+	said := matching.Numbers(message)
+	saidKey := matching.Key(message)
+	missing := []string{}
+	for _, number := range matching.Numbers(instruction) {
+		if !slices.Contains(said, number) && !slices.Contains(missing, number) {
+			missing = append(missing, number)
+		}
+	}
+	for _, mention := range matching.Cities(instruction, cities) {
+		if !strings.Contains(saidKey, matching.Key(mention.City)) {
+			missing = append(missing, mention.City)
+		}
+	}
+	return missing
 }
 
 // DiscountsDiffer reports whether the SMS and the email promise different
@@ -399,6 +477,11 @@ func JSONSchema(channels ...string) map[string]any {
 		properties[FieldEmailHeadline] = text("Short headline at the top of the email")
 		properties[FieldEmailCTALabel] = text("Button label, only when the brief gives a link")
 		properties[FieldEmailCTAURL] = text("Button link, copied exactly from the brief; empty when the brief gives none")
+	}
+	properties["not_applied"] = map[string]any{
+		"type":        "array",
+		"description": "Anything the instruction asked for that these messages do not do, and why",
+		"items":       map[string]any{"type": "string"},
 	}
 	return map[string]any{
 		"type":                 "object",

@@ -160,3 +160,130 @@ func TestUnmatchedIsNeverTakenFromAModel(t *testing.T) {
 		t.Fatal("a model cannot write this field")
 	}
 }
+
+// A place is known by how the sentence uses it, so no list of places can run out.
+func TestAPlaceTheBriefUsesIsSeenWithoutAList(t *testing.T) {
+	t.Parallel()
+	for brief, want := range map[string]string{
+		"Ankara müşterileri ve Paris'teki kullanıcılar": "Paris",
+		"Ankara müşterileri, Van'daki kullanıcılar":     "Van",
+		"Ankara müşterileri ve Ordu'da yaşayanlar":      "Ordu",
+		"Ankara customers and people in Berlin":         "Berlin",
+		"Ankara and Kars users":                         "Kars",
+		"Ankara and Tokyo customers":                    "Tokyo",
+		"Oslo customers in Ankara":                      "Oslo",
+	} {
+		t.Run(want, func(t *testing.T) {
+			t.Parallel()
+			proposal := proposalOf(segment.Spec{City: text("Ankara")})
+			if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems != nil {
+				t.Fatalf("rejected: %v", problems)
+			}
+			if !slices.Contains(proposal.Unmatched, want) {
+				t.Fatalf("unmatched: %v, want %s", proposal.Unmatched, want)
+			}
+		})
+	}
+}
+
+// The paired briefs: capitalised words and these same endings that are not places.
+func TestWordsThatOnlyLookLikePlacesPass(t *testing.T) {
+	t.Parallel()
+	for _, brief := range []string{
+		"Ankara'daki müşterilere Kasım'da büyük indirim",
+		"Ankara customers, sale ends in December",
+		"Ankara customers who write in English",
+		"Ankara'daki kullanıcılara Cuma'ya kadar kargo bedava",
+		"All Ankara users",
+		"Tüm Ankara kullanıcıları",
+		"Our Ankara customers",
+		"Ramazan'da Ankara kullanıcılarına duyuru",
+		"Ankara kullanıcılarına Ayşe'den selam",
+		"Remind users in Ankara about the sale",
+		"Notify customers in Ankara",
+		"Bu kullanıcılara Ankara'da duyuru",
+		"Send this to Ankara users. Customers will like it.",
+	} {
+		t.Run(brief, func(t *testing.T) {
+			t.Parallel()
+			proposal := proposalOf(segment.Spec{City: text("Ankara")})
+			if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems != nil {
+				t.Fatalf("rejected: %v", problems)
+			}
+			if len(proposal.Unmatched) != 0 {
+				t.Fatalf("unmatched: %v", proposal.Unmatched)
+			}
+		})
+	}
+}
+
+func TestAPlaceWrittenAsUnsupportedIsNotCountedTwice(t *testing.T) {
+	t.Parallel()
+	proposal := proposalOf(segment.Spec{City: text("Ankara")})
+	proposal.UnsupportedConditions = []string{"Paris'teki kullanıcılar"}
+	if problems := segment.CheckAgainstBrief(&proposal, "Ankara ve Paris'teki kullanıcılar", groundingCities, nil); problems != nil {
+		t.Fatal(problems)
+	}
+	if len(proposal.Unmatched) != 0 {
+		t.Fatalf("unmatched: %v", proposal.Unmatched)
+	}
+}
+
+// A word used like a place may be something else. Saying so lifts the block and stays
+// visible, so a wrong word never traps a person and a wrong claim can still be seen.
+func TestAModelCanSayANameIsNotAboutTheAudience(t *testing.T) {
+	t.Parallel()
+	for brief, name := range map[string]string{
+		"Instagram'da gördüğünüz ürünler için Ankara müşterilerine duyuru": "Instagram",
+		"İzmir mağazamız açıldı, Ankara müşterilerine duyuru":              "İzmir",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			proposal := proposalOf(segment.Spec{City: text("Ankara")})
+			proposal.NotAudience = []string{name}
+			if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems != nil {
+				t.Fatal(problems)
+			}
+			if len(proposal.Unmatched) != 0 {
+				t.Fatalf("unmatched: %v", proposal.Unmatched)
+			}
+		})
+	}
+}
+
+// When the brief itself says these are the people, no claim can wave them away.
+func TestAModelCannotWaveAwayWhoTheBriefNames(t *testing.T) {
+	t.Parallel()
+	for brief, name := range map[string]string{
+		"Ankara ve İzmir kullanıcıları":                 "İzmir",
+		"Ankara müşterileri ve Paris'teki kullanıcılar": "Paris",
+		"Ankara and Tokyo customers":                    "Tokyo",
+		"Ankara müşterileri, Ordu'da yaşayanlar":        "Ordu",
+		"Ankara customers and people in Berlin":         "Berlin",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			proposal := proposalOf(segment.Spec{City: text("Ankara")})
+			proposal.NotAudience = []string{name}
+			if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems != nil {
+				t.Fatal(problems)
+			}
+			if !slices.Contains(proposal.Unmatched, name) {
+				t.Fatalf("unmatched: %v, want %s", proposal.Unmatched, name)
+			}
+		})
+	}
+}
+
+// "müşterilerine" names everyone the rule is about, so it cannot be a missing condition.
+func TestAGenericWordForPeopleIsNotAnUnsupportedCondition(t *testing.T) {
+	t.Parallel()
+	proposal := proposalOf(segment.Spec{City: text("Ankara")})
+	proposal.UnsupportedConditions = []string{"müşterilerine", "Customers", "25 yaş üstü müşteriler"}
+	if problems := segment.CheckAgainstBrief(&proposal, "Ankara'daki 25 yaş üstü müşterilerine", groundingCities, nil); problems != nil {
+		t.Fatal(problems)
+	}
+	if len(proposal.UnsupportedConditions) != 1 || proposal.UnsupportedConditions[0] != "25 yaş üstü müşteriler" {
+		t.Fatalf("unsupported: %v", proposal.UnsupportedConditions)
+	}
+}

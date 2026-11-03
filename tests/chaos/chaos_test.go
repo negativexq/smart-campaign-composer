@@ -98,6 +98,9 @@ func startSending(t *testing.T) string {
 	post(t, base+"/generate", http.StatusOK)
 	post(t, base+"/approve", http.StatusOK)
 	post(t, base+"/dispatch", http.StatusAccepted)
+	// Runs after the test has brought back what it stopped. A test that failed halfway
+	// must not leave messages going out during the next one, which counts them.
+	t.Cleanup(func() { settle(created.ID) })
 	return created.ID
 }
 
@@ -124,6 +127,14 @@ func read(id string) (progress, string, error) {
 		return current, "", err
 	}
 	return current, view.Status, nil
+}
+
+func settle(id string) {
+	for deadline := time.Now().Add(3 * time.Minute); time.Now().Before(deadline); time.Sleep(time.Second) {
+		if _, status, err := read(id); err == nil && (status == "COMPLETED" || status == "COMPLETED_WITH_FAILURES") {
+			return
+		}
+	}
 }
 
 func waitForProcessed(t *testing.T, id string, atLeast int) {
@@ -221,7 +232,7 @@ func TestAStoppedWorkerLeavesNothingInFlight(t *testing.T) {
 		t.Fatal(err)
 	}
 	if stopped.ByStatus["SENDING"] != 0 {
-		t.Fatalf("a graceful stop left %d in flight", stopped.ByStatus["SENDING"])
+		t.Errorf("a graceful stop left %d in flight", stopped.ByStatus["SENDING"])
 	}
 
 	bringBack(t, "worker")

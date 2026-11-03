@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -789,5 +791,51 @@ func TestAnEmailGoesOutDesignedWithAWayToUnsubscribe(t *testing.T) {
 	}
 	if emails == 0 {
 		t.Fatal("no email was sent")
+	}
+}
+
+// A provider that never answers is the slowest stop there is: the worker must wait
+// for the call, record it and only then return, leaving nothing in flight.
+func TestAStopWaitsForACallThatGetsNoAnswer(t *testing.T) {
+	t.Parallel()
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	release := make(chan struct{})
+	var once sync.Once
+	r := newRig(t, func(int, delivery.Message) (delivery.Result, error) {
+		once.Do(func() {
+			stop()
+			close(release)
+		})
+		<-release
+		return delivery.Result{}, errors.New("no answer")
+	})
+
+	if err := r.worker.Run(ctx); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := r.statuses(t); got["SENDING"] != 0 {
+		t.Fatalf("left in flight: %v", got)
+	}
+}
+
+// Whatever runs the worker must wait out MaxDrain, or a stop becomes a kill that
+// strands messages. This keeps the two numbers from drifting apart.
+func TestComposeWaitsLongerThanAWorkerCanTakeToStop(t *testing.T) {
+	t.Parallel()
+	file, err := os.ReadFile("../../compose.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := regexp.MustCompile(`(?m)^  worker:\n(?:    .*\n|      .*\n)*?    stop_grace_period: (\w+)`).FindSubmatch(file)
+	if found == nil {
+		t.Fatal("the worker service sets no stop_grace_period")
+	}
+	grace, err := time.ParseDuration(string(found[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grace <= delivery.MaxDrain {
+		t.Fatalf("stop_grace_period %v must be longer than %v", grace, delivery.MaxDrain)
 	}
 }

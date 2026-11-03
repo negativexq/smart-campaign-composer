@@ -134,6 +134,13 @@ onMounted(async () => {
         {{ blocker }}
       </ValidationNotice>
 
+      <ValidationNotice v-for="note in campaign.proposal?.not_applied ?? []" :key="note" tone="warning" title="Not done">
+        {{ note }}
+      </ValidationNotice>
+      <ValidationNotice v-if="campaign.proposal?.not_audience?.length" tone="warning" title="Not used for the audience">
+        {{ campaign.proposal.not_audience.join(", ") }}. If any of these should decide who receives this, refine the audience.
+      </ValidationNotice>
+
       <section class="section">
         <h2>Audience size</h2>
         <div class="metrics">

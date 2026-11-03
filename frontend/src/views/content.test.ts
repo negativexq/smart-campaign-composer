@@ -289,6 +289,16 @@ describe("content page", () => {
     expect((wrapper.find("[data-testid=email-template-offer]").element as HTMLInputElement).checked).toBe(true);
   });
 
+  it("says when an instruction was not done", async () => {
+    stub({ ...ready, content_warnings: [{ field: "sms", reason: "not_applied", message: "Your instruction mentions 3, but this message does not." }] });
+    const sms = open("sms");
+    await flushPromises();
+
+    expect(sms.text()).toContain("Not done");
+    expect(sms.text()).toContain("Your instruction mentions 3");
+    expect(sms.text()).not.toContain("Differs from the brief");
+  });
+
   it("shows only the warnings of this channel", async () => {
     const warned = { ...ready, content_warnings: [{ field: "email_body", reason: "invented_discount", message: "Email mentions 40%." }] };
     stub(warned);

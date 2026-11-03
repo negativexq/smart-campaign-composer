@@ -1,6 +1,7 @@
 package content_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -364,5 +365,62 @@ func TestChannelsMustNotPromiseDifferentDiscounts(t *testing.T) {
 	}
 	if !content.NewDiscount("make it %50", "Brief with 30% off") || content.NewDiscount("make it 30%", "Brief with 30% off") || content.NewDiscount("shorter", "Brief with 30% off") {
 		t.Error("an instruction changes the offer only by naming a new discount")
+	}
+}
+
+func TestMessagesMustNotSayHowThePersonWasPicked(t *testing.T) {
+	t.Parallel()
+	windows := []int{60}
+	for name, sms := range map[string]string{
+		"turkish": "Merhaba {{first_name}}, son 60 günde alışveriş yaptığınız için yazıyoruz.",
+		"months":  "Merhaba {{first_name}}, son 2 ayda alışveriş yaptınız.",
+		"english": "Hi {{first_name}}, you bought in the last 60 days.",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			issues := content.CheckTargeting(content.Content{SMS: sms}, windows, "Son 60 günde alışveriş yapan Ankara müşterileri")
+			if len(issues) != 1 || issues[0].Reason != "reveals_targeting" {
+				t.Fatalf("issues: %+v", issues)
+			}
+		})
+	}
+}
+
+func TestATimeThatIsNotTheSelectionMayBeSaid(t *testing.T) {
+	t.Parallel()
+	windows := []int{60}
+	for name, tt := range map[string]struct{ sms, source string }{
+		"another length":              {"Merhaba {{first_name}}, fırsat 3 gün sürecek.", "Son 60 günde alışveriş yapanlara, fırsat 3 gün sürecek"},
+		"said again as the offer":     {"Merhaba {{first_name}}, indirim 60 gün geçerli.", "Son 60 günde alışveriş yapanlara, indirim 60 gün geçerli"},
+		"asked for in an instruction": {"Merhaba {{first_name}}, 60 gün geçerli.", "Son 60 günde alışveriş yapanlara\n60 gün geçerli de"},
+		"no time at all":              {"Merhaba {{first_name}}, sizi bekliyoruz.", "Son 60 günde alışveriş yapanlara"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if issues := content.CheckTargeting(content.Content{SMS: tt.sms}, windows, tt.source); len(issues) != 0 {
+				t.Fatalf("issues: %+v", issues)
+			}
+		})
+	}
+}
+
+func TestPlacesInAMessageAreCheckedWithoutAList(t *testing.T) {
+	t.Parallel()
+	issues := content.CheckFacts(content.Content{SMS: "Merhaba {{first_name}}, Paris'teki mağazamızda sizi bekliyoruz."}, "Ankara müşterileri", []string{"Ankara"})
+	if len(issues) != 1 || issues[0].Reason != "invented_city" {
+		t.Fatalf("issues: %+v", issues)
+	}
+}
+
+func TestWhatAnInstructionAskedForIsLookedForInTheResult(t *testing.T) {
+	t.Parallel()
+	cities := []string{"Ankara", "İzmir"}
+	message := "Merhaba {{first_name}}, fırsat 3 gün sürecek."
+	if missing := content.MissingFromInstruction(message, "3 gün sürdüğünü söyle", cities); len(missing) != 0 {
+		t.Fatalf("missing: %v", missing)
+	}
+	missing := content.MissingFromInstruction(message, "5 gün sürdüğünü ve İzmir mağazasında geçerli olduğunu söyle", cities)
+	if !slices.Contains(missing, "5") || !slices.Contains(missing, "İzmir") {
+		t.Fatalf("missing: %v", missing)
 	}
 }

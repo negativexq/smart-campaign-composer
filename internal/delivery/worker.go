@@ -43,14 +43,21 @@ const (
 	reasonLeaseExpired = "lease_expired"
 	reasonNotSent      = "provider_unreachable"
 
-	recoverBatch   = 500
-	limiterPause   = time.Second
-	notSentPause   = 5 * time.Second
-	recordTimeout  = 5 * time.Second
-	finishInterval = time.Second
-	idlePause      = 200 * time.Millisecond
-	errorPause     = 2 * time.Second
+	recoverBatch       = 500
+	limiterPause       = time.Second
+	notSentPause       = 5 * time.Second
+	recordTimeout      = 5 * time.Second
+	defaultSendTimeout = 5 * time.Second
+	finishInterval     = time.Second
+	idlePause          = 200 * time.Millisecond
+	errorPause         = 2 * time.Second
 )
+
+// MaxDrain is the longest a worker can take to stop once told to: a claim already
+// under way, then one provider call that gets no answer, pausing the channel and
+// recording the outcome. Whatever runs the worker must wait longer than this, or
+// messages stay in flight until their lease expires.
+const MaxDrain = recordTimeout + defaultSendTimeout + recordTimeout + recordTimeout
 
 // Message is one rendered message for the provider.
 type Message struct {
@@ -104,7 +111,7 @@ func DefaultConfig() Config {
 		Concurrency: 32,
 		Lease:       time.Minute,
 		MaxAttempts: 5,
-		SendTimeout: 5 * time.Second,
+		SendTimeout: defaultSendTimeout,
 		Backoff:     ExponentialBackoff,
 	}
 }

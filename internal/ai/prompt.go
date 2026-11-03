@@ -26,6 +26,8 @@ Rules:
 - With a refinement, return updated_brief: the whole brief rewritten so it says what the refinement asks, in the brief's language. Change only those words and copy the rest exactly. Add no discount, link or fact the brief and refinement do not contain. If the refinement changes nothing in the brief, copy it unchanged. Without a refinement, leave updated_brief empty.
 - Set a filter only for what the brief says, and copy its values: the same city, and the same length of time converted to days. These are compared with the brief's words afterwards. If the brief names several cities or leaves a city out, put that in unsupported_conditions, since the city filter holds one city.
 - Put any part of the brief that these filters cannot express (age, gender, loyalty tier, and so on) in unsupported_conditions, in the brief's own words. Never drop such a condition silently and never approximate it with another filter.
+- unsupported_conditions is only for who should receive the message. Products, brands, sale dates and what the message is about are not conditions: leave them out of it. Put the name of any place, brand or product that is not about the receivers in not_audience, such as "Instagram" in "Instagram'da gördüğünüz ürünler" or "İzmir" in "İzmir mağazamız açıldı". It is shown to the marketer.
+- If a refinement asks for something you cannot or did not do, say so in not_applied with the reason. Never leave it unmentioned.
 - A filter that does not apply is left out or set to null.
 - If no filter applies, return an empty segment and explain why in unsupported_conditions.
 - Discounts and message wording describe the content, not the audience. Ignore them here.
@@ -39,7 +41,9 @@ Rules:
 - The only variable is {{first_name}}. Use it where a greeting reads naturally. Write no other placeholders.
 - Hard limits apply after {{first_name}} is filled in: SMS %[1]d characters, email subject %[2]d characters. Each {{first_name}} can become %[3]d characters in an SMS and %[4]d in an email.
 - Mention a discount only if the brief states one, with exactly the same percentage, and include it in both the SMS and the email.
-- Never invent discount amounts, deadlines, coupon codes, links, product names or facts that are not in the brief. Every number and city in a message is compared with the brief and the audience afterwards.
+- Never invent discount amounts, deadlines, coupon codes, links, product names or facts that are not in the brief or the instruction. A fact the marketer states in the instruction is theirs, so use it. Every number and city in a message is compared with the brief, the instruction and the audience afterwards.
+- Write to the person about the offer. Never say how they were selected: no "because you shopped in the last 60 days", no "customers who bought recently". The audience tag says who receives this, it is not something to tell them.
+- If an instruction asks for something you cannot or did not do, say so in not_applied with the reason. Never leave it unmentioned.
 - The email subject is one line. The email body is plain text with a blank line between paragraphs. Do not repeat the subject as the first line.
 - Also write a short email headline and preview text. The preview text adds to the subject rather than repeating it. Neither states a discount unless the brief gives one.
 - Add a button only if the brief or instruction contains a link: copy that link exactly into email_cta_url and write a short label. With no link, leave both empty.

@@ -45,6 +45,7 @@ func CheckAgainstBrief(proposal *Proposal, brief string, cities []string, chosen
 	problems := &ValidationError{}
 	reading := readBrief(brief)
 	proposal.Unmatched = nil
+	proposal.UnsupportedConditions = slices.DeleteFunc(proposal.UnsupportedConditions, matching.OnlyPeople)
 	checkCity(proposal, problems, brief, cities)
 	checkWindows(proposal, problems, reading, chosenQuietDays)
 	checkBehavior(proposal, problems, reading)
@@ -71,10 +72,24 @@ func checkCity(proposal *Proposal, problems *ValidationError, brief string, citi
 		if proposal.Segment.City != nil && *proposal.Segment.City == mention.City {
 			continue
 		}
-		if !mentionedIn(proposal.UnsupportedConditions, mention.City) {
+		if !accountedFor(proposal, brief, mention.City) {
 			proposal.Unmatched = append(proposal.Unmatched, mention.City)
 		}
 	}
+	for _, place := range matching.Places(brief, cities) {
+		if !accountedFor(proposal, brief, place) {
+			proposal.Unmatched = append(proposal.Unmatched, place)
+		}
+	}
+}
+
+// accountedFor says whether a name the rule does not use has been dealt with. A model
+// may say it is not about the audience, unless the brief uses it for the people.
+func accountedFor(proposal *Proposal, brief, name string) bool {
+	if mentionedIn(proposal.UnsupportedConditions, name) {
+		return true
+	}
+	return mentionedIn(proposal.NotAudience, name) && !matching.NamesAudience(brief, name)
 }
 
 func cityNames(mentions []matching.CityMention) string {

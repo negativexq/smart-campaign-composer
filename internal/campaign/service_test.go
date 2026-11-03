@@ -599,3 +599,55 @@ func TestWhatTheRuleLeavesOutBlocksApproval(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestARefinementThatChangedNothingSaysSo(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, step{output: validProposal}, step{output: withUpdatedBrief(validProposal, secretBrief)})
+	id := h.create(t)
+	ctx := context.Background()
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	view, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{Refinement: "make the rule 14 days"})
+	if err != nil {
+		t.Fatalf("refine: %v", err)
+	}
+	if len(view.Proposal.NotApplied) != 1 || !strings.Contains(view.Proposal.NotApplied[0], "make the rule 14 days") {
+		t.Fatalf("not applied: %v", view.Proposal.NotApplied)
+	}
+	if len(view.Blockers) != 0 {
+		t.Fatalf("a note, not a blocker: %v", view.Blockers)
+	}
+}
+
+func TestARefinementThatChangedSomethingSaysWhatItLeftOut(t *testing.T) {
+	t.Parallel()
+	updated := strings.Replace(secretBrief, "İstanbul", "Ankara", 1)
+	changed := strings.Replace(validProposal, "İstanbul", "Ankara", 1)
+	h := newHarness(t, step{output: validProposal}, step{output: withUpdatedBrief(changed, updated)})
+	id := h.create(t)
+	ctx := context.Background()
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	view, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{Refinement: "Ankara, and make it 14 days"})
+	if err != nil {
+		t.Fatalf("refine: %v", err)
+	}
+	if !strings.Contains(strings.Join(view.Proposal.NotApplied, " "), "14") {
+		t.Fatalf("not applied: %v", view.Proposal.NotApplied)
+	}
+}
+
+func TestAModelCanSayWhatItDidNotDo(t *testing.T) {
+	t.Parallel()
+	reported := strings.Replace(validProposal, `"assumptions":[]`, `"not_applied":["the brief wording"],"assumptions":[]`, 1)
+	h := newHarness(t, step{output: reported})
+	view, err := h.service.ProposeSegment(context.Background(), h.create(t), campaign.ProposeInput{})
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if len(view.Proposal.NotApplied) != 1 || view.Proposal.NotApplied[0] != "the brief wording" {
+		t.Fatalf("not applied: %v", view.Proposal.NotApplied)
+	}
+}

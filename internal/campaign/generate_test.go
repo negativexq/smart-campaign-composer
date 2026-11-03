@@ -727,3 +727,50 @@ func TestGeneratedMessagesAreCheckedAgainstTheBrief(t *testing.T) {
 		})
 	}
 }
+
+func TestAMessageSayingHowThePersonWasPickedIsRepaired(t *testing.T) {
+	t.Parallel()
+	h, provider, id := newContentHarness(t,
+		step{output: `{"sms":"Hi {{first_name}}, you carted in the last 30 days","email_subject":"Hello","email_body":"Your cart is waiting."}`},
+		step{output: validContent})
+	view, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if view.Content.SMS != "Hi {{first_name}}" || !strings.Contains(provider.contentCalls[1].ValidationError, "picked") {
+		t.Fatalf("sms %q, repair %q", view.Content.SMS, provider.contentCalls[1].ValidationError)
+	}
+}
+
+func TestAnInstructionTheModelSkippedIsShown(t *testing.T) {
+	t.Parallel()
+	h, _, id := newContentHarness(t,
+		step{output: validContent},
+		step{output: `{"sms":"Hello {{first_name}}","not_applied":["I could not mention the store"]}`},
+		step{output: `{"sms":"Hi again {{first_name}}"}`})
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	view, _, err := run(t, h, id, campaign.GenerateInput{Channel: "sms", Instruction: "say it lasts 3 days and mention the store"})
+	if err != nil {
+		t.Fatalf("regenerate: %v", err)
+	}
+	notes := []string{}
+	for _, warning := range view.ContentWarnings {
+		if warning.Reason == "not_applied" {
+			notes = append(notes, warning.Message)
+		}
+	}
+	joined := strings.Join(notes, " ")
+	if !strings.Contains(joined, "the store") || !strings.Contains(joined, "3") {
+		t.Fatalf("warnings: %+v", view.ContentWarnings)
+	}
+
+	view, _, err = run(t, h, id, campaign.GenerateInput{Channel: "sms"})
+	if err != nil {
+		t.Fatalf("again: %v", err)
+	}
+	if slices.ContainsFunc(view.ContentWarnings, func(w content.Issue) bool { return w.Reason == "not_applied" }) {
+		t.Fatalf("a later generation keeps the warning: %+v", view.ContentWarnings)
+	}
+}
