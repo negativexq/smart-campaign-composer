@@ -30,7 +30,7 @@ function channels(campaign: CampaignSummary) {
       <tbody>
         <tr v-for="campaign in campaigns" :key="campaign.id" data-testid="campaign-row">
           <td class="name">
-            <a :href="`/campaigns/${campaign.id}`" :title="campaign.brief">{{ campaign.brief }}</a>
+            <a :href="`/campaigns/${campaign.id}`" :title="campaign.brief">{{ campaign.name }}</a>
           </td>
           <td><CampaignStatusBadge :status="campaign.status" /></td>
           <td class="optional">{{ channels(campaign) }}</td>

@@ -214,6 +214,23 @@ func TestWorkspaceEndpoints(t *testing.T) {
 	}
 }
 
+func TestRenameThroughTheAPI(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, ai.NewMock())
+	id := createCampaign(t, api, exampleBrief)
+
+	status, response := call(t, api, http.MethodPatch, "/api/campaigns/"+id, `{"name":"Black Friday"}`)
+	if status != http.StatusOK || response["name"] != "Black Friday" || response["name_source"] != "user" {
+		t.Fatalf("rename: %d %v", status, response)
+	}
+	if status, _ := call(t, api, http.MethodPatch, "/api/campaigns/"+id, `{"name":" "}`); status != http.StatusBadRequest {
+		t.Fatalf("empty name: %d", status)
+	}
+	if status, _ := call(t, api, http.MethodPatch, "/api/campaigns/nope", `{"name":"x"}`); status != http.StatusNotFound {
+		t.Fatalf("unknown campaign: %d", status)
+	}
+}
+
 func TestConfigNamesTheProviderForTheBadge(t *testing.T) {
 	t.Parallel()
 	status, response := call(t, newAPI(t, ai.NewMock()), http.MethodGet, "/api/config", "")

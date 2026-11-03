@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 
 import { errorMessage, getCampaign, proposeSegment, type Campaign } from "../api/campaigns";
 import AudienceRule from "../components/AudienceRule.vue";
+import CampaignName from "../components/CampaignName.vue";
 import MetricCard from "../components/MetricCard.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 
@@ -78,6 +79,8 @@ onMounted(async () => {
       <h1>Check who will receive this.</h1>
       <p class="muted">Read the conditions first. The number only tells you how many people they match.</p>
     </header>
+
+    <CampaignName as="h2" :campaign="campaign" @renamed="campaign = $event" />
 
     <section class="brief card" aria-label="Campaign brief">
       <template v-if="editingBrief">

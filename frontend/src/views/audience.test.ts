@@ -7,6 +7,8 @@ import { currentPath, navigate } from "../lib/navigation";
 
 const campaign: Campaign = {
   id: "c1",
+  name: "Cart Recovery",
+  name_source: "ai",
   brief: "Istanbul cart reminder",
   status: "DRAFT",
   version: 1,

@@ -46,6 +46,7 @@ type Assumption struct {
 // Proposal is a validated audience proposal. UnsupportedConditions lists parts
 // of the brief no filter can express; they block approval until resolved.
 type Proposal struct {
+	CampaignName          string       `json:"campaign_name,omitempty"`
 	Segment               Spec         `json:"segment"`
 	Assumptions           []Assumption `json:"assumptions"`
 	UnsupportedConditions []string     `json:"unsupported_conditions"`
@@ -79,6 +80,7 @@ func invalid(reason, problem string) *ValidationError {
 // are resolved to the canonical entry in cities.
 func ParseProposal(raw []byte, cities []string) (Proposal, error) {
 	var decoded struct {
+		CampaignName          string       `json:"campaign_name"`
 		Segment               *Spec        `json:"segment"`
 		Assumptions           []Assumption `json:"assumptions"`
 		UnsupportedConditions []string     `json:"unsupported_conditions"`
@@ -96,6 +98,7 @@ func ParseProposal(raw []byte, cities []string) (Proposal, error) {
 	}
 
 	proposal := Proposal{
+		CampaignName:          decoded.CampaignName,
 		Segment:               *decoded.Segment,
 		Assumptions:           decoded.Assumptions,
 		UnsupportedConditions: cleanConditions(decoded.UnsupportedConditions),
@@ -122,6 +125,14 @@ func cleanConditions(conditions []string) []string {
 func (p *Proposal) validate(cities []string) *ValidationError {
 	problems := &ValidationError{}
 	spec := &p.Segment
+
+	if strings.TrimSpace(p.CampaignName) == "" {
+		p.CampaignName = ""
+	} else if name, ok := CleanCampaignName(p.CampaignName); ok {
+		p.CampaignName = name
+	} else {
+		problems.add("invalid_campaign_name", fmt.Sprintf("campaign_name must be plain text of at most %d characters", MaxCampaignNameLength))
+	}
 
 	if spec.City != nil {
 		canonical, ok := resolveCity(*spec.City, cities)
@@ -235,8 +246,9 @@ func JSONSchema() map[string]any {
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
-		"required":             []string{"segment", "assumptions", "unsupported_conditions"},
+		"required":             []string{"campaign_name", "segment", "assumptions", "unsupported_conditions"},
 		"properties": map[string]any{
+			"campaign_name": map[string]any{"type": "string", "description": "Short title of 2 to 5 words, at most 80 characters"},
 			"segment": map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,

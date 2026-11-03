@@ -8,6 +8,7 @@ import { navigate } from "../lib/navigation";
 
 const summary = (overrides: Partial<CampaignSummary> = {}): CampaignSummary => ({
   id: "c1",
+  name: "Cart Recovery",
   brief: "Istanbul cart reminder",
   status: "DRAFT",
   channels: [],
@@ -19,10 +20,10 @@ const summary = (overrides: Partial<CampaignSummary> = {}): CampaignSummary => (
 });
 
 const activity: ActivityEntry[] = [
-  { campaign_id: "c1", brief: "Istanbul cart reminder", type: "campaign.created", details: {}, occurred_at: "2026-11-03T12:00:00Z" },
+  { campaign_id: "c1", campaign_name: "Cart Recovery", type: "campaign.created", details: {}, occurred_at: "2026-11-03T12:00:00Z" },
   {
     campaign_id: "c1",
-    brief: "Istanbul cart reminder",
+    campaign_name: "Cart Recovery",
     type: "segment.proposed",
     details: { trigger: "refinement", provider: "mock", audience: { total: 1284 }, unsupported_conditions: 0 },
     occurred_at: "2026-11-03T12:01:00Z",
@@ -31,6 +32,8 @@ const activity: ActivityEntry[] = [
 
 const campaign: Campaign = {
   id: "c1",
+  name: "Cart Recovery",
+  name_source: "ai",
   brief: "Istanbul cart reminder",
   status: "DRAFT",
   version: 1,
@@ -84,7 +87,7 @@ describe("overview", () => {
 
     expect(wrapper.find("h1").text()).toContain("at a glance");
     expect(wrapper.text()).toContain("24");
-    expect(wrapper.text()).toContain("Istanbul cart reminder");
+    expect(wrapper.text()).toContain("Cart Recovery");
     expect(wrapper.text()).toContain("Audience refined");
   });
 
@@ -198,7 +201,75 @@ describe("campaign detail", () => {
   });
 });
 
+describe("campaign name", () => {
+  function stubRename(result: { status: number; body: unknown }) {
+    const base = vi.mocked(fetch).getMockImplementation()!;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) =>
+      init?.method === "PATCH"
+        ? ({ ok: result.status < 400, status: result.status, json: async () => result.body } as Response)
+        : base(url, init as never),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const routes = { "/api/campaigns/c1": campaign, "/api/campaigns/c1/activity": { activity } };
+
+  it("heads the detail page, marks a suggestion and keeps the brief visible", async () => {
+    const { wrapper } = await open("/campaigns/c1", routes);
+
+    expect(wrapper.find("h1").text()).toBe("Cart Recovery");
+    expect(wrapper.find("[data-testid=campaign-name]").text()).toContain("AI suggested");
+    expect(wrapper.find("[data-testid=brief-text]").text()).toBe("Istanbul cart reminder");
+  });
+
+  it("does not call a name someone chose a suggestion", async () => {
+    const { wrapper } = await open("/campaigns/c1", { ...routes, "/api/campaigns/c1": { ...campaign, name_source: "user" } });
+    expect(wrapper.find("[data-testid=campaign-name]").text()).not.toContain("AI suggested");
+  });
+
+  it("renames and refreshes the page", async () => {
+    const { wrapper } = await open("/campaigns/c1", routes);
+    const fetchMock = stubRename({ status: 200, body: { ...campaign, name: "Black Friday", name_source: "user" } });
+
+    await wrapper.find("[data-testid=rename]").trigger("click");
+    await wrapper.find("#campaign-name-input").setValue("Black Friday");
+    await wrapper.find("[data-testid=campaign-name] form").trigger("submit");
+    await flushPromises();
+
+    const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    expect(JSON.parse(patch[1]!.body as string)).toEqual({ name: "Black Friday" });
+    expect(wrapper.find("h1").text()).toBe("Black Friday");
+  });
+
+  it("keeps the typed name and explains when renaming fails", async () => {
+    const { wrapper } = await open("/campaigns/c1", routes);
+    stubRename({ status: 400, body: { error: "Write a campaign name of up to 80 characters." } });
+
+    await wrapper.find("[data-testid=rename]").trigger("click");
+    await wrapper.find("#campaign-name-input").setValue("Too long");
+    await wrapper.find("[data-testid=campaign-name] form").trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.find("[role=alert]").text()).toContain("up to 80 characters");
+    expect((wrapper.find("#campaign-name-input").element as HTMLInputElement).value).toBe("Too long");
+  });
+
+  it("cancels without saving", async () => {
+    const { wrapper } = await open("/campaigns/c1", routes);
+    await wrapper.find("[data-testid=rename]").trigger("click");
+    await wrapper.find("#campaign-name-input").setValue("Something else");
+    await wrapper.findAll("button").find((button) => button.text() === "Cancel")!.trigger("click");
+
+    expect(wrapper.find("h1").text()).toBe("Cart Recovery");
+  });
+});
+
 describe("activity wording", () => {
+  it("reads a rename as a sentence", () => {
+    expect(describeActivity({ ...activity[0], type: "campaign.renamed", details: { name: "Black Friday" } }).title).toBe('Renamed to "Black Friday"');
+  });
+
   it("keeps events it does not recognise rather than hiding them", () => {
     expect(describeActivity({ ...activity[0], type: "campaign.something_new" }).title).toBe("campaign.something_new");
   });

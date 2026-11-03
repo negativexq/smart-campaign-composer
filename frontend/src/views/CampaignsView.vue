@@ -62,7 +62,7 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
         </button>
       </div>
       <label class="visually-hidden" for="campaign-search">Search campaigns</label>
-      <input id="campaign-search" v-model="query" class="field search" type="search" placeholder="Search briefs" />
+      <input id="campaign-search" v-model="query" class="field search" type="search" placeholder="Search names and briefs" />
     </div>
 
     <ValidationNotice v-if="error" tone="error" title="We could not load your campaigns">{{ error }}</ValidationNotice>

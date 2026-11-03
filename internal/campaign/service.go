@@ -40,6 +40,8 @@ const (
 	reasonUnsupported  = "unsupported_condition"
 	reasonEmpty        = "empty_audience"
 	reasonNoConsent    = "no_consented_recipients"
+	eventRenamed       = "campaign.renamed"
+	maxProvisionalName = 60
 	eventCreated       = "campaign.created"
 	eventSegmentChosen = "segment.proposed"
 )
@@ -47,6 +49,7 @@ const (
 // Errors the API maps to responses.
 var (
 	ErrInvalidBrief     = errors.New("brief is empty or too long")
+	ErrInvalidName      = errors.New("campaign name is empty or too long")
 	ErrNotFound         = errors.New("campaign not found")
 	ErrNotEditable      = errors.New("campaign can no longer be edited")
 	ErrProposalRejected = errors.New("proposal failed validation")
@@ -62,6 +65,8 @@ type ProposeInput struct {
 // View is a campaign as the marketer sees it.
 type View struct {
 	ID           string              `json:"id"`
+	Name         string              `json:"name"`
+	NameSource   string              `json:"name_source"`
 	Brief        string              `json:"brief"`
 	Status       string              `json:"status"`
 	Version      int                 `json:"version"`
@@ -103,7 +108,7 @@ func (s *Service) Create(ctx context.Context, brief string) (string, error) {
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
 	var id string
-	if err := tx.QueryRow(ctx, `INSERT INTO campaigns (brief) VALUES ($1) RETURNING id::text`, brief).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO campaigns (brief, name) VALUES ($1, $2) RETURNING id::text`, brief, provisionalName(brief)).Scan(&id); err != nil {
 		return "", fmt.Errorf("insert campaign: %w", err)
 	}
 	if err := recordAudit(ctx, tx, id, eventCreated, map[string]any{"brief_characters": utf8.RuneCountInString(brief)}); err != nil {
@@ -113,6 +118,63 @@ func (s *Service) Create(ctx context.Context, brief string) (string, error) {
 		return "", fmt.Errorf("commit create: %w", err)
 	}
 	return id, nil
+}
+
+// Rename sets the name someone chose. Names label a campaign rather than being
+// part of the approved content, so this works in every status.
+func (s *Service) Rename(ctx context.Context, id, name string) (View, error) {
+	var parsed pgtype.UUID
+	if err := parsed.Scan(id); err != nil {
+		return View{}, ErrNotFound
+	}
+	name, ok := segment.CleanCampaignName(name)
+	if !ok {
+		return View{}, ErrInvalidName
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return View{}, fmt.Errorf("begin rename: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+
+	result, err := tx.Exec(ctx, `UPDATE campaigns SET name = $2, name_source = 'user', updated_at = now() WHERE id = $1`, parsed, name)
+	if err != nil {
+		return View{}, fmt.Errorf("rename campaign: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return View{}, ErrNotFound
+	}
+	if err := recordAudit(ctx, tx, id, eventRenamed, map[string]any{"name": name}); err != nil {
+		return View{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return View{}, fmt.Errorf("commit rename: %w", err)
+	}
+	return s.Get(ctx, id)
+}
+
+// provisionalName labels a campaign until a better name exists, cutting the
+// brief between words.
+func provisionalName(brief string) string {
+	words := strings.Fields(brief)
+	name := strings.Join(words, " ")
+	if utf8.RuneCountInString(name) <= maxProvisionalName {
+		return name
+	}
+	var kept strings.Builder
+	for _, word := range words {
+		if utf8.RuneCountInString(kept.String())+utf8.RuneCountInString(word)+1 > maxProvisionalName-1 {
+			break
+		}
+		if kept.Len() > 0 {
+			kept.WriteByte(' ')
+		}
+		kept.WriteString(word)
+	}
+	if kept.Len() == 0 {
+		kept.WriteString(string([]rune(name)[:maxProvisionalName-1]))
+	}
+	return kept.String() + "…"
 }
 
 func cleanBrief(brief string) (string, error) {
@@ -309,7 +371,18 @@ func (s *Service) saveProposal(ctx context.Context, id, brief string, proposal s
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
-	if _, err := tx.Exec(ctx, `UPDATE campaigns SET brief = $2, updated_at = now() WHERE id = $1`, id, brief); err != nil {
+	// A name someone chose stays. Otherwise a suggestion wins, and a provisional
+	// name follows the brief it came from.
+	if _, err := tx.Exec(ctx, `
+		UPDATE campaigns SET brief = $2, updated_at = now(),
+			name = CASE WHEN name_source = 'user' THEN name
+			            WHEN $3::text <> '' THEN $3::text
+			            WHEN name_source = 'brief' THEN $4::text
+			            ELSE name END,
+			name_source = CASE WHEN name_source = 'user' THEN 'user'
+			                   WHEN $3::text <> '' THEN 'ai'
+			                   ELSE name_source END
+		WHERE id = $1`, id, brief, proposal.CampaignName, provisionalName(brief)); err != nil {
 		return fmt.Errorf("update campaign: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -379,12 +452,12 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 		audienceAsOf *time.Time
 	)
 	err := s.db.QueryRow(ctx, `
-		SELECT c.brief, c.status, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.audience_as_of
+		SELECT c.name, c.name_source, c.brief, c.status, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.audience_as_of
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1`, parsed).Scan(&view.Brief, &view.Status, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &audienceAsOf)
+		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &audienceAsOf)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}

@@ -87,6 +87,14 @@ func TestMockAppliesRefinementToTheCurrentProposal(t *testing.T) {
 	}
 }
 
+func TestMockSuggestsANameFromTheAudience(t *testing.T) {
+	t.Parallel()
+	proposal := proposeWithMock(t, ai.SegmentRequest{Brief: "Ankara users who abandoned their cart"})
+	if proposal.CampaignName != "Cart Recovery — Ankara" {
+		t.Fatalf("name: %q", proposal.CampaignName)
+	}
+}
+
 func TestMockIsDeterministic(t *testing.T) {
 	t.Parallel()
 	request := ai.SegmentRequest{Brief: "İzmir sepet", Cities: seed.Cities}

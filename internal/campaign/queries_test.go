@@ -158,7 +158,7 @@ func TestOverviewCountsMatchTheFilters(t *testing.T) {
 	if len(overview.Recent) != 5 {
 		t.Fatalf("recent: %d", len(overview.Recent))
 	}
-	if len(overview.Activity) != 6 || overview.Activity[0].Brief == "" {
+	if len(overview.Activity) != 6 || overview.Activity[0].Name == "" {
 		t.Fatalf("activity: %+v", overview.Activity)
 	}
 }

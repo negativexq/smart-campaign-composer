@@ -12,7 +12,7 @@ defineProps<{ entries: ActivityEntry[]; showCampaign?: boolean }>();
       <div class="body">
         <strong class="title">{{ describeActivity(entry).title }}</strong>
         <span v-if="describeActivity(entry).detail" class="muted small">{{ describeActivity(entry).detail }}</span>
-        <a v-if="showCampaign" class="campaign small" :href="`/campaigns/${entry.campaign_id}`" :title="entry.brief">{{ entry.brief }}</a>
+        <a v-if="showCampaign" class="campaign small" :href="`/campaigns/${entry.campaign_id}`" >{{ entry.campaign_name }}</a>
       </div>
       <time class="muted small" :datetime="entry.occurred_at">{{ formatDateTime(entry.occurred_at) }}</time>
     </li>

@@ -27,6 +27,7 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 	mux.HandleFunc("GET /api/campaigns", a.list)
 	mux.HandleFunc("POST /api/campaigns", a.create)
 	mux.HandleFunc("GET /api/campaigns/{id}", a.get)
+	mux.HandleFunc("PATCH /api/campaigns/{id}", a.rename)
 	mux.HandleFunc("POST /api/campaigns/{id}/segment", a.proposeSegment)
 	mux.HandleFunc("GET /api/campaigns/{id}/audience", a.audience)
 	mux.HandleFunc("GET /api/campaigns/{id}/activity", a.activity)
@@ -90,6 +91,21 @@ func (a *api) get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
+func (a *api) rename(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	view, err := a.campaigns.Rename(r.Context(), r.PathValue("id"), body.Name)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
 func (a *api) proposeSegment(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Brief      *string `json:"brief"`
@@ -139,6 +155,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, campaign.ErrInvalidBrief):
 		status, message = http.StatusBadRequest, "Write a brief of up to 2000 characters."
+	case errors.Is(err, campaign.ErrInvalidName):
+		status, message = http.StatusBadRequest, "Write a campaign name of up to 80 characters."
 	case errors.Is(err, campaign.ErrUnknownGroup):
 		status, message = http.StatusBadRequest, "This campaign filter does not exist."
 	case errors.Is(err, campaign.ErrNotFound):

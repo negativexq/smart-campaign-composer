@@ -43,6 +43,7 @@ type ListFilter struct {
 // they stay empty until the campaign is dispatched.
 type Summary struct {
 	ID        string    `json:"id"`
+	Name      string    `json:"name"`
 	Brief     string    `json:"brief"`
 	Status    string    `json:"status"`
 	Channels  []string  `json:"channels"`
@@ -68,7 +69,7 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 	}
 
 	rows, err := s.db.Query(ctx, `
-		SELECT c.id::text, c.brief, c.status,
+		SELECT c.id::text, c.name, c.brief, c.status,
 		       COALESCE(d.channels, '{}'), COALESCE(d.total, 0), COALESCE(d.processed, 0),
 		       c.created_at, c.updated_at
 		FROM campaigns c
@@ -79,7 +80,7 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 			FROM campaign_deliveries WHERE campaign_id = c.id
 		) d ON true
 		WHERE ($1::text[] IS NULL OR c.status = ANY($1))
-		  AND ($2 = '' OR c.brief ILIKE '%' || $2 || '%' ESCAPE '\')
+		  AND ($2 = '' OR c.name ILIKE '%' || $2 || '%' ESCAPE '\' OR c.brief ILIKE '%' || $2 || '%' ESCAPE '\')
 		ORDER BY c.created_at DESC, c.id
 		LIMIT $3`, statuses, escapeLike(strings.TrimSpace(filter.Query)), limit)
 	if err != nil {
@@ -87,7 +88,7 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 	}
 	summaries, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Summary, error) {
 		var summary Summary
-		err := row.Scan(&summary.ID, &summary.Brief, &summary.Status, &summary.Channels,
+		err := row.Scan(&summary.ID, &summary.Name, &summary.Brief, &summary.Status, &summary.Channels,
 			&summary.Total, &summary.Processed, &summary.CreatedAt, &summary.UpdatedAt)
 		return summary, err
 	})
@@ -147,7 +148,7 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 // ActivityEntry is one audit event, for people to read.
 type ActivityEntry struct {
 	CampaignID string          `json:"campaign_id"`
-	Brief      string          `json:"brief"`
+	Name       string          `json:"campaign_name"`
 	Type       string          `json:"type"`
 	Details    json.RawMessage `json:"details"`
 	OccurredAt time.Time       `json:"occurred_at"`
@@ -169,7 +170,7 @@ func (s *Service) Activity(ctx context.Context, id string) ([]ActivityEntry, err
 // first when id is nil.
 func (s *Service) queryActivity(ctx context.Context, id *pgtype.UUID, limit int) ([]ActivityEntry, error) {
 	query := `
-		SELECT a.campaign_id::text, c.brief, a.event_type, a.details, a.occurred_at
+		SELECT a.campaign_id::text, c.name, a.event_type, a.details, a.occurred_at
 		FROM audit_events a JOIN campaigns c ON c.id = a.campaign_id `
 	var args []any
 	if id != nil {
@@ -185,7 +186,7 @@ func (s *Service) queryActivity(ctx context.Context, id *pgtype.UUID, limit int)
 	}
 	entries, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ActivityEntry, error) {
 		var entry ActivityEntry
-		err := row.Scan(&entry.CampaignID, &entry.Brief, &entry.Type, &entry.Details, &entry.OccurredAt)
+		err := row.Scan(&entry.CampaignID, &entry.Name, &entry.Type, &entry.Details, &entry.OccurredAt)
 		return entry, err
 	})
 	if err != nil {

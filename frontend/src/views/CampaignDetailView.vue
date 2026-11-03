@@ -4,6 +4,7 @@ import { computed, onMounted, ref } from "vue";
 import { errorMessage, getActivity, getCampaign, type ActivityEntry, type Campaign } from "../api/campaigns";
 import ActivityTimeline from "../components/ActivityTimeline.vue";
 import AudienceRule from "../components/AudienceRule.vue";
+import CampaignName from "../components/CampaignName.vue";
 import CampaignStatusBadge from "../components/CampaignStatusBadge.vue";
 import MetricCard from "../components/MetricCard.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
@@ -32,6 +33,11 @@ function isAssumed(field: string) {
   return assumptions.value.some((assumption) => assumption.field === field);
 }
 
+function onRenamed(updated: Campaign) {
+  campaign.value = updated;
+  getActivity(props.campaignId).then((entries) => (activity.value = entries), () => {});
+}
+
 onMounted(async () => {
   try {
     campaign.value = await getCampaign(props.campaignId);
@@ -58,7 +64,7 @@ onMounted(async () => {
 
     <header class="head">
       <div class="title">
-        <h1 data-testid="campaign-title">{{ campaign.brief }}</h1>
+        <CampaignName as="h1" :campaign="campaign" @renamed="onRenamed" />
         <CampaignStatusBadge :status="campaign.status" />
       </div>
       <a
@@ -89,6 +95,10 @@ onMounted(async () => {
     </div>
 
     <section v-if="tab === 'overview'" id="panel-overview" class="panel" role="tabpanel" aria-labelledby="tab-overview">
+      <section class="brief card" aria-label="Campaign brief">
+        <span class="muted small">Brief</span>
+        <p data-testid="brief-text">{{ campaign.brief }}</p>
+      </section>
       <template v-if="campaign.proposal">
         <div class="metrics">
           <MetricCard label="Matching customers" :value="campaign.audience.total" />
@@ -153,9 +163,10 @@ onMounted(async () => {
   min-width: 240px;
 }
 
-.title h1 {
-  font-size: 20px;
-  line-height: 1.4;
+.brief {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4);
 }
 
 .link-button {

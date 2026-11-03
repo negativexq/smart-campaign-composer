@@ -64,6 +64,7 @@ func (*Mock) ProposeSegment(_ context.Context, request SegmentRequest) (SegmentR
 		addUnsupported(&proposal, folded)
 	}
 	applyFilters(&proposal, folded, request.Cities)
+	proposal.CampaignName = mockName(proposal.Segment)
 
 	output, err := json.Marshal(proposal)
 	if err != nil {
@@ -129,6 +130,24 @@ func applyFilters(proposal *segment.Proposal, folded string, cities []string) {
 	case boughtPattern.MatchString(folded) && hasDays:
 		spec.PurchasedWithinDays = &days
 	}
+}
+
+func mockName(spec segment.Spec) string {
+	name := "Audience"
+	switch {
+	case spec.NoPurchaseSinceCart != nil && *spec.NoPurchaseSinceCart:
+		name = "Cart Recovery"
+	case spec.CartAddedWithinDays != nil:
+		name = "Cart Activity"
+	case spec.NotPurchasedWithinDays != nil:
+		name = "Win-back"
+	case spec.PurchasedWithinDays != nil:
+		name = "Recent Buyers"
+	}
+	if spec.City != nil {
+		name += " — " + *spec.City
+	}
+	return name
 }
 
 func parseDays(folded string) (int, bool) {

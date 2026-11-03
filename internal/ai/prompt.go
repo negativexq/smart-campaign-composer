@@ -15,6 +15,8 @@ Express the audience only with the filters in the output schema:
 - purchased_within_days: purchased within this many days
 - not_purchased_within_days: did not purchase within this many days
 
+Also suggest campaign_name: a short title of 2 to 5 words saying who the campaign is for and why, such as "Cart Recovery — İstanbul". Write it in the language of the brief. Never include a person's name or contact details.
+
 Rules:
 - Add an entry to assumptions for every value the brief does not state. If a brief mentions cart abandonment without a time window, use 30 days and record that assumption.
 - Put any part of the brief that these filters cannot express (age, gender, loyalty tier, and so on) in unsupported_conditions, in the brief's own words. Never drop such a condition silently and never approximate it with another filter.

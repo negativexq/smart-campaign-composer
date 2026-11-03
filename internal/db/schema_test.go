@@ -45,7 +45,7 @@ func insertCampaign(t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	var id string
 	err := pool.QueryRow(context.Background(),
-		`INSERT INTO campaigns (brief) VALUES ('brief') RETURNING id`).Scan(&id)
+		`INSERT INTO campaigns (brief, name) VALUES ('brief', 'name') RETURNING id`).Scan(&id)
 	if err != nil {
 		t.Fatalf("insert campaign: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestCampaignRejectsUnknownStatus(t *testing.T) {
 	pool := testsupport.NewDatabase(t)
 
 	_, err := pool.Exec(context.Background(),
-		`INSERT INTO campaigns (brief, status) VALUES ('brief', 'SENDING_MAYBE')`)
+		`INSERT INTO campaigns (brief, name, status) VALUES ('brief', 'name', 'SENDING_MAYBE')`)
 
 	requirePgError(t, err, pgCheckViolation)
 }

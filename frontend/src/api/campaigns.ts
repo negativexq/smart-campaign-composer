@@ -4,6 +4,8 @@ export type Audience = { total: number; sms: number; email: number };
 
 export type Campaign = {
   id: string;
+  name: string;
+  name_source: "brief" | "ai" | "user";
   brief: string;
   status: string;
   version: number;
@@ -18,6 +20,7 @@ export type Campaign = {
 
 export type CampaignSummary = {
   id: string;
+  name: string;
   brief: string;
   status: string;
   channels: string[];
@@ -29,7 +32,7 @@ export type CampaignSummary = {
 
 export type ActivityEntry = {
   campaign_id: string;
-  brief: string;
+  campaign_name: string;
   type: string;
   details: Record<string, unknown>;
   occurred_at: string;
@@ -84,6 +87,14 @@ export async function createCampaign(brief: string): Promise<string> {
 
 export function proposeSegment(id: string, input: { brief?: string; refinement?: string } = {}): Promise<Campaign> {
   return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/segment`, input);
+}
+
+export function renameCampaign(id: string, name: string): Promise<Campaign> {
+  return request<Campaign>(`/api/campaigns/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
 }
 
 export function getCampaign(id: string): Promise<Campaign> {

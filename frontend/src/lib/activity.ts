@@ -16,6 +16,8 @@ export function describeActivity(entry: ActivityEntry): { title: string; detail:
   switch (entry.type) {
     case "campaign.created":
       return { title: "Campaign created", detail: "" };
+    case "campaign.renamed":
+      return { title: `Renamed to "${details.name}"`, detail: "" };
     case "segment.proposed": {
       const audience = details.audience as { total: number } | undefined;
       const parts = [audience ? `${plural(audience.total, "matching customer")}` : "", `by ${details.provider}`];
