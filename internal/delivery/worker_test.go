@@ -736,3 +736,29 @@ func TestAProviderThatCannotBeReachedCostsNoAttempt(t *testing.T) {
 		t.Fatal("the channel should rest while the provider is down")
 	}
 }
+
+// The other recovery tests call RecoverExpired directly. This one proves a running
+// worker does it by itself, which is what a real crash depends on.
+func TestARunningWorkerRecoversAndFinishesByItself(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.crash(t, 5, 0, "-1 second")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- r.worker.Run(ctx) }()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for r.campaignStatus(t) != "COMPLETED" {
+		if time.Now().After(deadline) {
+			t.Fatalf("campaign is %s with %v", r.campaignStatus(t), r.statuses(t))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	cancel()
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+}
+
