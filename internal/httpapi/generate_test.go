@@ -177,6 +177,22 @@ func TestSampleRecipients(t *testing.T) {
 	}
 }
 
+func TestProposalShowsOnlyWordsTheMarketerWrote(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, fastMock())
+	id := createCampaign(t, api, exampleBrief)
+	_, view := call(t, api, http.MethodPost, "/api/campaigns/"+id+"/segment", "")
+	evidence := view["proposal"].(map[string]any)["evidence"].([]any)
+	if len(evidence) == 0 {
+		t.Fatalf("no evidence: %+v", view["proposal"])
+	}
+	for _, entry := range evidence {
+		if quote := entry.(map[string]any)["quote"].(string); !strings.Contains(exampleBrief, quote) {
+			t.Fatalf("%q is not in the brief", quote)
+		}
+	}
+}
+
 func TestAudienceBreakdown(t *testing.T) {
 	t.Parallel()
 	api := newAPI(t, fastMock())

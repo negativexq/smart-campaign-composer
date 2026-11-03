@@ -10,9 +10,15 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
-const maxWindowDays = 365
+const (
+	maxWindowDays = 365
+	// A quote this short or long says nothing about why a filter was chosen.
+	minEvidenceQuote = 3
+	maxEvidenceQuote = 200
+)
 
 // languageNames lists the languages present in user data.
 var languageNames = map[string]string{"tr": "Turkish", "en": "English"}
@@ -44,12 +50,20 @@ type Assumption struct {
 	Note  string `json:"note"`
 }
 
+// Evidence is the wording a filter came from. Only KeepQuotedEvidence makes it
+// trustworthy, since a model can claim anything.
+type Evidence struct {
+	Field string `json:"field"`
+	Quote string `json:"quote"`
+}
+
 // Proposal is a validated audience proposal. UnsupportedConditions lists parts
 // of the brief no filter can express; they block approval until resolved.
 type Proposal struct {
 	CampaignName          string       `json:"campaign_name,omitempty"`
 	Segment               Spec         `json:"segment"`
 	Assumptions           []Assumption `json:"assumptions"`
+	Evidence              []Evidence   `json:"evidence"`
 	UnsupportedConditions []string     `json:"unsupported_conditions"`
 }
 
@@ -84,6 +98,7 @@ func ParseProposal(raw []byte, cities []string) (Proposal, error) {
 		CampaignName          string       `json:"campaign_name"`
 		Segment               *Spec        `json:"segment"`
 		Assumptions           []Assumption `json:"assumptions"`
+		Evidence              []Evidence   `json:"evidence"`
 		UnsupportedConditions []string     `json:"unsupported_conditions"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -102,10 +117,14 @@ func ParseProposal(raw []byte, cities []string) (Proposal, error) {
 		CampaignName:          decoded.CampaignName,
 		Segment:               *decoded.Segment,
 		Assumptions:           decoded.Assumptions,
+		Evidence:              decoded.Evidence,
 		UnsupportedConditions: cleanConditions(decoded.UnsupportedConditions),
 	}
 	if proposal.Assumptions == nil {
 		proposal.Assumptions = []Assumption{}
+	}
+	if proposal.Evidence == nil {
+		proposal.Evidence = []Evidence{}
 	}
 	if problems := proposal.validate(cities); len(problems.Problems) > 0 {
 		return Proposal{}, problems
@@ -176,7 +195,42 @@ func (p *Proposal) validate(cities []string) *ValidationError {
 			problems.add("unknown_assumption_field", fmt.Sprintf("assumption refers to unknown field %q", assumption.Field))
 		}
 	}
+	for _, evidence := range p.Evidence {
+		if !slices.Contains(filterFields, evidence.Field) {
+			problems.add("unknown_evidence_field", fmt.Sprintf("evidence refers to unknown field %q", evidence.Field))
+		}
+	}
 	return problems
+}
+
+// KeepQuotedEvidence removes evidence for filters that are not applied and quotes
+// that do not appear in sources, and returns how many it removed. A wrong quote
+// costs only the explanation, so it does not reject the proposal.
+func (p *Proposal) KeepQuotedEvidence(sources ...string) int {
+	applied := Describe(p.Segment)
+	kept := make([]Evidence, 0, len(p.Evidence))
+	for _, evidence := range p.Evidence {
+		isApplied := slices.ContainsFunc(applied, func(condition Condition) bool { return condition.Field == evidence.Field })
+		if isApplied && quoted(evidence.Quote, sources) {
+			kept = append(kept, evidence)
+		}
+	}
+	dropped := len(p.Evidence) - len(kept)
+	p.Evidence = kept
+	return dropped
+}
+
+func quoted(quote string, sources []string) bool {
+	folded := foldWords(quote)
+	if length := utf8.RuneCountInString(folded); length < minEvidenceQuote || length > maxEvidenceQuote {
+		return false
+	}
+	return slices.ContainsFunc(sources, func(source string) bool { return strings.Contains(foldWords(source), folded) })
+}
+
+// foldWords ignores what a model may change while copying: case and spacing.
+func foldWords(text string) string {
+	return strings.Join(strings.Fields(foldCity(text)), " ")
 }
 
 var filterFields = []string{
@@ -251,7 +305,7 @@ func JSONSchema() map[string]any {
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
-		"required":             []string{"campaign_name", "segment", "assumptions", "unsupported_conditions"},
+		"required":             []string{"campaign_name", "segment", "assumptions", "evidence", "unsupported_conditions"},
 		"properties": map[string]any{
 			"campaign_name": map[string]any{"type": "string", "description": "Short title of 2 to 5 words, at most 80 characters"},
 			"segment": map[string]any{
@@ -277,6 +331,19 @@ func JSONSchema() map[string]any {
 					"properties": map[string]any{
 						"field": map[string]any{"type": "string", "enum": filterFields},
 						"note":  map[string]any{"type": "string"},
+					},
+				},
+			},
+			"evidence": map[string]any{
+				"type":        "array",
+				"description": "For each filter, the exact words of the brief or refinement it came from",
+				"items": map[string]any{
+					"type":                 "object",
+					"additionalProperties": false,
+					"required":             []string{"field", "quote"},
+					"properties": map[string]any{
+						"field": map[string]any{"type": "string", "enum": filterFields},
+						"quote": map[string]any{"type": "string", "description": "Copied character for character, never translated"},
 					},
 				},
 			},

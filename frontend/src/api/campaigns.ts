@@ -2,6 +2,7 @@ import { EventStreamParser } from "../lib/sse";
 import type { DeliveryQuery } from "../lib/report";
 import { currentUser } from "../lib/session";
 
+export type Evidence = { field: string; quote: string };
 export type Condition = { field: string; label: string; value: string };
 export type AudienceBreakdown = { everyone: number; steps: { field: string; remaining: number }[] };
 export type Assumption = { field: string; note: string };
@@ -75,8 +76,9 @@ export type Campaign = {
   channels: string[];
   tone?: string;
   offer_percent?: number | null;
+  not_messaged_within_days?: number | null;
   version: number;
-  proposal?: { assumptions: Assumption[]; unsupported_conditions: string[] };
+  proposal?: { assumptions: Assumption[]; evidence?: Evidence[] | null; unsupported_conditions: string[] };
   conditions: Condition[];
   audience: Audience;
   audience_as_of?: string;

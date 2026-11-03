@@ -22,6 +22,7 @@ Also suggest campaign_name: a short title of 2 to 5 words saying who the campaig
 
 Rules:
 - Add an entry to assumptions for every value the brief does not state. If a brief mentions cart abandonment without a time window, use 30 days and record that assumption.
+- Add an entry to evidence for every filter you set: its field and the shortest words from the brief or refinement that led to it, copied character for character and never translated. They are checked against the text and shown to the marketer. If no words support a filter, add no entry for it. When a refinement changes a filter, replace its entry.
 - Put any part of the brief that these filters cannot express (age, gender, loyalty tier, and so on) in unsupported_conditions, in the brief's own words. Never drop such a condition silently and never approximate it with another filter.
 - A filter that does not apply is left out or set to null.
 - If no filter applies, return an empty segment and explain why in unsupported_conditions.

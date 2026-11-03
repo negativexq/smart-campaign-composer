@@ -159,6 +159,41 @@ describe("audience page", () => {
     expect(wrapper.text()).not.toContain("cart_added_within_days");
   });
 
+  it("shows the words behind each condition and never claims words nobody wrote", async () => {
+    const { wrapper } = await open({
+      "GET /api/campaigns/c1": {
+        body: {
+          ...campaign,
+          conditions: [...campaign.conditions, { field: "language", label: "Language is", value: "Turkish" }, { field: "not_messaged_within_days", label: "No message from us in the last", value: "7 days" }],
+          not_messaged_within_days: 7,
+          proposal: {
+            assumptions: campaign.proposal!.assumptions,
+            evidence: [{ field: "city", quote: "İstanbul'daki müşteriler" }],
+            unsupported_conditions: ["VIP"],
+          },
+        },
+      },
+    });
+    await flushPromises();
+    const sources = wrapper.findAll("[data-testid=step-source]").map((source) => source.text());
+
+    expect(sources[0]).toBe("Because you wrote İstanbul'daki müşteriler");
+    expect(sources).toContain("AI added this. It is not in what you wrote, so please check it.");
+    expect(sources).toContain("You chose this in Options.");
+    expect(sources.length).toBe(3); // the assumed window has its own label
+    expect(wrapper.find("[data-testid=unsupported-step]").text()).toContain("VIP");
+    expect(wrapper.find("[data-testid=rule-guards]").text()).toContain("never run as a database query");
+    expect(wrapper.find("[data-testid=rule-guards]").text()).toContain("384 of these people have not agreed to SMS");
+  });
+
+  it("makes no claim about quotes for a proposal made before they existed", async () => {
+    const { wrapper } = await open({ "GET /api/campaigns/c1": { body: campaign } });
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid=step-source]").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("word for word");
+  });
+
   it("still lists the conditions when the counts cannot be loaded", async () => {
     const { wrapper } = await open({
       "GET /api/campaigns/c1": { body: campaign },

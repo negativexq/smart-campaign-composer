@@ -46,7 +46,11 @@ var (
 	boughtPattern = regexp.MustCompile(`purchased|bought|satin alan|aliş ?veriş yapan`)
 	quietPattern  = regexp.MustCompile(`(?:not messaged|no message)[^0-9]*(\d+)\s*days?|(\d+)\s*g[uü]n\S*\s*mesaj almayan`)
 	clearPattern  = regexp.MustCompile(`remove|drop|ignore|kaldir|çikar`)
+
+	languagePattern = regexp.MustCompile(`english|ingilizce|turkish|türkçe`)
 )
+
+const mockQuoteWords = 8
 
 func mockFold(text string) string {
 	return strings.ToLower(mockFolder.Replace(text))
@@ -54,7 +58,7 @@ func mockFold(text string) string {
 
 // ProposeSegment implements Provider.
 func (*Mock) ProposeSegment(_ context.Context, request SegmentRequest) (Response, error) {
-	proposal := segment.Proposal{Assumptions: []segment.Assumption{}, UnsupportedConditions: []string{}}
+	proposal := segment.Proposal{Assumptions: []segment.Assumption{}, Evidence: []segment.Evidence{}, UnsupportedConditions: []string{}}
 	text := request.Brief
 	if len(request.Current) > 0 {
 		if err := json.Unmarshal(request.Current, &proposal); err != nil {
@@ -69,7 +73,9 @@ func (*Mock) ProposeSegment(_ context.Context, request SegmentRequest) (Response
 	} else {
 		addUnsupported(&proposal, folded)
 	}
+	before := proposal.Segment
 	applyFilters(&proposal, folded, request.Cities)
+	addMockEvidence(&proposal, before, text)
 	proposal.CampaignName = mockName(proposal.Segment)
 
 	output, err := json.Marshal(proposal)
@@ -143,6 +149,58 @@ func applyFilters(proposal *segment.Proposal, folded string, cities []string) {
 	case boughtPattern.MatchString(folded) && hasDays:
 		spec.PurchasedWithinDays = &days
 	}
+}
+
+// addMockEvidence quotes the words behind each filter this text changed. A filter
+// it did not touch keeps its earlier quote.
+func addMockEvidence(proposal *segment.Proposal, before segment.Spec, text string) {
+	spec := proposal.Segment
+	for _, filter := range []struct {
+		field   string
+		changed bool
+		pattern *regexp.Regexp
+	}{
+		{"city", spec.City != nil && !samePointer(before.City, spec.City), cityWords(spec.City)},
+		{"language", spec.Language != nil && !samePointer(before.Language, spec.Language), languagePattern},
+		{cartWindowField, spec.CartAddedWithinDays != nil && !samePointer(before.CartAddedWithinDays, spec.CartAddedWithinDays), cartPattern},
+		{cartWindowField, spec.CartAddedWithinDays != nil && !samePointer(before.CartAddedWithinDays, spec.CartAddedWithinDays), daysPattern},
+		{"no_purchase_since_cart", spec.NoPurchaseSinceCart != nil && !samePointer(before.NoPurchaseSinceCart, spec.NoPurchaseSinceCart), noBuyPattern},
+		{"purchased_within_days", spec.PurchasedWithinDays != nil && !samePointer(before.PurchasedWithinDays, spec.PurchasedWithinDays), boughtPattern},
+		{"not_purchased_within_days", spec.NotPurchasedWithinDays != nil && !samePointer(before.NotPurchasedWithinDays, spec.NotPurchasedWithinDays), noBuyPattern},
+		{"not_messaged_within_days", spec.NotMessagedWithinDays != nil && !samePointer(before.NotMessagedWithinDays, spec.NotMessagedWithinDays), quietPattern},
+	} {
+		if !filter.changed || filter.pattern == nil {
+			continue
+		}
+		if quote := mockQuote(text, filter.pattern); quote != "" {
+			proposal.Evidence = append(proposal.Evidence, segment.Evidence{Field: filter.field, Quote: quote})
+		}
+	}
+}
+
+func samePointer[T comparable](a, b *T) bool {
+	return a != nil && b != nil && *a == *b
+}
+
+func cityWords(city *string) *regexp.Regexp {
+	if city == nil {
+		return nil
+	}
+	return regexp.MustCompile(regexp.QuoteMeta(mockFold(*city)))
+}
+
+// mockQuote finds the fewest consecutive words of text that match pattern.
+func mockQuote(text string, pattern *regexp.Regexp) string {
+	words := strings.Fields(text)
+	for size := 1; size <= mockQuoteWords; size++ {
+		for start := 0; start+size <= len(words); start++ {
+			window := strings.Join(words[start:start+size], " ")
+			if pattern.MatchString(mockFold(window)) {
+				return strings.TrimRight(window, ".,;:!?")
+			}
+		}
+	}
+	return ""
 }
 
 func mockName(spec segment.Spec) string {

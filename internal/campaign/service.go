@@ -341,6 +341,8 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 		proposal.Segment.NotMessagedWithinDays = stored.NotMessagedWithinDays
 	}
 
+	s.checkEvidence(&proposal, request, stored.Proposal)
+
 	asOf := s.now()
 	counts, err := s.evaluateAudience(ctx, proposal.Segment, asOf)
 	if err != nil {
@@ -353,6 +355,20 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 		return View{}, err
 	}
 	return s.Get(ctx, id)
+}
+
+// checkEvidence keeps the quotes a person really wrote. A refinement builds on
+// the current proposal, so quotes already checked for it still count.
+func (s *Service) checkEvidence(proposal *segment.Proposal, request ai.SegmentRequest, current *segment.Proposal) {
+	sources := []string{request.Brief, request.Refinement}
+	if request.Refinement != "" && current != nil {
+		for _, evidence := range current.Evidence {
+			sources = append(sources, evidence.Quote)
+		}
+	}
+	if dropped := proposal.KeepQuotedEvidence(sources...); dropped > 0 {
+		s.metrics.ValidationFailures.WithLabelValues(stageSegment, "unquoted_evidence").Add(float64(dropped))
+	}
 }
 
 // proposalTrigger says why a proposal was made, for the audit trail.

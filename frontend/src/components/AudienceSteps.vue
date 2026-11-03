@@ -21,6 +21,17 @@ const sentences: Record<string, (value: string) => string> = {
 const sentence = (condition: Condition) => sentences[condition.field]?.(condition.value) ?? `${condition.label} ${condition.value}`;
 const formatCount = (count: number) => count.toLocaleString("en-US");
 const assumptions = computed(() => props.campaign.proposal?.assumptions ?? []);
+// Older proposals were made before quotes existed, so they have nothing to say here.
+const evidence = computed(() => props.campaign.proposal?.evidence);
+
+/** Where a condition came from, never claiming words nobody wrote. */
+function sourceOf(condition: Condition): { quotes: string[]; text: string } {
+  const quotes = (evidence.value ?? []).filter((entry) => entry.field === condition.field).map((entry) => entry.quote);
+  if (quotes.length) return { quotes, text: "" };
+  if (condition.field === "not_messaged_within_days" && props.campaign.not_messaged_within_days) return { quotes, text: "You chose this in Options." };
+  if (!evidence.value || assumptions.value.some((assumption) => assumption.field === condition.field)) return { quotes, text: "" };
+  return { quotes, text: "AI added this. It is not in what you wrote, so please check it." };
+}
 
 const steps = computed(() => {
   let before = breakdown.value?.everyone;
@@ -31,6 +42,7 @@ const steps = computed(() => {
     return {
       field: condition.field,
       text: sentence(condition),
+      source: sourceOf(condition),
       notes: assumptions.value.filter((assumption) => assumption.field === condition.field),
       remaining,
       removed,
@@ -39,6 +51,14 @@ const steps = computed(() => {
 });
 
 const otherNotes = computed(() => assumptions.value.filter((assumption) => !props.campaign.conditions.some((condition) => condition.field === assumption.field)));
+const unsupported = computed(() => props.campaign.proposal?.unsupported_conditions ?? []);
+const consent = computed(() =>
+  props.campaign.channels.map((channel) => {
+    const name = channel === "sms" ? "SMS" : "email";
+    const missing = props.campaign.audience.total - props.campaign.audience[channel as "sms" | "email"];
+    return missing ? `${formatCount(missing)} of these people have not agreed to ${name}, so they get no ${name}.` : `Everyone here has agreed to ${name}.`;
+  }),
+);
 const proposedBy = computed(() => (props.campaign.provider === "mock" ? "the built-in test model" : props.campaign.model));
 
 function share(count: number | undefined) {
@@ -75,6 +95,14 @@ watch(
         <div class="bar" aria-hidden="true"><span :style="{ width: '100%' }"></span></div>
       </li>
       <li v-for="step in steps" :key="step.field" class="step" data-testid="audience-step">
+        <p v-if="step.source.quotes.length" class="source small" data-testid="step-source">
+          <span class="muted">Because you wrote </span>
+          <template v-for="(quote, index) in step.source.quotes" :key="quote">
+            <span v-if="index" class="muted">&nbsp;and&nbsp;</span>
+            <q class="quote">{{ quote }}</q>
+          </template>
+        </p>
+        <p v-else-if="step.source.text" class="source muted small" data-testid="step-source">{{ step.source.text }}</p>
         <div class="line">
           <span class="text">
             {{ step.text }}
@@ -88,12 +116,25 @@ watch(
         <div v-if="breakdown" class="bar" aria-hidden="true"><span :style="{ width: share(step.remaining) }"></span></div>
         <p v-for="note in step.notes" :key="note.note" class="muted small" data-testid="assumption-note">{{ note.note }}</p>
       </li>
+      <li v-for="condition in unsupported" :key="condition" class="step" data-testid="unsupported-step">
+        <p class="source small"><span class="muted">Your brief also asks for</span> <strong class="quote">{{ condition }}</strong></p>
+        <div class="line">
+          <span class="text">No filter can do this, so it is not applied</span>
+          <span class="assumption small">Blocks approval</span>
+        </div>
+      </li>
     </ol>
     <p v-for="note in otherNotes" :key="note.field" class="muted small" data-testid="assumption-note">{{ note.note }}</p>
     <p v-if="failed" class="muted small" data-testid="breakdown-unavailable">The step-by-step counts could not be loaded. The conditions above still apply.</p>
-    <p v-if="proposedBy" class="muted small" data-testid="rule-origin">
-      Proposed by {{ proposedBy }} from your brief, then checked by the app. Only the conditions listed here are applied.
-    </p>
+    <section v-if="campaign.proposal" class="guards" data-testid="rule-guards">
+      <h3 class="guards-title small">What the app makes sure of</h3>
+      <ul class="muted small">
+        <li>The AI's answer must fit the filters the app allows. It is never run as a database query.</li>
+        <li v-if="evidence">Quotes are checked word for word against what you wrote.</li>
+        <li v-for="line in consent" :key="line">{{ line }}</li>
+        <li v-if="proposedBy" data-testid="rule-origin">Proposed by {{ proposedBy }}. Only the conditions listed here are applied.</li>
+      </ul>
+    </section>
   </div>
 </template>
 
@@ -119,6 +160,33 @@ watch(
 
 .step:first-child {
   padding-top: 0;
+}
+
+.source {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.quote {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.guards {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.guards-title {
+  margin: 0;
+  font-weight: 500;
+}
+
+.guards ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
 }
 
 .line {

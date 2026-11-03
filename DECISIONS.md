@@ -130,6 +130,10 @@ That run showed one limit. Every percentage in a brief must appear in every mess
 
 The marketer reads each condition as a sentence and sees how many people it leaves, counted by applying the conditions one at a time at the audience's own timestamp. The raw rule stays out of the interface because it adds nothing a marketer can act on. A discount is not a condition, so it sits with the message settings and only exists once someone adds it.
 
+## Each condition shows the words it came from
+
+The model returns, for each filter, the exact words of the brief or refinement behind it. The backend keeps a quote only if it really appears in that text, ignoring case and spacing, and a filter without one is shown as added by the AI. A false quote costs only the explanation, so it does not reject the proposal. The check proves the words were written, not that the filter means the same thing, which is what human approval is for.
+
 ## Known limits of content generation
 
 Regeneration replaces every message rather than one, which keeps the validation of the offer across channels simple. The `there` fallback for a missing name is English and reads awkwardly in a Turkish message; per-language fallbacks belong with per-language content.

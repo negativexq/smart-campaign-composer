@@ -97,6 +97,31 @@ func TestMockSuggestsANameFromTheAudience(t *testing.T) {
 	}
 }
 
+func TestMockQuotesTheWordsBehindEachFilter(t *testing.T) {
+	t.Parallel()
+	brief := "İstanbul'daki müşteriler, son 30 gün sepete ekleyip satın almayan."
+	response, err := ai.NewMock().ProposeSegment(context.Background(), ai.SegmentRequest{Brief: brief, Cities: []string{"İstanbul"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := segment.ParseProposal(response.Output, []string{"İstanbul"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dropped := proposal.KeepQuotedEvidence(brief); dropped != 0 {
+		t.Fatalf("%d quotes are not in the brief: %+v", dropped, proposal.Evidence)
+	}
+	fields := map[string]bool{}
+	for _, evidence := range proposal.Evidence {
+		fields[evidence.Field] = true
+	}
+	for _, want := range []string{"city", "cart_added_within_days", "no_purchase_since_cart"} {
+		if !fields[want] {
+			t.Fatalf("no quote for %s: %+v", want, proposal.Evidence)
+		}
+	}
+}
+
 func TestMockIsDeterministic(t *testing.T) {
 	t.Parallel()
 	request := ai.SegmentRequest{Brief: "İzmir sepet", Cities: seed.Cities}
