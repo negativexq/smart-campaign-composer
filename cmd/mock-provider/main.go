@@ -11,9 +11,11 @@ import (
 
 	"github.com/negativexq/smart-campaign-composer/internal/health"
 	"github.com/negativexq/smart-campaign-composer/internal/server"
+	"github.com/negativexq/smart-campaign-composer/internal/telemetry"
 )
 
 func main() {
+	slog.SetDefault(telemetry.NewLogger(os.Stdout))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

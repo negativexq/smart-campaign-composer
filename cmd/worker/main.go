@@ -17,9 +17,11 @@ import (
 	"github.com/negativexq/smart-campaign-composer/internal/db"
 	"github.com/negativexq/smart-campaign-composer/internal/health"
 	"github.com/negativexq/smart-campaign-composer/internal/server"
+	"github.com/negativexq/smart-campaign-composer/internal/telemetry"
 )
 
 func main() {
+	slog.SetDefault(telemetry.NewLogger(os.Stdout))
 	if err := run(); err != nil {
 		slog.Error("worker failed", "error", err)
 		os.Exit(1)
