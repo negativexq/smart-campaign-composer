@@ -47,6 +47,7 @@ services:
     command: ["/app/api"]
     environment:
       <<: *backend-env
+      UNSUBSCRIBE_SECRET: ${UNSUBSCRIBE_SECRET:-local-unsubscribe-secret}
       WORKER_HEALTH_URL: http://worker:8080/healthz
       PROVIDER_HEALTH_URL: http://mock-provider:8080/healthz
       PROVIDER_WEBHOOK_SECRET: ${PROVIDER_WEBHOOK_SECRET:-local-mock-webhook-secret}
@@ -67,6 +68,8 @@ services:
     environment:
       <<: *backend-env
       PROVIDER_URL: http://mock-provider:8080
+      UNSUBSCRIBE_SECRET: ${UNSUBSCRIBE_SECRET:-local-unsubscribe-secret}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
     ports:
       - "8082:8080"
     depends_on:

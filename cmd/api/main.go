@@ -77,6 +77,9 @@ func run(logger *slog.Logger) error {
 	health.RegisterSystem(mux, "/api/system", system)
 	mux.Handle("GET /metrics", promhttp.Handler())
 	httpapi.Register(mux, campaigns, provider, metrics)
+	if secret := os.Getenv("UNSUBSCRIBE_SECRET"); secret != "" {
+		httpapi.RegisterUnsubscribe(mux, campaigns, secret)
+	}
 	if secret := os.Getenv("PROVIDER_WEBHOOK_SECRET"); secret != "" {
 		httpapi.RegisterProviderEvents(mux, campaigns, secret)
 	}

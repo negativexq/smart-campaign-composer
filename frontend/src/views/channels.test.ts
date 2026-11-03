@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Campaign } from "../api/campaigns";
 import DeliveryProgress from "../components/DeliveryProgress.vue";
+import EmailPreview from "../components/EmailPreview.vue";
 import { navigate } from "../lib/navigation";
 import AudienceView from "./AudienceView.vue";
 import ComposeView from "./ComposeView.vue";
@@ -144,5 +145,66 @@ describe("a campaign on one channel", () => {
 
     expect(wrapper.text()).toContain("SMS");
     expect(wrapper.text()).not.toContain("Email");
+  });
+});
+
+describe("email preview", () => {
+  const draft = { email_subject: "Hi {{first_name}}", email_preheader: "Soon", email_body: "Hello {{first_name}}" };
+  const recipients = [{ id: 1, label: "Ayşe", first_name: "Ayşe" }];
+
+  function previewStub(result: () => Response) {
+    const fetchMock = vi.fn(async () => result());
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+  const answer = { ok: true, status: 200, json: async () => ({ subject: "Hi Ayşe", html: "<table>designed</table>", text: "Hello Ayşe\n\nUnsubscribe" }) } as Response;
+
+  it("shows what the backend renders, for the chosen person, without scripts", async () => {
+    const fetchMock = previewStub(() => answer);
+    const wrapper = mount(EmailPreview, { props: { message: draft, recipients } });
+    await flushPromises();
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/email-preview");
+    expect(JSON.parse(init.body as string)).toEqual({ email_headline: "", email_cta_label: "", email_cta_url: "", ...draft, first_name: "Ayşe" });
+    const frame = wrapper.find("[data-testid=email-frame]");
+    expect(frame.attributes("srcdoc")).toContain("designed");
+    expect(frame.attributes("sandbox")).toBe("allow-same-origin");
+    expect(wrapper.find("[data-testid=email-subject]").text()).toBe("Hi Ayşe");
+    expect(wrapper.find("[data-testid=email-preheader]").text()).toBe("Soon");
+  });
+
+  it("asks only for what the template uses, so stored content can be previewed", async () => {
+    const fetchMock = previewStub(() => answer);
+    mount(EmailPreview, { props: { message: { ...draft, sms: "Hi", edited: ["sms"] } as never, recipients } });
+    await flushPromises();
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const sent = JSON.parse(init.body as string);
+    expect(sent.edited).toBeUndefined();
+    expect(sent.sms).toBeUndefined();
+  });
+
+  it("switches between the desktop, mobile and plain text views", async () => {
+    previewStub(() => answer);
+    const wrapper = mount(EmailPreview, { props: { message: draft, recipients } });
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid=email-frame]").attributes("style")).toContain("width: 640px");
+    await wrapper.find("[data-testid=email-mode-mobile]").trigger("click");
+    expect(wrapper.find("[data-testid=email-frame]").attributes("style")).toContain("width: 375px");
+    await wrapper.find("[data-testid=email-mode-text]").trigger("click");
+    expect(wrapper.find("[data-testid=email-frame]").exists()).toBe(false);
+    expect(wrapper.find("[data-testid=email-text]").text()).toContain("Unsubscribe");
+    expect(wrapper.find("[data-testid=email-mode-text]").attributes("aria-pressed")).toBe("true");
+  });
+
+  it("still shows the text when the design cannot be fetched", async () => {
+    previewStub(() => ({ ok: false, status: 500, json: async () => ({ error: "no" }) }) as Response);
+    const wrapper = mount(EmailPreview, { props: { message: draft, recipients } });
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid=email-frame]").exists()).toBe(false);
+    expect(wrapper.find("[data-testid=email-body]").text()).toBe("Hello Ayşe");
   });
 });

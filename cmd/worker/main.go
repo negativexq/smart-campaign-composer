@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/negativexq/smart-campaign-composer/internal/health"
 	"github.com/negativexq/smart-campaign-composer/internal/server"
 	"github.com/negativexq/smart-campaign-composer/internal/telemetry"
+	"github.com/negativexq/smart-campaign-composer/internal/unsubscribe"
 )
 
 func main() {
@@ -49,6 +51,10 @@ func run() error {
 	}
 
 	providerURL, err := server.RequireEnv("PROVIDER_URL")
+	if err != nil {
+		return err
+	}
+	unsubscribeSecret, err := server.RequireEnv("UNSUBSCRIBE_SECRET")
 	if err != nil {
 		return err
 	}
@@ -88,9 +94,14 @@ func run() error {
 	})
 	mux.Handle("GET /metrics", promhttp.Handler())
 
+	config := delivery.DefaultConfig()
+	publicURL := strings.TrimRight(server.Env("PUBLIC_URL", "http://localhost:8080"), "/")
+	config.Unsubscribe = func(userID int64) string {
+		return publicURL + "/api/unsubscribe/" + unsubscribe.Token(unsubscribeSecret, userID)
+	}
 	worker := delivery.New(pool, delivery.NewHTTPSender(providerURL),
 		delivery.NewRedisLimiter(redisClient, ratePerSecond, "delivery"),
-		telemetry.NewMetrics(prometheus.DefaultRegisterer), otel.Tracer("delivery"), delivery.DefaultConfig())
+		telemetry.NewMetrics(prometheus.DefaultRegisterer), otel.Tracer("delivery"), config)
 
 	var running sync.WaitGroup
 	running.Go(func() {

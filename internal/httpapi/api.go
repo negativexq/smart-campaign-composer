@@ -49,6 +49,7 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 		"POST /api/campaigns/{id}/generate":                      a.generate,
 		"PUT /api/campaigns/{id}/content":                        a.saveContent,
 		"GET /api/campaigns/{id}/sample-recipients":              a.sampleRecipients,
+		"POST /api/email-preview":                                a.emailPreview,
 		"POST /api/campaigns/{id}/approve":                       a.approve,
 		"POST /api/campaigns/{id}/dispatch":                      a.dispatch,
 		"POST /api/campaigns/{id}/schedule":                      a.schedule,

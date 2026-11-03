@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -17,16 +18,24 @@ import (
 
 const (
 	// MaxSMS and the other limits are in characters, after variables are filled.
-	MaxSMS          = 160
-	MaxEmailSubject = 80
-	MaxEmailBody    = 5000
+	MaxSMS            = 160
+	MaxEmailSubject   = 80
+	MaxEmailBody      = 5000
+	MaxEmailPreheader = 120
+	MaxEmailHeadline  = 80
+	MaxEmailCTALabel  = 30
+	MaxEmailCTAURL    = 2000
 
 	// FirstNameFallback replaces {{first_name}} for users without a name.
 	FirstNameFallback = "there"
 
-	FieldSMS          = "sms"
-	FieldEmailSubject = "email_subject"
-	FieldEmailBody    = "email_body"
+	FieldSMS            = "sms"
+	FieldEmailSubject   = "email_subject"
+	FieldEmailBody      = "email_body"
+	FieldEmailPreheader = "email_preheader"
+	FieldEmailHeadline  = "email_headline"
+	FieldEmailCTALabel  = "email_cta_label"
+	FieldEmailCTAURL    = "email_cta_url"
 
 	firstNameVariable = "first_name"
 )
@@ -41,6 +50,11 @@ type Content struct {
 	SMS          string `json:"sms"`
 	EmailSubject string `json:"email_subject"`
 	EmailBody    string `json:"email_body"`
+	// The rest of the email is optional, so older drafts stay valid.
+	EmailPreheader string `json:"email_preheader"`
+	EmailHeadline  string `json:"email_headline"`
+	EmailCTALabel  string `json:"email_cta_label"`
+	EmailCTAURL    string `json:"email_cta_url"`
 }
 
 // Limits holds the longest first name per channel in the audience, which
@@ -60,6 +74,7 @@ func (l Limits) Keep(c Content) Content {
 	}
 	if l.SkipEmail {
 		c.EmailSubject, c.EmailBody = "", ""
+		c.EmailPreheader, c.EmailHeadline, c.EmailCTALabel, c.EmailCTAURL = "", "", "", ""
 	}
 	return c
 }
@@ -128,6 +143,9 @@ func CheckMessages(c Content, limits Limits) []Issue {
 			issues = append(issues, checkField(rule.field, rule.label, rule.text, rule.max, rule.nameLength)...)
 		}
 	}
+	if !limits.SkipEmail {
+		issues = append(issues, checkEmailDesign(c, limits)...)
+	}
 	if strings.ContainsAny(c.EmailSubject, "\r\n") {
 		issues = append(issues, Issue{FieldEmailSubject, "line_break", "Email subject must be a single line."})
 	}
@@ -154,6 +172,47 @@ func checkField(field, label, text string, limit, nameLength int) []Issue {
 		issues = append(issues, Issue{field, "malformed_variable", label + " has a broken variable; write it as {{first_name}}."})
 	}
 	return issues
+}
+
+func checkEmailDesign(c Content, limits Limits) []Issue {
+	var issues []Issue
+	for _, rule := range []struct {
+		field, label, text string
+		max                int
+	}{
+		{FieldEmailPreheader, "Preview text", c.EmailPreheader, MaxEmailPreheader},
+		{FieldEmailHeadline, "Headline", c.EmailHeadline, MaxEmailHeadline},
+		{FieldEmailCTALabel, "Button label", c.EmailCTALabel, MaxEmailCTALabel},
+	} {
+		if strings.TrimSpace(rule.text) != "" {
+			issues = append(issues, checkField(rule.field, rule.label, rule.text, rule.max, limits.EmailName)...)
+		}
+	}
+	label, link := strings.TrimSpace(c.EmailCTALabel), strings.TrimSpace(c.EmailCTAURL)
+	switch {
+	case label != "" && link == "":
+		issues = append(issues, Issue{FieldEmailCTAURL, "incomplete_button", "The button has a label but no link."})
+	case label == "" && link != "":
+		issues = append(issues, Issue{FieldEmailCTALabel, "incomplete_button", "The button has a link but no label."})
+	case link != "" && !validLink(link):
+		issues = append(issues, Issue{FieldEmailCTAURL, "invalid_link", "The button link must be a full http or https address."})
+	}
+	return issues
+}
+
+func validLink(link string) bool {
+	parsed, err := url.Parse(link)
+	return err == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Host != "" &&
+		utf8.RuneCountInString(link) <= MaxEmailCTAURL && !strings.ContainsAny(link, "{} \t\n")
+}
+
+// CheckLinks refuses a generated link that nobody gave: a model must not make up
+// where people are sent. A person editing the message may set any valid link.
+func CheckLinks(c Content, source string) []Issue {
+	if c.EmailCTAURL == "" || strings.Contains(source, c.EmailCTAURL) {
+		return nil
+	}
+	return []Issue{{FieldEmailCTAURL, "invented_link", "The button link is not in the brief. Leave it out or use a link from the brief."}}
 }
 
 // RenderedLength is the length in characters once variables are filled with a
@@ -193,6 +252,9 @@ func CheckDiscounts(c Content, source string) []Issue {
 		{FieldSMS, "SMS", c.SMS},
 		{FieldEmailSubject, "Email subject", c.EmailSubject},
 		{FieldEmailBody, "Email body", c.EmailBody},
+		{FieldEmailPreheader, "Preview text", c.EmailPreheader},
+		{FieldEmailHeadline, "Headline", c.EmailHeadline},
+		{FieldEmailCTALabel, "Button label", c.EmailCTALabel},
 	} {
 		for _, found := range discounts(part.text) {
 			if !slices.Contains(allowed, found) {
@@ -248,7 +310,11 @@ func JSONSchema(channels ...string) map[string]any {
 	if len(channels) == 0 || slices.Contains(channels, "email") {
 		required = append(required, FieldEmailSubject, FieldEmailBody)
 		properties[FieldEmailSubject] = text("Email subject on a single line")
-		properties[FieldEmailBody] = text("Email body in plain text")
+		properties[FieldEmailBody] = text("Email body in plain text, with a blank line between paragraphs")
+		properties[FieldEmailPreheader] = text("Preview text shown after the subject in an inbox, adding to it rather than repeating it")
+		properties[FieldEmailHeadline] = text("Short headline at the top of the email")
+		properties[FieldEmailCTALabel] = text("Button label, only when the brief gives a link")
+		properties[FieldEmailCTAURL] = text("Button link, copied exactly from the brief; empty when the brief gives none")
 	}
 	return map[string]any{
 		"type":                 "object",

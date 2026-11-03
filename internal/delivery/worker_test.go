@@ -126,6 +126,7 @@ func newRig(t *testing.T, respond func(int, delivery.Message) (delivery.Result, 
 
 func (r *rig) newWorker() *delivery.Worker {
 	return delivery.New(r.pool, r.sender, r.limiter, r.metrics, noop.NewTracerProvider().Tracer("test"), delivery.Config{
+		Unsubscribe: func(userID int64) string { return fmt.Sprintf("https://app.example.com/api/unsubscribe/%d", userID) },
 		BatchSize:   50,
 		Concurrency: 8,
 		Lease:       time.Minute,

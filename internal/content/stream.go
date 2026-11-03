@@ -43,7 +43,7 @@ func NewFieldStream(emit func(field, text string)) *FieldStream {
 	return &FieldStream{emit: emit}
 }
 
-var streamedFields = []string{FieldSMS, FieldEmailSubject, FieldEmailBody}
+var streamedFields = []string{FieldSMS, FieldEmailSubject, FieldEmailPreheader, FieldEmailHeadline, FieldEmailBody, FieldEmailCTALabel, FieldEmailCTAURL}
 
 // Write consumes the next chunk of output.
 func (s *FieldStream) Write(chunk string) {

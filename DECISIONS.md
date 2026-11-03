@@ -98,6 +98,18 @@ Messages are written for a specific audience, and its longest name sets the limi
 
 A campaign uses SMS, email or both, and that choice is fixed once it exists. It is stored on the campaign rather than derived from which text was written, because the choice decides what gets written: the model is asked only for the chosen fields, text for any other field is dropped whoever wrote it, and deliveries are only created on the chosen channels. Reachable counts are zeroed for an unused channel before the approval checks run, so a campaign is not blocked by missing consent on a channel it does not use, and the number on the approve button stays exact.
 
+## One email template, filled with text
+
+The model and the marketer write text only: subject, preview text, headline, body, button label and link. The backend puts that text into one table-based responsive template with `html/template`, so neither can add markup, and the plain text alternative comes from the same fields. Letting a model write HTML would need a sanitizer, would break differently in each mail client, and would make every campaign a new design to check. The cost is that campaigns cannot have their own layout or images.
+
+The preview calls the same renderer through an endpoint instead of copying it in the frontend, so what a marketer checks is what is sent. It is shown in a sandboxed frame with no scripts.
+
+A button link from the model must appear in the brief, the instruction or the current version, because a made-up address sends real people somewhere nobody chose. A person editing the message can set any full http or https link. The footer text is English even for Turkish messages, which has the same cause as the `there` fallback: campaigns have no language field yet.
+
+## Unsubscribing takes a signed link and a button
+
+Every email has its own link, signed with HMAC-SHA256, so it needs no session and cannot be changed to withdraw someone else's consent. Opening it only asks, because mail scanners open links; the POST withdraws email consent and can be repeated. SMS consent does not change. The worker reads consent again before each send, so queued emails for that person end as `consent_withdrawn` with no extra code. The worker refuses to start without `UNSUBSCRIBE_SECRET`, so no campaign can go out with a footer that does not work.
+
 ## Known limits of content generation
 
 Regeneration replaces every message rather than one, which keeps the validation of the offer across channels simple. The `there` fallback for a missing name is English and reads awkwardly in a Turkish message; per-language fallbacks belong with per-language content.

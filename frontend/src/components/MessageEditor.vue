@@ -16,6 +16,8 @@ const props = defineProps<{
   // Longest {{first_name}} in the audience. When given, the count is what the
   // longest recipient would get rather than the template as written.
   longestName?: number;
+  // A link has no place for a variable.
+  noVariables?: boolean;
   problem?: string;
 }>();
 
@@ -76,6 +78,7 @@ function insertFirstName() {
 
     <div class="footer">
       <button
+        v-if="!noVariables"
         type="button"
         class="insert small mono"
         data-testid="insert-variable"

@@ -8,7 +8,15 @@ const FAILURE_REASONS: Record<string, string> = {
   unavailable: "the AI service was unavailable",
 };
 
-const FIELD_NAMES: Record<string, string> = { sms: "SMS", email_subject: "email subject", email_body: "email body" };
+const FIELD_NAMES: Record<string, string> = {
+  sms: "SMS",
+  email_subject: "email subject",
+  email_preheader: "preview text",
+  email_headline: "headline",
+  email_body: "email body",
+  email_cta_label: "button label",
+  email_cta_url: "button link",
+};
 
 const TRIGGER_TITLES: Record<string, string> = {
   refinement: "Audience refined",

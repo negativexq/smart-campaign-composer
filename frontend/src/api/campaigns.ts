@@ -6,7 +6,7 @@ export type Condition = { field: string; label: string; value: string };
 export type Assumption = { field: string; note: string };
 export type Audience = { total: number; sms: number; email: number };
 
-export type MessageField = "sms" | "email_subject" | "email_body";
+export type MessageField = "sms" | "email_subject" | "email_preheader" | "email_headline" | "email_body" | "email_cta_label" | "email_cta_url";
 export type Messages = Record<MessageField, string>;
 export type ContentIssue = { field: string; reason: string; message: string };
 export type SampleRecipient = { id: number; label: string; first_name: string };
@@ -189,6 +189,16 @@ export async function listCampaigns(filter: { group: CampaignGroup; query: strin
 
 export async function getActivity(id: string): Promise<ActivityEntry[]> {
   return (await request<{ activity: ActivityEntry[] }>(`/api/campaigns/${encodeURIComponent(id)}/activity`)).activity;
+}
+
+const EMAIL_FIELDS: MessageField[] = ["email_subject", "email_preheader", "email_headline", "email_body", "email_cta_label", "email_cta_url"];
+
+export type EmailPreviewResult = { subject: string; html: string; text: string };
+
+export function previewEmail(message: Partial<Messages>, firstName: string): Promise<EmailPreviewResult> {
+  // Stored content also says who edited what, which the template has no use for.
+  const fields = EMAIL_FIELDS.map((field) => [field, message[field] ?? ""]);
+  return post<EmailPreviewResult>("/api/email-preview", { ...Object.fromEntries(fields), first_name: firstName });
 }
 
 export function saveContent(id: string, messages: Messages): Promise<Campaign> {

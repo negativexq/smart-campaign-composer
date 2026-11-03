@@ -31,6 +31,7 @@ func NewHTTPSender(baseURL string) *HTTPSender {
 func (s *HTTPSender) Send(ctx context.Context, message Message) (Result, error) {
 	encoded, err := json.Marshal(map[string]string{
 		"channel": message.Channel, "to": message.To, "subject": message.Subject, "body": message.Body,
+		"html": message.HTML, "unsubscribe_url": message.UnsubscribeURL,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("encode message: %w", err)

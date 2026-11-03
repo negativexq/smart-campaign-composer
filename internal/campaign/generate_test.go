@@ -506,3 +506,40 @@ func TestSampleRecipientsShowTheEdgeCases(t *testing.T) {
 		t.Fatalf("samples: %+v", samples)
 	}
 }
+
+func TestAModelCannotMakeUpWhereAButtonLeads(t *testing.T) {
+	t.Parallel()
+	invented := `{"sms":"Hi {{first_name}}","email_subject":"Hello {{first_name}}","email_body":"Your cart is waiting.","email_cta_label":"Go","email_cta_url":"https://evil.example.com"}`
+	h, provider, id := newContentHarness(t, step{output: invented}, step{output: validContent})
+
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err != nil {
+		t.Fatalf("the corrected attempt should pass: %v", err)
+	}
+	if len(provider.contentCalls) != 2 || !strings.Contains(provider.contentCalls[1].ValidationError, "not in the brief") {
+		t.Fatalf("calls: %+v", provider.contentCalls)
+	}
+	view, err := h.service.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Content == nil || view.Content.EmailCTAURL != "" {
+		t.Fatalf("content: %+v", view.Content)
+	}
+}
+
+func TestAModelMayUseALinkFromTheInstruction(t *testing.T) {
+	t.Parallel()
+	given := `{"sms":"Hi {{first_name}}","email_subject":"Hello {{first_name}}","email_body":"Your cart is waiting.","email_cta_label":"Go","email_cta_url":"https://shop.example.com/sale"}`
+	h, _, id := newContentHarness(t, step{output: given})
+
+	if _, _, err := run(t, h, id, campaign.GenerateInput{Instruction: "Link to https://shop.example.com/sale"}); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	view, err := h.service.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Content == nil || view.Content.EmailCTAURL != "https://shop.example.com/sale" {
+		t.Fatalf("content: %+v", view.Content)
+	}
+}

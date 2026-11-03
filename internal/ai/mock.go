@@ -174,6 +174,7 @@ const mockChunkSize = 12
 
 var (
 	mockDiscount = regexp.MustCompile(`%\s*\d+|\d+\s*%`)
+	mockLink     = regexp.MustCompile(`https?://[^\s<>"]+[^\s<>".,;:!?)]`)
 	mockTurkish  = regexp.MustCompile(`[çğıİöşüÇĞÖŞÜ]|indirim|gönder|sepet|kargo`)
 )
 
@@ -181,7 +182,14 @@ var (
 // switching when regenerating, and carries the discount the text asks for.
 func (m *Mock) StreamContent(ctx context.Context, request ContentRequest, handler StreamHandler) (Response, error) {
 	source := content.OfferSource(request.Brief, request.Instruction)
-	draft := request.Limits.Keep(mockDraft(mockTurkish.MatchString(request.Brief), mockDiscount.FindString(source), string(request.Current)))
+	draft := mockDraft(mockTurkish.MatchString(request.Brief), mockDiscount.FindString(source), string(request.Current))
+	if link := mockLink.FindString(request.Brief + " " + request.Instruction); link != "" {
+		draft.EmailCTAURL, draft.EmailCTALabel = link, "See the offer"
+		if mockTurkish.MatchString(request.Brief) {
+			draft.EmailCTALabel = "Teklifi gör"
+		}
+	}
+	draft = request.Limits.Keep(draft)
 	output, err := json.Marshal(draft)
 	if err != nil {
 		return Response{}, fmt.Errorf("%w: %w", ErrInvalidOutput, err)
@@ -224,27 +232,35 @@ func mockWording(turkish bool, variant int, offerSMS, offerEmail string) content
 	if turkish {
 		if variant == 0 {
 			return content.Content{
-				SMS:          "Merhaba {{first_name}}, seni unutmadık." + offerSMS,
-				EmailSubject: "{{first_name}}, sana bir haberimiz var",
-				EmailBody:    "Merhaba {{first_name}},\n\nSeçtiklerin hâlâ burada." + offerEmail + "\n\nTekrar görüşmek üzere.",
+				SMS:            "Merhaba {{first_name}}, seni unutmadık." + offerSMS,
+				EmailSubject:   "{{first_name}}, sana bir haberimiz var",
+				EmailPreheader: "Seçtiklerin seni bekliyor.",
+				EmailHeadline:  "Seni tekrar görmek güzel",
+				EmailBody:      "Merhaba {{first_name}},\n\nSeçtiklerin hâlâ burada." + offerEmail + "\n\nTekrar görüşmek üzere.",
 			}
 		}
 		return content.Content{
-			SMS:          "{{first_name}}, kaldığın yerden devam et." + offerSMS,
-			EmailSubject: "Kaldığın yerden devam et, {{first_name}}",
-			EmailBody:    "Selam {{first_name}},\n\nKısa bir hatırlatma yapmak istedik." + offerEmail + "\n\nGörüşmek üzere.",
+			SMS:            "{{first_name}}, kaldığın yerden devam et." + offerSMS,
+			EmailSubject:   "Kaldığın yerden devam et, {{first_name}}",
+			EmailPreheader: "Kısa bir hatırlatma.",
+			EmailHeadline:  "Bıraktığın yerde duruyor",
+			EmailBody:      "Selam {{first_name}},\n\nKısa bir hatırlatma yapmak istedik." + offerEmail + "\n\nGörüşmek üzere.",
 		}
 	}
 	if variant == 0 {
 		return content.Content{
-			SMS:          "Hi {{first_name}}, we saved your spot." + offerSMS,
-			EmailSubject: "{{first_name}}, we have news for you",
-			EmailBody:    "Hi {{first_name}},\n\nWhat you picked is still here." + offerEmail + "\n\nSee you soon.",
+			SMS:            "Hi {{first_name}}, we saved your spot." + offerSMS,
+			EmailSubject:   "{{first_name}}, we have news for you",
+			EmailPreheader: "What you picked is waiting for you.",
+			EmailHeadline:  "Good to see you again",
+			EmailBody:      "Hi {{first_name}},\n\nWhat you picked is still here." + offerEmail + "\n\nSee you soon.",
 		}
 	}
 	return content.Content{
-		SMS:          "{{first_name}}, pick up where you left off." + offerSMS,
-		EmailSubject: "Pick up where you left off, {{first_name}}",
-		EmailBody:    "Hello {{first_name}},\n\nA quick reminder from us." + offerEmail + "\n\nThanks for reading.",
+		SMS:            "{{first_name}}, pick up where you left off." + offerSMS,
+		EmailSubject:   "Pick up where you left off, {{first_name}}",
+		EmailPreheader: "A quick reminder from us.",
+		EmailHeadline:  "Still where you left it",
+		EmailBody:      "Hello {{first_name}},\n\nA quick reminder from us." + offerEmail + "\n\nThanks for reading.",
 	}
 }

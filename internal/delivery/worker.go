@@ -58,6 +58,8 @@ type Message struct {
 	To             string
 	Subject        string
 	Body           string
+	HTML           string
+	UnsubscribeURL string
 	IdempotencyKey string
 }
 
@@ -91,6 +93,8 @@ type Config struct {
 	MaxAttempts int
 	SendTimeout time.Duration
 	Backoff     func(attempt int) time.Duration
+	// Unsubscribe gives the signed link for a person's emails.
+	Unsubscribe func(userID int64) string
 }
 
 // DefaultConfig holds production settings.
@@ -250,17 +254,21 @@ func (w *Worker) claim(ctx context.Context) ([]claim, error) {
 	return claims, nil
 }
 
-func (c claim) message() Message {
+func (c claim) message(unsubscribeURL string) (Message, error) {
 	message := Message{Channel: c.channel, IdempotencyKey: c.key}
 	if c.channel == "sms" {
 		message.To = c.phone
 		message.Body = content.Render(c.content.SMS, c.firstName)
-		return message
+		return message, nil
 	}
 	message.To = c.email
-	message.Subject = content.Render(c.content.EmailSubject, c.firstName)
-	message.Body = content.Render(c.content.EmailBody, c.firstName)
-	return message
+	message.UnsubscribeURL = unsubscribeURL
+	email, err := content.RenderEmail(c.content, c.firstName, unsubscribeURL)
+	if err != nil {
+		return Message{}, err
+	}
+	message.Subject, message.Body, message.HTML = email.Subject, email.Text, email.HTML
+	return message, nil
 }
 
 func (w *Worker) handle(ctx context.Context, item claim) (err error) {
@@ -357,11 +365,22 @@ func (w *Worker) send(ctx context.Context, item claim) (Result, error) {
 	callCtx, span := w.tracer.Start(callCtx, "delivery.provider")
 	defer span.End()
 
+	message, err := item.message(w.unsubscribeURL(item))
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrNotSent, err)
+	}
 	start := time.Now()
-	result, err := w.sender.Send(callCtx, item.message())
+	result, err := w.sender.Send(callCtx, message)
 	w.metrics.DeliveryDuration.WithLabelValues(item.channel).Observe(time.Since(start).Seconds())
 	span.SetAttributes(attribute.Int("http.response.status_code", result.StatusCode))
 	return result, err
+}
+
+func (w *Worker) unsubscribeURL(item claim) string {
+	if item.channel != "email" || w.config.Unsubscribe == nil {
+		return ""
+	}
+	return w.config.Unsubscribe(item.userID)
 }
 
 func classify(result Result, sendErr error) (string, *int) {

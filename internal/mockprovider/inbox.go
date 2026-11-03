@@ -22,15 +22,17 @@ var inboxPage []byte
 // filled in. Repeats counts calls that reused its idempotency key: they reached
 // the provider, but no person would get a second message.
 type InboxMessage struct {
-	ID         string     `json:"id"`
-	Channel    string     `json:"channel"`
-	To         string     `json:"to"`
-	Subject    string     `json:"subject,omitempty"`
-	Body       string     `json:"body"`
-	Repeats    int        `json:"repeats"`
-	ReceivedAt time.Time  `json:"received_at"`
-	OpenedAt   *time.Time `json:"opened_at"`
-	key        string
+	ID             string     `json:"id"`
+	Channel        string     `json:"channel"`
+	To             string     `json:"to"`
+	Subject        string     `json:"subject,omitempty"`
+	Body           string     `json:"body"`
+	HTML           string     `json:"html,omitempty"`
+	UnsubscribeURL string     `json:"unsubscribe_url,omitempty"`
+	Repeats        int        `json:"repeats"`
+	ReceivedAt     time.Time  `json:"received_at"`
+	OpenedAt       *time.Time `json:"opened_at"`
+	key            string
 }
 
 // InboxPage is one read of the inbox, newest first. Totals ignore the filters.
@@ -55,6 +57,7 @@ type inbox struct {
 func (b *inbox) add(key, id string, message request) {
 	entry := &InboxMessage{
 		ID: id, Channel: message.Channel, To: message.To, Subject: message.Subject, Body: message.Body,
+		HTML: message.HTML, UnsubscribeURL: message.UnsubscribeURL,
 		ReceivedAt: time.Now().UTC(), key: key,
 	}
 	b.messages = append(b.messages, entry)
@@ -140,6 +143,7 @@ func (s *Server) registerInbox(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/inbox/{id}/open", s.openMessage)
 	mux.HandleFunc("GET /{$}", serveInboxPage)
 	mux.HandleFunc("GET /v1/inbox", s.getInbox)
+	mux.HandleFunc("GET /v1/inbox/{id}", s.getInboxMessage)
 	mux.HandleFunc("DELETE /v1/inbox", s.deleteInbox)
 }
 
@@ -163,7 +167,24 @@ func (s *Server) getInbox(w http.ResponseWriter, r *http.Request) {
 	if err != nil || limit <= 0 {
 		limit = defaultInboxPage
 	}
-	writeJSON(w, http.StatusOK, s.Inbox(channel, query.Get("q"), min(limit, maxInboxPage)))
+	page := s.Inbox(channel, query.Get("q"), min(limit, maxInboxPage))
+	// The page polls this list, so each design is only fetched when it is opened.
+	for index := range page.Messages {
+		page.Messages[index].HTML = ""
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+func (s *Server) getInboxMessage(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, entry := range s.inbox.messages {
+		if entry.ID == r.PathValue("id") {
+			writeJSON(w, http.StatusOK, *entry)
+			return
+		}
+	}
+	writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such message"})
 }
 
 func (s *Server) openMessage(w http.ResponseWriter, r *http.Request) {

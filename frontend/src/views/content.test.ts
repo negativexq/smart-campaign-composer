@@ -23,7 +23,7 @@ const base: Campaign = {
   created_at: "2026-11-03T12:00:00Z",
   updated_at: "2026-11-03T12:00:00Z",
 };
-const stored = { sms: "Hi {{first_name}}", email_subject: "Subject", email_body: "Body", edited: [] };
+const stored = { sms: "Hi {{first_name}}", email_subject: "Subject", email_preheader: "", email_headline: "", email_body: "Body", email_cta_label: "", email_cta_url: "", edited: [] };
 const ready: Campaign = { ...base, status: "READY_FOR_REVIEW", content: stored };
 const recipients = [
   { id: 1, label: "Ayşe", first_name: "Ayşe" },

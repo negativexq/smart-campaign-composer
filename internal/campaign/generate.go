@@ -268,12 +268,27 @@ func (g *Generation) validate(ctx context.Context, output []byte, offerSource st
 	_, span := g.service.tracer.Start(ctx, "content.validate")
 	defer span.End()
 	generated, err := content.ParseGenerated(output, g.view.ContentLimits, offerSource)
+	if err == nil {
+		if issues := content.CheckLinks(generated, g.linkSource()); len(issues) > 0 {
+			err = &content.ValidationError{Issues: issues}
+		}
+	}
 	var invalid *content.ValidationError
 	if errors.As(err, &invalid) {
 		span.SetStatus(codes.Error, "rejected")
 		span.SetAttributes(attribute.StringSlice("validation.reasons", issueReasons(invalid)))
 	}
 	return generated, err
+}
+
+// linkSource is everything a person wrote that a generated link may come from,
+// including a link they already set on the current version.
+func (g *Generation) linkSource() string {
+	source := g.view.Brief + "\n" + g.instruction
+	if g.view.Content != nil {
+		source += "\n" + g.view.Content.EmailCTAURL
+	}
+	return source
 }
 
 func issueReasons(invalid *content.ValidationError) []string {
@@ -402,21 +417,28 @@ func (s *Service) SaveContent(ctx context.Context, id string, edited content.Con
 
 func changedFields(before, after content.Content) []string {
 	changed := []string{}
-	if before.SMS != after.SMS {
-		changed = append(changed, content.FieldSMS)
-	}
-	if before.EmailSubject != after.EmailSubject {
-		changed = append(changed, content.FieldEmailSubject)
-	}
-	if before.EmailBody != after.EmailBody {
-		changed = append(changed, content.FieldEmailBody)
+	for _, field := range []struct {
+		name          string
+		before, after string
+	}{
+		{content.FieldSMS, before.SMS, after.SMS},
+		{content.FieldEmailSubject, before.EmailSubject, after.EmailSubject},
+		{content.FieldEmailPreheader, before.EmailPreheader, after.EmailPreheader},
+		{content.FieldEmailHeadline, before.EmailHeadline, after.EmailHeadline},
+		{content.FieldEmailBody, before.EmailBody, after.EmailBody},
+		{content.FieldEmailCTALabel, before.EmailCTALabel, after.EmailCTALabel},
+		{content.FieldEmailCTAURL, before.EmailCTAURL, after.EmailCTAURL},
+	} {
+		if field.before != field.after {
+			changed = append(changed, field.name)
+		}
 	}
 	return changed
 }
 
 func mergeEdited(existing, changed []string) []string {
 	merged := []string{}
-	for _, field := range []string{content.FieldSMS, content.FieldEmailSubject, content.FieldEmailBody} {
+	for _, field := range []string{content.FieldSMS, content.FieldEmailSubject, content.FieldEmailPreheader, content.FieldEmailHeadline, content.FieldEmailBody, content.FieldEmailCTALabel, content.FieldEmailCTAURL} {
 		for _, list := range [][]string{existing, changed} {
 			if contains(list, field) {
 				merged = append(merged, field)

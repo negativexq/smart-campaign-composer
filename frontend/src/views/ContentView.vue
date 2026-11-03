@@ -11,6 +11,7 @@ import {
   type Campaign,
   type ContentIssue,
   type MessageField,
+  type Messages,
   type SampleRecipient,
 } from "../api/campaigns";
 import EmailPreview from "../components/EmailPreview.vue";
@@ -32,7 +33,7 @@ const generating = ref(false);
 const saving = ref(false);
 const issues = ref<ContentIssue[]>([]);
 const instruction = ref("");
-const messages = reactive({ sms: "", email_subject: "", email_body: "" });
+const messages = reactive<Messages>({ sms: "", email_subject: "", email_preheader: "", email_headline: "", email_body: "", email_cta_label: "", email_cta_url: "" });
 let controller: AbortController | null = null;
 
 const stored = computed(() => campaign.value?.content);
@@ -42,9 +43,7 @@ const dirty = computed(() =>
 const canGenerate = computed(() => !generating.value && !saving.value);
 
 function fill(content: Campaign["content"]) {
-  messages.sms = content?.sms ?? "";
-  messages.email_subject = content?.email_subject ?? "";
-  messages.email_body = content?.email_body ?? "";
+  for (const field of Object.keys(messages) as MessageField[]) messages[field] = content?.[field] ?? "";
 }
 
 function issueFor(field: MessageField) {
@@ -208,6 +207,28 @@ onBeforeUnmount(() => controller?.abort());
         />
         <MessageEditor
           v-if="campaign.channels.includes('email')"
+          v-model="messages.email_preheader"
+          label="Preview text"
+          :limit="120"
+          :rows="2"
+          :state="stateOf('email_preheader')"
+          :origin="originOf('email_preheader')"
+          :longest-name="campaign.content_limits.email_name_length"
+          :problem="issueFor('email_preheader')"
+        />
+        <MessageEditor
+          v-if="campaign.channels.includes('email')"
+          v-model="messages.email_headline"
+          label="Headline"
+          :limit="80"
+          :rows="2"
+          :state="stateOf('email_headline')"
+          :origin="originOf('email_headline')"
+          :longest-name="campaign.content_limits.email_name_length"
+          :problem="issueFor('email_headline')"
+        />
+        <MessageEditor
+          v-if="campaign.channels.includes('email')"
           v-model="messages.email_body"
           label="Email body"
           :limit="5000"
@@ -216,6 +237,27 @@ onBeforeUnmount(() => controller?.abort());
           :origin="originOf('email_body')"
           :longest-name="campaign.content_limits.email_name_length"
           :problem="issueFor('email_body')"
+        />
+        <MessageEditor
+          v-if="campaign.channels.includes('email')"
+          v-model="messages.email_cta_label"
+          label="Button label"
+          :limit="30"
+          :rows="1"
+          :state="stateOf('email_cta_label')"
+          :origin="originOf('email_cta_label')"
+          :longest-name="campaign.content_limits.email_name_length"
+          :problem="issueFor('email_cta_label')"
+        />
+        <MessageEditor
+          v-if="campaign.channels.includes('email')"
+          v-model="messages.email_cta_url"
+          label="Button link"
+          :rows="1"
+          no-variables
+          :state="stateOf('email_cta_url')"
+          :origin="originOf('email_cta_url')"
+          :problem="issueFor('email_cta_url')"
         />
 
         <div v-if="generating" class="row">
@@ -259,7 +301,7 @@ onBeforeUnmount(() => controller?.abort());
         </template>
         <template v-if="campaign.channels.includes('email')">
           <h2>Email</h2>
-          <EmailPreview :subject="messages.email_subject" :body="messages.email_body" :recipients="recipients" />
+          <EmailPreview :message="messages" :recipients="recipients" />
         </template>
       </aside>
     </div>
@@ -298,6 +340,11 @@ onBeforeUnmount(() => controller?.abort());
   min-width: 0;
 }
 
+.previews {
+  position: sticky;
+  top: var(--space-4);
+}
+
 .regenerate {
   gap: var(--space-2);
 }
@@ -321,6 +368,10 @@ onBeforeUnmount(() => controller?.abort());
 @media (max-width: 960px) {
   .grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .previews {
+    position: static;
   }
 }
 </style>

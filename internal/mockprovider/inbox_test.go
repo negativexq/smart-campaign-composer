@@ -283,3 +283,47 @@ func TestInboxKeepsTheEmailAsItWasDesigned(t *testing.T) {
 		t.Fatalf("message: %+v", got)
 	}
 }
+
+func TestInboxListLeavesTheDesignForWhenAMessageIsOpened(t *testing.T) {
+	t.Parallel()
+	provider := mockprovider.New(rolling(0.9))
+	mux := http.NewServeMux()
+	provider.Register(mux)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	designed := mail
+	designed.HTML = "<table>designed</table>"
+	if _, err := delivery.NewHTTPSender(server.URL).Send(context.Background(), designed); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	var page mockprovider.InboxPage
+	getJSON(t, server.URL+"/v1/inbox", &page)
+	if page.Messages[0].HTML != "" {
+		t.Fatalf("list: %+v", page.Messages[0])
+	}
+	var message mockprovider.InboxMessage
+	getJSON(t, server.URL+"/v1/inbox/"+page.Messages[0].ID, &message)
+	if message.HTML != designed.HTML {
+		t.Fatalf("message: %+v", message)
+	}
+	response, err := http.Get(server.URL + "/v1/inbox/none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown message: %d", response.StatusCode)
+	}
+}
+
+func getJSON(t *testing.T, url string, into any) {
+	t.Helper()
+	response, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if err := json.NewDecoder(response.Body).Decode(into); err != nil {
+		t.Fatal(err)
+	}
+}

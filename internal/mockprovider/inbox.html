@@ -53,6 +53,10 @@ button, input { font: inherit; color: inherit; }
 .meta { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 2px 8px; margin: 0; font-size: 13px; }
 .meta dt { color: var(--muted); }
 .meta dd { margin: 0; overflow-wrap: anywhere; }
+.modes { display: flex; gap: 4px; width: fit-content; margin-top: 4px; padding: 2px; background: var(--subtle); border-radius: 8px; }
+.mode { min-height: 28px; padding: 0 10px; background: transparent; border: 0; border-radius: 6px; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+.mode[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 500; box-shadow: 0 0 0 1px var(--border); }
+.mail-frame { display: block; max-width: 100%; height: 480px; margin: 0 auto; border: 0; }
 .mail-body { margin: 0; padding: 24px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .phone { max-width: 360px; padding: 16px; }
 .phone-head { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); text-align: center; }
@@ -103,7 +107,8 @@ button, input { font: inherit; color: inherit; }
 // Message text comes from a model and from people: it only ever goes in as text.
 const REFRESH_MS = 2000;
 const PAGE = 200;
-const state = { channel: "", search: "", selected: "", messages: [], failed: false };
+const EMAIL_MODES = [["desktop", "Desktop"], ["mobile", "Mobile"], ["text", "Plain text"]];
+const state = { channel: "", search: "", selected: "", messages: [], failed: false, emailMode: "desktop", designs: new Map(), shown: "" };
 const $ = (id) => document.getElementById(id);
 
 function el(tag, className, text) {
@@ -147,9 +152,19 @@ function renderList() {
   $("list").replaceChildren(...items);
 }
 
+async function fetchDesign(message) {
+  if (message.channel !== "email" || state.designs.has(message.id)) return;
+  const response = await fetch(`/v1/inbox/${encodeURIComponent(message.id)}`);
+  if (!response.ok) return;
+  const full = await response.json();
+  if (full.html) state.designs.set(message.id, full.html);
+}
+
 async function open(message) {
   state.selected = message.id;
   render();
+  await fetchDesign(message);
+  renderDetail();
   if (message.opened_at) return;
   // Opening it here is what the campaign's report counts.
   await fetch(`/v1/inbox/${encodeURIComponent(message.id)}/open`, { method: "POST" });
@@ -175,6 +190,10 @@ function renderFacts(message) {
 function renderDetail() {
   const message = state.messages.find((item) => item.id === state.selected);
   const detail = $("detail");
+  // The list refreshes on a timer. Rebuilding an unchanged message would reload its design.
+  const shown = message ? [message.id, message.opened_at, message.repeats, state.emailMode, state.designs.has(message.id)].join("|") : "";
+  if (message && shown === state.shown) return;
+  state.shown = shown;
   if (!message) {
     const empty = el("div", "empty");
     const nothingYet = !state.messages.length && !state.search;
@@ -195,7 +214,33 @@ function renderDetail() {
     const meta = el("dl", "meta");
     meta.append(el("dt", "", "To"), el("dd", "", message.to), el("dt", "", "From"), el("dd", "", "Mock Email Provider"));
     head.append(el("h2", "", message.subject), meta);
-    card.append(head, el("p", "mail-body", message.body));
+    const modes = el("div", "modes");
+    for (const [id, label] of EMAIL_MODES) {
+      const button = el("button", "mode", label);
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(state.emailMode === id));
+      button.addEventListener("click", () => {
+        state.emailMode = id;
+        renderDetail();
+      });
+      modes.append(button);
+    }
+    head.append(modes);
+    const design = state.designs.get(message.id);
+    if (design && state.emailMode !== "text") {
+      const frame = el("iframe", "mail-frame");
+      frame.title = "The email as it was received";
+      // No scripts run in it. Popups let its links open, so the unsubscribe page can be tried.
+      frame.setAttribute("sandbox", "allow-same-origin allow-popups allow-popups-to-escape-sandbox");
+      frame.srcdoc = design;
+      frame.style.width = state.emailMode === "mobile" ? "375px" : "100%";
+      frame.addEventListener("load", () => {
+        frame.style.height = `${frame.contentDocument.documentElement.scrollHeight}px`;
+      });
+      card.append(head, frame);
+    } else {
+      card.append(head, el("p", "mail-body", message.body));
+    }
   }
   detail.replaceChildren(card, renderFacts(message));
 }

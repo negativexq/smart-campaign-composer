@@ -96,10 +96,12 @@ func (s *Server) Register(mux *http.ServeMux) {
 }
 
 type request struct {
-	Channel string `json:"channel"`
-	To      string `json:"to"`
-	Subject string `json:"subject"`
-	Body    string `json:"body"`
+	Channel        string `json:"channel"`
+	To             string `json:"to"`
+	Subject        string `json:"subject"`
+	Body           string `json:"body"`
+	HTML           string `json:"html"`
+	UnsubscribeURL string `json:"unsubscribe_url"`
 }
 
 func (r request) problem() string {

@@ -20,6 +20,7 @@ import AudienceRule from "../components/AudienceRule.vue";
 import CampaignName from "../components/CampaignName.vue";
 import CampaignStatusBadge from "../components/CampaignStatusBadge.vue";
 import DeliveriesPanel from "../components/DeliveriesPanel.vue";
+import EmailPreview from "../components/EmailPreview.vue";
 import DeliveryProgress from "../components/DeliveryProgress.vue";
 import MetricCard from "../components/MetricCard.vue";
 import OriginTag from "../components/OriginTag.vue";
@@ -260,8 +261,7 @@ onBeforeUnmount(() => stopWatching?.());
       </article>
       <article v-if="campaign.channels.includes('email')" class="message card" data-testid="content-email">
         <div class="message-head"><h2>Email</h2><OriginTag :origin="originOf('email_body')" /></div>
-        <p class="message-subject">{{ campaign.content.email_subject }}</p>
-        <p class="message-text">{{ campaign.content.email_body }}</p>
+        <EmailPreview :message="campaign.content" :recipients="[]" />
       </article>
     </section>
 
@@ -400,10 +400,6 @@ onBeforeUnmount(() => stopWatching?.());
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-}
-
-.message-subject {
-  font-weight: 500;
 }
 
 .message-text {

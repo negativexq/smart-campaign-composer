@@ -193,6 +193,15 @@ func provisionalName(brief string) string {
 	return kept.String() + "…"
 }
 
+// Unsubscribe withdraws a person's email consent. Deliveries still waiting read
+// consent again before sending, so they stop as well.
+func (s *Service) Unsubscribe(ctx context.Context, userID int64) error {
+	if _, err := s.db.Exec(ctx, `UPDATE consents SET allowed = false, updated_at = now() WHERE user_id = $1 AND channel = 'email' AND allowed`, userID); err != nil {
+		return fmt.Errorf("withdraw email consent: %w", err)
+	}
+	return nil
+}
+
 // normalizeChannels puts a choice in the product's order. Saying nothing means
 // both, while an empty list is a choice of none and is refused.
 func normalizeChannels(chosen []string) ([]string, error) {

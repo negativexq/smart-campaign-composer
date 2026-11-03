@@ -9,6 +9,7 @@ import {
   scheduleCampaign,
   type Campaign,
 } from "../api/campaigns";
+import EmailPreview from "../components/EmailPreview.vue";
 import MetricCard from "../components/MetricCard.vue";
 import SchedulePicker from "../components/SchedulePicker.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
@@ -103,8 +104,7 @@ onMounted(async () => {
       </article>
       <article v-if="campaign.channels.includes('email')" class="message card" data-testid="review-email">
         <h3 class="muted small">Email</h3>
-        <p class="subject">{{ campaign.content.email_subject }}</p>
-        <p class="text">{{ campaign.content.email_body }}</p>
+        <EmailPreview :message="campaign.content" :recipients="[]" />
       </article>
     </section>
 
@@ -153,10 +153,6 @@ onMounted(async () => {
   display: grid;
   gap: var(--space-2);
   padding: var(--space-4);
-}
-
-.subject {
-  font-weight: 500;
 }
 
 .text {
