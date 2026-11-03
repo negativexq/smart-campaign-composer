@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App.vue";
 
@@ -12,14 +12,28 @@ function stubReadiness(response: Partial<Response> | Error) {
   return fetchMock;
 }
 
+afterEach(() => {
+  window.history.pushState({}, "", "/");
+  vi.unstubAllGlobals();
+});
+
 describe("App", () => {
-  it("offers a brief field as the first step", async () => {
+  it("opens on the brief, not an empty dashboard", async () => {
     stubReadiness({ ok: true });
     const wrapper = mount(App);
     await flushPromises();
 
-    expect(wrapper.find("h1").text()).toBe("New campaign");
-    expect(wrapper.find("textarea").attributes("placeholder")).toContain("Describe");
+    expect(wrapper.find("h1").text()).toBe("Bring your next campaign to life.");
+    expect(wrapper.find("textarea").exists()).toBe(true);
+  });
+
+  it("always shows the campaign status and current step", async () => {
+    stubReadiness({ ok: true });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid=campaign-status]").text()).toBe("Draft");
+    expect(wrapper.find("[aria-current=step]").text()).toContain("Brief");
   });
 
   it("keeps generation disabled and says why", async () => {
@@ -28,9 +42,8 @@ describe("App", () => {
     await flushPromises();
     await wrapper.find("textarea").setValue("Send a 30% discount reminder");
 
-    const button = wrapper.find("button");
-    expect(button.attributes("disabled")).toBeDefined();
-    expect(wrapper.find("[data-testid=action-hint]").text()).not.toBe("");
+    expect(wrapper.find("button[type=submit]").attributes("disabled")).toBeDefined();
+    expect(wrapper.find("[data-testid=brief-hint]").text()).toContain("not available yet");
   });
 
   it("shows the system as operational when the API is ready", async () => {
@@ -56,5 +69,16 @@ describe("App", () => {
     await flushPromises();
 
     expect(wrapper.find("[data-testid=system-status]").text()).toBe("Unavailable");
+  });
+
+  it("labels the design review page as sample data", async () => {
+    stubReadiness({ ok: true });
+    window.history.pushState({}, "", "/design");
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(wrapper.find("h1").text()).toBe("Signal design system");
+    expect(wrapper.text()).toContain("Sample data");
+    expect(wrapper.text()).toContain("Approve & send");
   });
 });
