@@ -25,6 +25,7 @@ import DeliveryProgress from "../components/DeliveryProgress.vue";
 import MetricCard from "../components/MetricCard.vue";
 import OriginTag from "../components/OriginTag.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
+import { firstMessagePath } from "../lib/campaignSteps";
 import { isDraftStatus } from "../lib/campaignStatus";
 import { formatDateTime } from "../lib/format";
 import { sendingBlockers } from "../lib/systemHealth";
@@ -59,7 +60,7 @@ const tabs = computed(() => {
 
 const isLive = computed(() => campaign.value?.status === "DISPATCHING");
 const isDraft = computed(() => (campaign.value ? isDraftStatus(campaign.value.status) : false));
-const editHref = computed(() => `/campaigns/${props.campaignId}/${campaign.value?.content ? "content" : "edit"}`);
+const editHref = computed(() => (campaign.value?.content ? firstMessagePath(props.campaignId, campaign.value.channels) : `/campaigns/${props.campaignId}/edit`));
 
 function originOf(field: MessageField) {
   return campaign.value?.content?.edited.includes(field) ? "user" : "ai";

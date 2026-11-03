@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -64,9 +65,11 @@ type StoredContent struct {
 	Edited []string `json:"edited"`
 }
 
-// GenerateInput steers a generation. Instruction is optional.
+// GenerateInput steers a generation. Instruction is optional. Channel rewrites
+// only that channel; with no messages yet, every channel is written anyway.
 type GenerateInput struct {
 	Instruction string
+	Channel     string
 }
 
 // GenerationEvent is a piece of progress. The text is for display only: nothing
@@ -82,6 +85,7 @@ type Generation struct {
 	service     *Service
 	view        View
 	instruction string
+	channel     string
 }
 
 // StartGeneration checks the campaign can get content and claims it, so that
@@ -106,6 +110,13 @@ func (s *Service) StartGeneration(ctx context.Context, id string, input Generate
 	if len(view.Blockers) > 0 {
 		return nil, ErrAudienceBlocked
 	}
+	channel := input.Channel
+	if channel != "" && !slices.Contains(view.Channels, channel) {
+		return nil, ErrInvalidChannels
+	}
+	if view.Content == nil {
+		channel = ""
+	}
 	result, err := s.db.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1 AND `+freeToDraft, id, statusGenerating)
 	if err != nil {
 		return nil, fmt.Errorf("claim generation: %w", err)
@@ -113,7 +124,7 @@ func (s *Service) StartGeneration(ctx context.Context, id string, input Generate
 	if result.RowsAffected() == 0 {
 		return nil, ErrGenerationRunning
 	}
-	return &Generation{service: s, view: view, instruction: instruction}, nil
+	return &Generation{service: s, view: view, instruction: instruction, channel: channel}, nil
 }
 
 // Run writes the messages, repairing invalid output a bounded number of times.
@@ -191,19 +202,35 @@ func (g *Generation) generate(ctx context.Context, emit func(GenerationEvent)) (
 	return content.Content{}, MaxProposalAttempts, usage, fmt.Errorf("%w: %w", ErrContentRejected, lastInvalid)
 }
 
+// limits leaves out the channels this generation does not write.
+func (g *Generation) limits() content.Limits {
+	limits := g.view.ContentLimits
+	switch g.channel {
+	case "sms":
+		limits.SkipEmail = true
+	case "email":
+		limits.SkipSMS = true
+	}
+	return limits
+}
+
 func (g *Generation) request() (ai.ContentRequest, error) {
+	channels := g.view.Channels
+	if g.channel != "" {
+		channels = []string{g.channel}
+	}
 	request := ai.ContentRequest{
 		Brief:       g.view.writingBrief(),
 		Tone:        g.view.Tone,
-		Schema:      content.JSONSchema(g.view.Channels...),
-		Limits:      g.view.ContentLimits,
+		Schema:      content.JSONSchema(channels...),
+		Limits:      g.limits(),
 		Instruction: g.instruction,
 	}
 	for _, condition := range g.view.Conditions {
 		request.Conditions = append(request.Conditions, condition.Label+" "+condition.Value)
 	}
 	if g.view.Content != nil {
-		current, err := json.Marshal(g.view.Content.Content)
+		current, err := json.Marshal(g.limits().Keep(g.view.Content.Content))
 		if err != nil {
 			return ai.ContentRequest{}, fmt.Errorf("encode current content: %w", err)
 		}
@@ -268,7 +295,7 @@ func (g *Generation) callProvider(ctx context.Context, request ai.ContentRequest
 func (g *Generation) validate(ctx context.Context, output []byte, offerSource string) (content.Content, error) {
 	_, span := g.service.tracer.Start(ctx, "content.validate")
 	defer span.End()
-	generated, err := content.ParseGenerated(output, g.view.ContentLimits, offerSource)
+	generated, err := content.ParseGenerated(output, g.limits(), offerSource)
 	if err == nil {
 		if issues := content.CheckLinks(generated, g.linkSource()); len(issues) > 0 {
 			err = &content.ValidationError{Issues: issues}
@@ -300,9 +327,31 @@ func issueReasons(invalid *content.ValidationError) []string {
 	return reasons
 }
 
+// merged puts newly written messages next to the channel this generation left
+// alone, which keeps its text and its record of what a person changed.
+func (g *Generation) merged(generated content.Content) StoredContent {
+	if g.channel == "" {
+		return StoredContent{Content: generated, Edited: []string{}}
+	}
+	stored := g.view.Content
+	merged := StoredContent{Content: generated, Edited: []string{}}
+	if g.channel == "sms" {
+		merged.Content = stored.Content
+		merged.SMS = generated.SMS
+	} else {
+		merged.SMS = stored.SMS
+	}
+	for _, field := range stored.Edited {
+		if (field == content.FieldSMS) == (g.channel == "email") {
+			merged.Edited = append(merged.Edited, field)
+		}
+	}
+	return merged
+}
+
 func (g *Generation) save(ctx context.Context, generated content.Content, attempts int, usage ai.Usage) error {
 	s := g.service
-	encoded, err := json.Marshal(StoredContent{Content: generated, Edited: []string{}})
+	encoded, err := json.Marshal(g.merged(generated))
 	if err != nil {
 		return fmt.Errorf("encode content: %w", err)
 	}
@@ -325,7 +374,7 @@ func (g *Generation) save(ctx context.Context, generated content.Content, attemp
 	}
 	if err := recordAudit(ctx, tx, g.view.ID, eventGenerated, map[string]any{
 		"provider": s.provider.Name(), "model": s.provider.Model(), "attempts": attempts,
-		"regenerated": g.view.Content != nil, "instruction_given": g.instruction != "",
+		"regenerated": g.view.Content != nil, "channel": g.channel, "instruction_given": g.instruction != "",
 		"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens,
 	}); err != nil {
 		return err

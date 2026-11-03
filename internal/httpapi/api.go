@@ -204,11 +204,12 @@ func (a *api) audienceBreakdown(w http.ResponseWriter, r *http.Request) {
 func (a *api) generate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Instruction string `json:"instruction"`
+		Channel     string `json:"channel"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	generation, err := a.campaigns.StartGeneration(r.Context(), r.PathValue("id"), campaign.GenerateInput{Instruction: body.Instruction})
+	generation, err := a.campaigns.StartGeneration(r.Context(), r.PathValue("id"), campaign.GenerateInput{Instruction: body.Instruction, Channel: body.Channel})
 	if err != nil {
 		writeError(w, r, err)
 		return

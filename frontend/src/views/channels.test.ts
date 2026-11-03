@@ -94,12 +94,12 @@ describe("choosing channels", () => {
 describe("a campaign on one channel", () => {
   it("edits and previews only that channel", async () => {
     stub(smsOnly);
-    const wrapper = mount(ContentView, { props: { campaignId: "c1" } });
+    const wrapper = mount(ContentView, { props: { campaignId: "c1", channel: "sms" } });
     await flushPromises();
 
     expect(wrapper.text()).toContain("SMS");
-    expect(wrapper.text()).not.toContain("Email subject");
-    expect(wrapper.text()).not.toContain("Email body");
+    expect(wrapper.find("[data-testid=continue]").text()).toBe("Continue to review");
+    expect(wrapper.find("[data-testid=regenerate-scope]").text()).not.toContain("stays as it is");
     expect(wrapper.findComponent({ name: "EmailPreview" }).exists()).toBe(false);
   });
 

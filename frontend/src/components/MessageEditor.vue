@@ -16,9 +16,11 @@ const props = defineProps<{
   // Longest {{first_name}} in the audience. When given, the count is what the
   // longest recipient would get rather than the template as written.
   longestName?: number;
-  // A link has no place for a variable.
+  // Hides the shortcut for adding a variable, as in a link, where one has no place.
   noVariables?: boolean;
   problem?: string;
+  // One field among others in a step that shows state and origin once for all of them.
+  plain?: boolean;
 }>();
 
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();
@@ -52,10 +54,11 @@ function insertFirstName() {
 </script>
 
 <template>
-  <div class="editor card">
+  <div class="editor" :class="{ card: !plain, 'editor--plain': plain }">
     <div class="header">
       <label class="title" :for="id">{{ label }}</label>
-      <OriginTag :origin="origin" />
+      <OriginTag v-if="!plain" :origin="origin" />
+      <span v-else class="count small mono" :class="{ 'count--over': overBy > 0 }" data-testid="char-count" :title="countsRendered ? 'Length for the longest name in this audience' : undefined">{{ counter }}</span>
     </div>
 
     <textarea
@@ -76,7 +79,7 @@ function insertFirstName() {
 
     <p v-if="problem" class="problem small" data-testid="message-problem">{{ problem }}</p>
 
-    <div class="footer">
+    <div v-if="!plain || !noVariables" class="footer">
       <button
         v-if="!noVariables"
         type="button"
@@ -87,11 +90,11 @@ function insertFirstName() {
       >
         + first_name
       </button>
-      <span class="state small" :class="`state--${display.tone}`" data-testid="message-state">
+      <span v-if="!plain" class="state small" :class="`state--${display.tone}`" data-testid="message-state">
         <component :is="display.icon" :size="14" aria-hidden="true" />
         {{ display.text }}
       </span>
-      <span class="count small mono" :class="{ 'count--over': overBy > 0 }" data-testid="char-count" :title="countsRendered ? 'Length for the longest name in this audience' : undefined">{{ counter }}</span>
+      <span v-if="!plain" class="count small mono" :class="{ 'count--over': overBy > 0 }" data-testid="char-count" :title="countsRendered ? 'Length for the longest name in this audience' : undefined">{{ counter }}</span>
     </div>
   </div>
 </template>
@@ -160,6 +163,16 @@ function insertFirstName() {
 .state--muted,
 .count {
   color: var(--color-text-muted);
+}
+
+.editor--plain {
+  padding: 0;
+  gap: var(--space-2);
+}
+
+.editor--plain .title {
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .count--over {

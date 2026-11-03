@@ -10,11 +10,12 @@ import CampaignName from "../components/CampaignName.vue";
 import MetricCard from "../components/MetricCard.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { reachHint } from "../lib/message";
+import { channelLabel, firstChannel, firstMessagePath } from "../lib/campaignSteps";
 import { takeAudienceRequest } from "../lib/pendingAudience";
 import { useAudienceBreakdown } from "../lib/useAudienceBreakdown";
 
 const props = defineProps<{ campaignId: string }>();
-const emit = defineEmits<{ status: [status: string] }>();
+const emit = defineEmits<{ status: [status: string]; channels: [channels: string[]] }>();
 
 const campaign = ref<Campaign | null>(null);
 const loadError = ref("");
@@ -75,6 +76,7 @@ async function saveBrief() {
 }
 
 watch(() => campaign.value?.status, (status) => status && emit("status", status));
+watch(() => campaign.value?.channels, (channels) => channels && emit("channels", channels));
 
 onMounted(async () => {
   try {
@@ -162,11 +164,11 @@ onMounted(async () => {
       </form>
 
       <div class="row">
-        <a v-if="!blocked" class="button button--primary link-button" :href="`/campaigns/${campaignId}/content`" data-testid="continue-content">
-          Continue to content
+        <a v-if="!blocked" class="button button--primary link-button" :href="firstMessagePath(campaignId, campaign.channels)" data-testid="continue-content">
+          Continue to {{ channelLabel(firstChannel(campaign.channels)) }}
         </a>
         <template v-else>
-          <button class="button button--primary" type="button" disabled>Continue to content</button>
+          <button class="button button--primary" type="button" disabled>Continue to {{ channelLabel(firstChannel(campaign.channels)) }}</button>
           <span class="muted small" data-testid="continue-hint">Resolve the issues above to continue.</span>
         </template>
         <a class="exit small" :href="`/campaigns/${campaignId}`">Save and exit</a>

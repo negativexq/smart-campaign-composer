@@ -6,6 +6,7 @@ import { fetchSession } from "./api/session";
 import AiModeBadge from "./components/AiModeBadge.vue";
 import AppShell from "./components/AppShell.vue";
 import CampaignStepper from "./components/CampaignStepper.vue";
+import { wizardSteps } from "./lib/campaignSteps";
 import { campaignStatusMeta } from "./lib/campaignStatus";
 import { currentPath } from "./lib/navigation";
 import { currentUser } from "./lib/session";
@@ -28,8 +29,8 @@ const route = computed(() => {
   if (path === "/campaigns/new") return { name: "new", id: "" };
   const edit = path.match(/^\/campaigns\/([^/]+)\/edit$/);
   if (edit) return { name: "edit", id: edit[1] };
-  const content = path.match(/^\/campaigns\/([^/]+)\/content$/);
-  if (content) return { name: "content", id: content[1] };
+  const message = path.match(/^\/campaigns\/([^/]+)\/(sms|email)$/);
+  if (message) return { name: message[2], id: message[1] };
   const review = path.match(/^\/campaigns\/([^/]+)\/review$/);
   if (review) return { name: "review", id: review[1] };
   const detail = path.match(/^\/campaigns\/([^/]+)$/);
@@ -42,14 +43,13 @@ let healthTimer: ReturnType<typeof setInterval> | undefined;
 const aiConfig = ref<AiConfig | null>(null);
 
 const wizardStatus = ref("DRAFT");
-watch(() => route.value.id, () => (wizardStatus.value = "DRAFT"));
+const wizardChannels = ref(["sms", "email"]);
+watch(() => route.value.id, () => {
+  wizardStatus.value = "DRAFT";
+  wizardChannels.value = ["sms", "email"];
+});
 
-const steps = [
-  { id: "brief", label: "Brief" },
-  { id: "audience", label: "Audience" },
-  { id: "content", label: "Content" },
-  { id: "review", label: "Review" },
-];
+const steps = computed(() => wizardSteps(wizardChannels.value));
 
 onMounted(async () => {
   healthTimer = setInterval(refreshSystemHealth, HEALTH_INTERVAL);
@@ -89,7 +89,7 @@ onBeforeUnmount(() => clearInterval(healthTimer));
   </AppShell>
 
   <AppShell
-    v-else-if="route.name === 'content' || route.name === 'review'"
+    v-else-if="route.name === 'sms' || route.name === 'email' || route.name === 'review'"
     active-path="/campaigns"
     title="Campaign setup"
     :campaign-status="campaignStatusMeta(wizardStatus).label"
@@ -101,8 +101,15 @@ onBeforeUnmount(() => clearInterval(healthTimer));
         <AiModeBadge v-if="aiConfig" :config="aiConfig" />
       </div>
     </template>
-    <ContentView v-if="route.name === 'content'" :key="route.id" :campaign-id="route.id" @status="wizardStatus = $event" />
-    <ReviewView v-else :key="route.id" :campaign-id="route.id" @status="wizardStatus = $event" />
+    <ContentView
+      v-if="route.name === 'sms' || route.name === 'email'"
+      :key="`${route.id} ${route.name}`"
+      :campaign-id="route.id"
+      :channel="route.name"
+      @status="wizardStatus = $event"
+      @channels="wizardChannels = $event"
+    />
+    <ReviewView v-else :key="route.id" :campaign-id="route.id" @status="wizardStatus = $event" @channels="wizardChannels = $event" />
   </AppShell>
 
   <AppShell
@@ -119,7 +126,7 @@ onBeforeUnmount(() => clearInterval(healthTimer));
       </div>
     </template>
 
-    <AudienceView v-if="route.name === 'edit'" :key="route.id" :campaign-id="route.id" @status="wizardStatus = $event" />
+    <AudienceView v-if="route.name === 'edit'" :key="route.id" :campaign-id="route.id" @status="wizardStatus = $event" @channels="wizardChannels = $event" />
     <ComposeView v-else />
 
     <template #panel>

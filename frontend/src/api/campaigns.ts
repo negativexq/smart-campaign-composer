@@ -319,7 +319,7 @@ export type GenerationHandlers = {
 // text is only a preview: what counts is the campaign in the final event.
 export async function generateContent(
   id: string,
-  input: { instruction?: string },
+  input: { instruction?: string; channel?: string },
   handlers: GenerationHandlers,
   signal: AbortSignal,
 ): Promise<Campaign> {

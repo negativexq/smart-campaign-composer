@@ -14,11 +14,12 @@ import EmailPreview from "../components/EmailPreview.vue";
 import MetricCard from "../components/MetricCard.vue";
 import SchedulePicker from "../components/SchedulePicker.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
+import { channelLabel, lastChannel, lastMessagePath } from "../lib/campaignSteps";
 import { navigate } from "../lib/navigation";
 import { buildSchedule, emptyScheduleForm, scheduleProblem } from "../lib/schedule";
 
 const props = defineProps<{ campaignId: string }>();
-const emit = defineEmits<{ status: [status: string] }>();
+const emit = defineEmits<{ status: [status: string]; channels: [channels: string[]] }>();
 
 const campaign = ref<Campaign | null>(null);
 const loadError = ref("");
@@ -87,6 +88,7 @@ async function confirm() {
 }
 
 watch(() => campaign.value?.status, (status) => status && emit("status", status));
+watch(() => campaign.value?.channels, (channels) => channels && emit("channels", channels));
 
 onMounted(async () => {
   try {
@@ -158,7 +160,7 @@ onMounted(async () => {
     <ValidationNotice v-if="actionError" tone="error" title="This did not go through">{{ actionError }}</ValidationNotice>
 
     <div class="row">
-      <a class="small" :href="`/campaigns/${campaignId}/content`">Back to content</a>
+      <a class="small" :href="lastMessagePath(campaignId, campaign.channels)">Back to {{ channelLabel(lastChannel(campaign.channels)) }}</a>
       <button class="button button--primary" type="button" data-testid="approve" :disabled="submitting || blocked || Boolean(problem)" @click="confirm">
         {{ actionLabel }}
       </button>

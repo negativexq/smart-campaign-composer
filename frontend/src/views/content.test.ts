@@ -2,7 +2,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Campaign } from "../api/campaigns";
-import { navigate } from "../lib/navigation";
+import { currentPath, navigate } from "../lib/navigation";
 import ContentView from "./ContentView.vue";
 import CampaignDetailView from "./CampaignDetailView.vue";
 
@@ -62,8 +62,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function open() {
-  return mount(ContentView, { props: { campaignId: "c1" } });
+function open(channel: "sms" | "email" = "sms") {
+  return mount(ContentView, { props: { campaignId: "c1", channel } });
 }
 
 describe("content page", () => {
@@ -75,11 +75,11 @@ describe("content page", () => {
     }));
     const wrapper = open();
     await flushPromises();
-    await vi.waitFor(() => expect(wrapper.find("[data-testid=save]").exists()).toBe(true));
+    await vi.waitFor(() => expect(wrapper.find("[data-testid=regenerate]").text()).toBe("Regenerate"));
 
     expect(generateCalls(fetchMock)).toHaveLength(1);
     expect(wrapper.findAll("textarea")[0].element.value).toBe("Hi {{first_name}}");
-    expect(wrapper.findAll("[data-testid=message-state]")[0].text()).toContain("Validated");
+    expect(wrapper.find("[data-testid=message-state]").text()).toContain("Validated");
   });
 
   it("discards streamed text when the stream starts over", async () => {
@@ -89,7 +89,7 @@ describe("content page", () => {
       body: streamOf(event("delta", { field: "sms", text: "abandoned" }), event("reset", {}), event("delta", { field: "sms", text: "kept" }), event("done", { ...ready, content: { ...stored, sms: "kept" } })),
     }));
     const wrapper = open();
-    await vi.waitFor(() => expect(wrapper.find("[data-testid=save]").exists()).toBe(true));
+    await vi.waitFor(() => expect(wrapper.find("[data-testid=regenerate]").text()).toBe("Regenerate"));
     expect(wrapper.findAll("textarea")[0].element.value).toBe("kept");
   });
 
@@ -138,12 +138,13 @@ describe("content page", () => {
     await flushPromises();
     const fetchMock = vi.mocked(fetch);
     const [, init] = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/generate"))!;
-    expect(wrapper.find("[data-testid=generating]").exists()).toBe(true);
+    expect(wrapper.find("[data-testid=message-state]").text()).toContain("Writing");
     await wrapper.find("[data-testid=stop]").trigger("click");
     expect(init?.signal?.aborted).toBe(true);
   });
 
-  it("saves edits and shows what the backend rejected on the field", async () => {
+  it("shows what the backend rejected on the field and stays on the step", async () => {
+    navigate("/campaigns/c1/sms");
     stub(ready, undefined, () => ({
       ok: false,
       status: 422,
@@ -151,16 +152,125 @@ describe("content page", () => {
     }));
     const wrapper = open();
     await flushPromises();
-    expect((wrapper.find("[data-testid=save]").element as HTMLButtonElement).disabled).toBe(true);
 
-    await wrapper.findAll("textarea")[0].setValue("Changed");
-    expect(wrapper.find("[data-testid=unsaved]").exists()).toBe(true);
-    expect(wrapper.findAll("[data-testid=message-state]")[0].text()).toContain("Draft");
-    await wrapper.find("[data-testid=save]").trigger("click");
+    await wrapper.find("textarea").setValue("Changed");
+    expect(wrapper.find("[data-testid=message-state]").text()).toContain("Unsaved changes");
+    await wrapper.find("[data-testid=continue]").trigger("click");
     await flushPromises();
 
     expect(wrapper.find("[data-testid=message-problem]").text()).toBe("SMS is too long.");
-    expect(wrapper.findAll("[data-testid=message-state]")[0].text()).toContain("Needs changes");
+    expect(wrapper.find("[data-testid=message-state]").text()).toContain("Needs changes");
+    expect(currentPath.value).toBe("/campaigns/c1/sms");
+  });
+
+  it("saves what was typed when moving on", async () => {
+    const put = vi.fn(() => ({ ok: true, status: 200, json: async () => ({ ...ready, content: { ...stored, sms: "Changed", edited: ["sms"] } }) }));
+    const fetchMock = stub(ready, undefined, put);
+    const wrapper = open();
+    await flushPromises();
+
+    await wrapper.find("textarea").setValue("Changed");
+    await wrapper.find("[data-testid=continue]").trigger("click");
+    await flushPromises();
+
+    expect(put).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls.find(([, options]) => options?.method === "PUT")!;
+    expect(JSON.parse(init!.body as string).sms).toBe("Changed");
+    expect(currentPath.value).toBe("/campaigns/c1/email");
+  });
+
+  it("moves on without saving when nothing changed", async () => {
+    const put = vi.fn();
+    stub(ready, undefined, put);
+    const wrapper = open("email");
+    await flushPromises();
+
+    await wrapper.find("[data-testid=continue]").trigger("click");
+    await flushPromises();
+
+    expect(put).not.toHaveBeenCalled();
+    expect(currentPath.value).toBe("/campaigns/c1/review");
+  });
+
+  it("goes SMS, email, review and back the same way", async () => {
+    stub(ready);
+    const sms = open("sms");
+    await flushPromises();
+    expect(sms.find("[data-testid=continue]").text()).toBe("Continue to email");
+    expect(sms.find("[data-testid=back]").text()).toBe("Back to audience");
+
+    const email = open("email");
+    await flushPromises();
+    expect(email.find("[data-testid=continue]").text()).toBe("Continue to review");
+    expect(email.find("[data-testid=back]").text()).toBe("Back to SMS");
+  });
+
+  it("shows one channel at a time with one state for the whole message", async () => {
+    stub(ready);
+    const sms = open("sms");
+    await flushPromises();
+    expect(sms.findAll("textarea")).toHaveLength(1);
+    expect(sms.findAll("[data-testid=message-state]")).toHaveLength(1);
+    expect(sms.text()).not.toContain("Subject");
+    expect(sms.find("[data-testid=phone-message]").exists()).toBe(true);
+
+    const email = open("email");
+    await flushPromises();
+    expect(email.findAll("[data-testid=message-state]")).toHaveLength(1);
+    expect(email.text()).toContain("Subject");
+    expect(email.find("[data-testid=phone-message]").exists()).toBe(false);
+  });
+
+  it("keeps an optional button out of the way until it has a problem", async () => {
+    stub(ready, undefined, () => ({
+      ok: false,
+      status: 422,
+      json: async () => ({ error: "Fix it.", issues: [{ field: "email_cta_url", reason: "invalid_link", message: "Bad link." }] }),
+    }));
+    const wrapper = open("email");
+    await flushPromises();
+    const button = () => wrapper.find("[data-testid=email-button]").element as HTMLDetailsElement;
+    expect(button().open).toBe(false);
+
+    await wrapper.findAll("textarea")[0].setValue("Changed");
+    await wrapper.find("[data-testid=continue]").trigger("click");
+    await flushPromises();
+
+    expect(button().open).toBe(true);
+  });
+
+  it("regenerates only this channel and leaves the other one alone", async () => {
+    const newSms = { ...ready, content: { ...stored, sms: "New" } };
+    const fetchMock = stub(ready, async () => ({ ok: true, status: 200, body: streamOf(event("delta", { field: "sms", text: "New" }), event("done", newSms)) }));
+    const wrapper = open("sms");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=regenerate-scope]").text()).toContain("The email stays as it is.");
+
+    await wrapper.find("form").trigger("submit");
+    await vi.waitFor(() => expect(wrapper.find("textarea").element.value).toBe("New"));
+
+    const [, init] = generateCalls(fetchMock)[0];
+    expect(JSON.parse(init!.body as string).channel).toBe("sms");
+  });
+
+  it("shows only the warnings of this channel", async () => {
+    const warned = { ...ready, content_warnings: [{ field: "email_body", reason: "invented_discount", message: "Email mentions 40%." }] };
+    stub(warned);
+    const sms = open("sms");
+    await flushPromises();
+    expect(sms.text()).not.toContain("Email mentions 40%.");
+
+    const email = open("email");
+    await flushPromises();
+    expect(email.text()).toContain("Email mentions 40%.");
+  });
+
+  it("sends people on when the campaign does not use this channel", async () => {
+    stub({ ...ready, channels: ["email"] });
+    const wrapper = open("sms");
+    await flushPromises();
+    expect(wrapper.find("a").attributes("href")).toBe("/campaigns/c1/email");
+    expect(wrapper.find("textarea").exists()).toBe(false);
   });
 
   it("counts length for the longest name in the audience", async () => {
@@ -168,7 +278,7 @@ describe("content page", () => {
     const wrapper = open();
     await flushPromises();
     // "Hi " plus a 21 character name.
-    expect(wrapper.findAll("[data-testid=char-count]")[0].text()).toContain("24 / 160");
+    expect(wrapper.find("[data-testid=char-count]").text()).toContain("24 / 160");
   });
 
   it("previews messages for a person without a name using the fallback", async () => {
@@ -206,7 +316,7 @@ describe("content on the campaign page", () => {
     const wrapper = mount(CampaignDetailView, { props: { campaignId: "c1" } });
     await flushPromises();
 
-    expect(wrapper.find("[data-testid=continue-editing]").attributes("href")).toBe("/campaigns/c1/content");
+    expect(wrapper.find("[data-testid=continue-editing]").attributes("href")).toBe("/campaigns/c1/sms");
     await wrapper.find("#tab-content").trigger("click");
     expect(wrapper.find("[data-testid=content-sms]").text()).toContain("Edited by you");
     expect(wrapper.find("[data-testid=content-email]").text()).toContain("AI suggested");

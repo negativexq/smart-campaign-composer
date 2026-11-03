@@ -238,3 +238,11 @@ A schedule is a row in `campaign_schedules`, including its next run time, and th
 The brief is what a marketer reads first and what message writing starts from, so it has to say the same thing as the rule. A refinement returns the whole brief rewritten next to the new rule, and the two are saved together.
 
 The rewrite is model output, so it is checked like the rest. It is rejected and retried if it is empty, too long, or brings in a discount or link that neither the old brief nor the refinement contains, and a discount that contradicts the one chosen for the campaign is refused with the existing conflict error. A rewrite on a first proposal is ignored, because only a person's request can change a person's brief. The page says the brief changed and names the request behind it, and the audit trail records that it changed but not the text.
+
+## SMS and email are separate steps
+
+One page held seven fields, two previews and a state and origin label on every field, so the setup flow is now Brief, Audience, SMS, Email, Review, without the step of a channel the campaign does not use. Each step shows one state and one origin for its whole message, and an email's optional button stays folded until it has something to say.
+
+The first arrival still writes all channels in one model call, because both messages come from the same brief and are validated together. Regenerating on a step rewrites only that channel, so asking for a shorter SMS cannot throw away edits made to the email. The stored row stays one document per campaign version.
+
+Moving to another step saves what was typed, so there is no separate save button and no way to walk away from unsaved text by accident. Text the backend refuses keeps the person on the step with the problem shown on the field.
