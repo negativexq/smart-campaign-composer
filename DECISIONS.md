@@ -42,4 +42,24 @@ The product follows the pattern shared by Klaviyo, Insider One and Braze: descri
 
 ## LLM providers behind one application-level interface
 
-Claude is the primary provider, as the case requires. OpenAI and a deterministic mock share one interface defined by what the application needs, not by a vendor's wire format. Validation stays in the backend, so it does not depend on the provider. Implementation is pending.
+Claude is the primary provider, as the case requires. OpenAI and a deterministic mock share one interface defined by what the application needs, not by a vendor's wire format. Validation stays in the backend, so it does not depend on the provider. A chosen provider without its key fails at startup; there is no silent fallback to the mock. The OpenAI adapter comes after the end-to-end flow works.
+
+## Claude output is shaped by a schema but judged by the backend
+
+Structured output asks Claude for the right shape, but it cannot enforce day ranges or the city list, and the model is still untrusted. `segment.ParseProposal` is the authority: unknown fields, unknown cities and out-of-range windows are rejected, and only a validated `Spec` can reach the compiler, which sends every value as a parameter. An empty spec compiles to `FALSE`, so a bug can never mean "everyone".
+
+Invalid output gets up to two repair attempts, with the validation errors passed back to the model. Refusals, truncation and outages are not retried this way, because the same prompt would not fix them. Output that never validates is not stored. Conditions the filters cannot express are returned as `unsupported_conditions` and block approval, rather than being dropped or approximated.
+
+The adapter enables Anthropic's server-side fallback, so the API can retry a refused or overloaded request on another model. `llm_model` records the configured model, so a served fallback is not visible in that column.
+
+## The audience is counted as of the proposal time
+
+Windows such as "last 30 days" are measured from `audience_as_of`, so the number under review does not shrink as time passes. Event data is still live: a purchase recorded after the proposal can change the count. Freezing recipients at approval is the job of the dispatch step.
+
+## Telemetry level: production essentials, not a platform
+
+Prometheus metrics, `slog` JSON logs, OpenTelemetry spans on critical flows, and a business audit table. Logs stay on `slog` because the Go OpenTelemetry log SDK is less mature than its tracing and metrics. Grafana, Loki, Tempo, Alertmanager and a Collector are left out on purpose: they would take time from the core flow without changing what this case demonstrates.
+
+Metric labels use fixed values only. Validation failures carry a reason code, because the human-readable message can quote model output. Campaign IDs, user data, briefs and message text never become labels. HTTP metrics use the route pattern, so IDs and scanner traffic cannot grow the series count.
+
+Telemetry says how the system behaves; `audit_events` says what was decided. The audit table is append-only and written in the same transaction as the change it describes, so it does not depend on telemetry retention.

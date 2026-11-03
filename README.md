@@ -2,7 +2,7 @@
 
 Turns a marketer's plain-language brief into a validated audience and SMS and email messages, waits for human approval, sends through a mock provider, and shows delivery status live. No real messages are ever sent.
 
-> **Status: in development.** The services, schema, seed, test environment and UI components work. The campaign flow is not built yet, so `make test-e2e` fails on purpose until it is. The components are visible with sample data at http://localhost:8080/design.
+> **Status: in development.** A brief can become a validated, refinable audience. Content generation, approval and sending are not built yet, so `make test-e2e` fails on purpose at `/generate`. The UI components are visible with sample data at http://localhost:8080/design.
 
 ## Run
 
@@ -20,6 +20,19 @@ docker compose up --build
 | Mock provider health | http://localhost:8083/healthz |
 
 Setup applies migrations and loads 5,000 fake users on first start. Event times are relative to that moment. To reseed, remove the volume with `docker compose down -v`.
+
+## LLM provider
+
+The system runs on a deterministic mock by default, and the top bar says so with a `Mock AI` badge. To use Claude, copy `.env.example` to `.env`, then set `LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`. A chosen provider without its key stops the API at startup instead of quietly using the mock. OpenAI support is planned but not available yet.
+
+## Telemetry
+
+| Signal | Where |
+|---|---|
+| Metrics | `/metrics` on the API and worker |
+| Logs | JSON on stdout, with `trace_id` when a span is active |
+| Traces | OTLP, when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; off otherwise |
+| Business audit | `audit_events` table in PostgreSQL |
 
 ## Test
 
