@@ -85,3 +85,72 @@ func TestLimiterFailsWhenRedisIsDown(t *testing.T) {
 		t.Fatal("no limiter must mean no permission to send")
 	}
 }
+
+func TestPauseHoldsEveryWorkerOnThatChannelOnly(t *testing.T) {
+	t.Parallel()
+	client := testsupport.NewRedis(t)
+	prefix := testsupport.Unique(t)
+	first, second := delivery.NewRedisLimiter(client, 100, prefix), delivery.NewRedisLimiter(client, 100, prefix)
+	ctx := context.Background()
+
+	if err := first.Pause(ctx, "sms", 300*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	waited, err := second.Wait(ctx, "sms")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waited < 200*time.Millisecond {
+		t.Fatalf("another worker waited only %v", waited)
+	}
+	start := time.Now()
+	if err := first.Pause(ctx, "sms", 300*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.Wait(ctx, "email"); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 150*time.Millisecond {
+		t.Fatalf("email was held for %v", elapsed)
+	}
+}
+
+func TestAPauseIsNotShortenedAndHasACeiling(t *testing.T) {
+	t.Parallel()
+	client := testsupport.NewRedis(t)
+	prefix := testsupport.Unique(t)
+	limiter := delivery.NewRedisLimiter(client, 100, prefix)
+	ctx := context.Background()
+
+	if err := limiter.Pause(ctx, "sms", 500*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if err := limiter.Pause(ctx, "sms", time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if waited, err := limiter.Wait(ctx, "sms"); err != nil || waited < 300*time.Millisecond {
+		t.Fatalf("waited %v, err %v", waited, err)
+	}
+
+	// A provider asking for a day must not stop every campaign for a day.
+	if err := limiter.Pause(ctx, "email", 24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := client.PTTL(ctx, prefix+":pause:email").Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remaining <= 0 || remaining > time.Minute {
+		t.Fatalf("paused for %v", remaining)
+	}
+}
+
+func TestPauseFailsWhenRedisIsDown(t *testing.T) {
+	t.Parallel()
+	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", MaxRetries: -1})
+	defer client.Close()
+	if err := delivery.NewRedisLimiter(client, 10, "x").Pause(context.Background(), "sms", time.Second); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+

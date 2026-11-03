@@ -3,6 +3,7 @@ package delivery_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -46,9 +47,21 @@ func always(result delivery.Result, err error) func(int, delivery.Message) (deli
 }
 
 type fakeLimiter struct {
-	mu    sync.Mutex
-	waits map[string]int
-	err   error
+	mu       sync.Mutex
+	waits    map[string]int
+	err      error
+	pauses   map[string]time.Duration
+	pauseErr error
+}
+
+func (f *fakeLimiter) Pause(_ context.Context, channel string, length time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.pauses == nil {
+		f.pauses = map[string]time.Duration{}
+	}
+	f.pauses[channel] = length
+	return f.pauseErr
 }
 
 func (f *fakeLimiter) Wait(_ context.Context, channel string) (time.Duration, error) {
@@ -533,5 +546,189 @@ func TestARepeatingCampaignWaitsForItsNextRun(t *testing.T) {
 	}
 	if finished != 1 || completed != 0 {
 		t.Fatalf("finished %d, completed %d", finished, completed)
+	}
+}
+
+// crash leaves deliveries as a killed worker would: claimed, with the lease run out.
+func (r *rig) crash(t *testing.T, count, attempts int, lease string) {
+	t.Helper()
+	_, err := r.pool.Exec(context.Background(), `
+		UPDATE campaign_deliveries
+		SET status = 'SENDING', attempts = $2, claim_token = gen_random_uuid(), lease_expires_at = now() + $3::interval
+		WHERE id IN (SELECT id FROM campaign_deliveries WHERE status = 'QUEUED' ORDER BY id LIMIT $1)`, count, attempts, lease)
+	if err != nil {
+		t.Fatalf("simulate crash: %v", err)
+	}
+}
+
+func TestMessagesLeftByACrashedWorkerAreSentAgain(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.crash(t, 5, 0, "-1 second")
+
+	recovered, err := r.worker.RecoverExpired(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered != 5 {
+		t.Fatalf("recovered %d, want 5", recovered)
+	}
+	r.drain(t)
+	if got := r.statuses(t); got["SENDING"] != 0 || got["RETRYING"] != 0 || got["QUEUED"] != 0 {
+		t.Fatalf("statuses after recovery: %v", got)
+	}
+	if status := r.campaignStatus(t); status != "COMPLETED" {
+		t.Fatalf("campaign is %s", status)
+	}
+	var lost int
+	if err := r.pool.QueryRow(context.Background(), `SELECT count(*) FROM delivery_attempts WHERE outcome = 'timeout' AND response_code IS NULL`).Scan(&lost); err != nil {
+		t.Fatal(err)
+	}
+	if lost != 5 {
+		t.Fatalf("the unfinished calls must stay on record: %d", lost)
+	}
+}
+
+func TestALeaseStillRunningIsLeftAlone(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.crash(t, 5, 0, "1 minute")
+	recovered, err := r.worker.RecoverExpired(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered != 0 || r.statuses(t)["SENDING"] != 5 {
+		t.Fatalf("recovered %d, statuses %v", recovered, r.statuses(t))
+	}
+}
+
+func TestAMessageThatKeepsCrashingWorkersEndsAsUnknown(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.crash(t, 2, r.maxTries-1, "-1 second")
+	if _, err := r.worker.RecoverExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.statuses(t)["UNKNOWN"]; got != 2 {
+		t.Fatalf("a message must not crash workers forever: %v", r.statuses(t))
+	}
+}
+
+func TestACrashKeepsALaterFailureUnknown(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(delivery.Result{StatusCode: http.StatusInternalServerError}, nil))
+	r.crash(t, 1, 0, "-1 second")
+	if _, err := r.worker.RecoverExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	r.drain(t)
+	got := r.statuses(t)
+	if got["UNKNOWN"] != 1 {
+		t.Fatalf("the crashed call may have gone through: %v", got)
+	}
+	if got["FAILED"] == 0 {
+		t.Fatalf("others should plainly fail: %v", got)
+	}
+}
+
+func TestARecoveredMessageKeepsItsIdempotencyKey(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.crash(t, 1, 0, "-1 second")
+	var key string
+	if err := r.pool.QueryRow(context.Background(), `SELECT idempotency_key FROM campaign_deliveries WHERE status = 'SENDING'`).Scan(&key); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.worker.RecoverExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	r.drain(t)
+	calls := 0
+	for _, message := range r.sender.calls {
+		if message.IdempotencyKey == key {
+			calls++
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("key used %d times by the new worker", calls)
+	}
+}
+
+func TestParallelRecoveryCountsEachMessageOnce(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.crash(t, 20, 0, "-1 second")
+	var (
+		wg    sync.WaitGroup
+		mu    sync.Mutex
+		total int
+	)
+	for range 4 {
+		wg.Go(func() {
+			recovered, err := r.newWorker().RecoverExpired(context.Background())
+			if err != nil {
+				t.Error(err)
+			}
+			mu.Lock()
+			total += recovered
+			mu.Unlock()
+		})
+	}
+	wg.Wait()
+	var rows int
+	if err := r.pool.QueryRow(context.Background(), `SELECT count(*) FROM delivery_attempts`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if total != 20 || rows != 20 {
+		t.Fatalf("recovered %d, attempts %d", total, rows)
+	}
+}
+
+func TestARateLimitedCallPausesTheChannel(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(delivery.Result{StatusCode: http.StatusTooManyRequests, RetryAfter: 3 * time.Second}, nil))
+	if _, err := r.worker.ProcessBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.limiter.pauses) == 0 {
+		t.Fatal("other workers must learn about the 429")
+	}
+	for channel, length := range r.limiter.pauses {
+		if length != 3*time.Second {
+			t.Errorf("%s paused for %v", channel, length)
+		}
+	}
+}
+
+func TestAFailedPauseStillRecordsTheOutcome(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(delivery.Result{StatusCode: http.StatusTooManyRequests, RetryAfter: time.Second}, nil))
+	r.limiter.pauseErr = errors.New("redis is down")
+	if _, err := r.worker.ProcessBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if r.statuses(t)["SENDING"] != 0 || r.statuses(t)["RETRYING"] == 0 {
+		t.Fatalf("statuses: %v", r.statuses(t))
+	}
+}
+
+func TestAProviderThatCannotBeReachedCostsNoAttempt(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(delivery.Result{}, fmt.Errorf("call provider: %w", delivery.ErrNotSent)))
+	if _, err := r.worker.ProcessBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var attempts, rows int
+	if err := r.pool.QueryRow(context.Background(), `SELECT COALESCE(sum(attempts), 0), (SELECT count(*) FROM delivery_attempts) FROM campaign_deliveries`).Scan(&attempts, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 0 || rows != 0 {
+		t.Fatalf("attempts %d, rows %d: nothing was sent", attempts, rows)
+	}
+	if r.statuses(t)["RETRYING"] == 0 {
+		t.Fatalf("statuses: %v", r.statuses(t))
+	}
+	if len(r.limiter.pauses) == 0 {
+		t.Fatal("the channel should rest while the provider is down")
 	}
 }
