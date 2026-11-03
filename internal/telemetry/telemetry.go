@@ -36,6 +36,13 @@ type Metrics struct {
 	ValidationFailures *prometheus.CounterVec
 	HTTPDuration       *prometheus.HistogramVec
 	SSEConnections     prometheus.Gauge
+
+	DeliveryAttempts      *prometheus.CounterVec
+	DeliveryDuration      *prometheus.HistogramVec
+	DeliveryDuplicates    *prometheus.CounterVec
+	DeliveryQueueDepth    *prometheus.GaugeVec
+	DeliveryRetries       *prometheus.CounterVec
+	DeliveryRateLimitWait *prometheus.HistogramVec
 }
 
 // NewMetrics registers the series on registerer.
@@ -73,6 +80,32 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 			Name: "http_sse_connections",
 			Help: "Server-sent event streams currently open.",
 		}),
+		DeliveryAttempts: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "campaign_delivery_attempts_total",
+			Help: "Calls to the provider by result. accepted means the provider took the message, not that a person received it.",
+		}, []string{"channel", "outcome"}),
+		DeliveryDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "campaign_delivery_duration_seconds",
+			Help:    "Duration of calls to the provider.",
+			Buckets: []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10},
+		}, []string{"channel"}),
+		DeliveryDuplicates: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "campaign_delivery_duplicates_prevented_total",
+			Help: "Repeated sends the provider recognised by idempotency key and did not deliver again.",
+		}, []string{"channel"}),
+		DeliveryQueueDepth: factory.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "campaign_delivery_queue_depth",
+			Help: "Deliveries waiting to be sent or retried.",
+		}, []string{"channel"}),
+		DeliveryRetries: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "campaign_delivery_retry_total",
+			Help: "Deliveries scheduled for another try, by what happened.",
+		}, []string{"channel", "reason"}),
+		DeliveryRateLimitWait: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "campaign_delivery_rate_limit_wait_seconds",
+			Help:    "Time spent waiting for the shared rate limit before a send.",
+			Buckets: []float64{0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5},
+		}, []string{"channel"}),
 	}
 }
 

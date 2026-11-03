@@ -19,9 +19,10 @@ import (
 )
 
 const (
-	statusApproved       = "APPROVED"
-	statusDispatching    = "DISPATCHING"
-	eventApproved        = "campaign.approved"
+	statusApproved    = "APPROVED"
+	statusDispatching = "DISPATCHING"
+	eventApproved     = "campaign.approved"
+
 	eventDispatched      = "campaign.dispatched"
 	reasonWithoutConsent = "no_consent"
 
