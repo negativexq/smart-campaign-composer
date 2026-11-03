@@ -2,7 +2,7 @@
 
 Turns a marketer's plain-language brief into a validated audience and SMS and email messages, waits for human approval, sends through a mock provider, and shows delivery status live. No real messages are ever sent.
 
-> **Status: in development.** The services, schema, seed and test environment work. The campaign flow is not built yet, so `make test-e2e` fails on purpose until it is.
+> **Status: in development.** The services, schema, seed, test environment and UI components work. The campaign flow is not built yet, so `make test-e2e` fails on purpose until it is. The components are visible with sample data at http://localhost:8080/design.
 
 ## Run
 
@@ -42,4 +42,4 @@ Integration tests use real PostgreSQL and fail, rather than skip, when it is mis
 | `tests/e2e/` | Acceptance test |
 | `ai-sessions/` | Exported AI working sessions |
 
-See [DECISIONS.md](DECISIONS.md) for the reasoning behind the design.
+See [DECISIONS.md](DECISIONS.md) for the reasoning behind the architecture and [DESIGN.md](DESIGN.md) for the Signal design language.

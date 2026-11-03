@@ -56,7 +56,7 @@ function insertFirstName() {
       :readonly="streaming"
       :value="modelValue"
       :aria-invalid="hasLocalProblem ? 'true' : undefined"
-      :aria-describedby="`${id}-problem`"
+      :aria-describedby="unknownVariables.length ? `${id}-problem` : undefined"
       @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
     ></textarea>
 

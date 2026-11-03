@@ -36,6 +36,10 @@ Tests come first where the rules are clear and mistakes are costly: validation, 
 
 `make test` needs only Docker. Integration tests fail when infrastructure is missing, so a green run proves the reliability tests actually ran.
 
+## Signal, our own design language
+
+The product follows the pattern shared by Klaviyo, Insider One and Braze: describe the goal, review a plain-language draft, then approve. It uses a guided workspace rather than a chat, because this flow has one fixed path. Mock provider acceptance is labelled `Accepted`, not delivered, because nothing confirms delivery to a person. The first version is light only, to keep scope on the core flow. See [DESIGN.md](DESIGN.md).
+
 ## LLM providers behind one application-level interface
 
 Claude is the primary provider, as the case requires. OpenAI and a deterministic mock share one interface defined by what the application needs, not by a vendor's wire format. Validation stays in the backend, so it does not depend on the provider. Implementation is pending.
