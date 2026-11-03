@@ -12,5 +12,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     restoreMocks: true,
+    // The contrast test reads the real token values from this stylesheet.
+    css: { include: /tokens\.css/ },
   },
 });
