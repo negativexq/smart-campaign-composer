@@ -16,6 +16,7 @@ const FIELD_NAMES: Record<string, string> = {
   email_body: "email body",
   email_cta_label: "button label",
   email_cta_url: "button link",
+  email_template: "email template",
 };
 
 const TRIGGER_TITLES: Record<string, string> = {

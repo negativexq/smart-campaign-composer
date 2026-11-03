@@ -8,7 +8,7 @@ export type AudienceBreakdown = { everyone: number; steps: { field: string; rema
 export type Assumption = { field: string; note: string };
 export type Audience = { total: number; sms: number; email: number };
 
-export type MessageField = "sms" | "email_subject" | "email_preheader" | "email_headline" | "email_body" | "email_cta_label" | "email_cta_url";
+export type MessageField = "sms" | "email_subject" | "email_preheader" | "email_headline" | "email_body" | "email_cta_label" | "email_cta_url" | "email_template";
 export type Messages = Record<MessageField, string>;
 export type ContentIssue = { field: string; reason: string; message: string };
 export type SampleRecipient = { id: number; label: string; first_name: string };
@@ -206,7 +206,7 @@ export async function getActivity(id: string): Promise<ActivityEntry[]> {
   return (await request<{ activity: ActivityEntry[] }>(`/api/campaigns/${encodeURIComponent(id)}/activity`)).activity;
 }
 
-const EMAIL_FIELDS: MessageField[] = ["email_subject", "email_preheader", "email_headline", "email_body", "email_cta_label", "email_cta_url"];
+const EMAIL_FIELDS: MessageField[] = ["email_subject", "email_preheader", "email_headline", "email_body", "email_cta_label", "email_cta_url", "email_template"];
 
 export type EmailPreviewResult = { subject: string; html: string; text: string };
 

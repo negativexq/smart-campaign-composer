@@ -153,7 +153,7 @@ describe("email preview", () => {
 
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("/api/email-preview");
-    expect(JSON.parse(init.body as string)).toEqual({ email_headline: "", email_cta_label: "", email_cta_url: "", ...draft, first_name: "Ayşe" });
+    expect(JSON.parse(init.body as string)).toEqual({ email_headline: "", email_cta_label: "", email_cta_url: "", email_template: "", ...draft, first_name: "Ayşe" });
     const frame = wrapper.find("[data-testid=email-frame]");
     expect(frame.attributes("srcdoc")).toContain("designed");
     expect(frame.attributes("sandbox")).toBe("allow-same-origin");

@@ -246,3 +246,9 @@ One page held seven fields, two previews and a state and origin label on every f
 The first arrival still writes all channels in one model call, because both messages come from the same brief and are validated together. Regenerating on a step rewrites only that channel, so asking for a shorter SMS cannot throw away edits made to the email. The stored row stays one document per campaign version.
 
 Moving to another step saves what was typed, so there is no separate save button and no way to walk away from unsaved text by accident. Text the backend refuses keeps the person on the step with the problem shown on the field.
+
+## A few fixed email templates, not an editor
+
+Campaign emails looked plain, and a marketer now picks one of three designs (Classic, Announcement, Offer) on the Email step and sees it in the preview, which the backend renders with the same code that sends. The choice is stored with the messages, so an approved email is frozen along with its design, and drafts from before this feature keep rendering as Classic.
+
+The templates are code, not data. People and models still only write text that `html/template` escapes, so a custom template or a markup editor would be a new attack surface and is left for later. A model cannot pick a template: its value is dropped when output is parsed, and regenerating keeps what the person chose. There is no logo or brand color yet, because the product has no brand settings to take them from.

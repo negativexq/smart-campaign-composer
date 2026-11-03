@@ -36,6 +36,7 @@ const (
 	FieldEmailHeadline  = "email_headline"
 	FieldEmailCTALabel  = "email_cta_label"
 	FieldEmailCTAURL    = "email_cta_url"
+	FieldEmailTemplate  = "email_template"
 
 	firstNameVariable = "first_name"
 )
@@ -55,6 +56,8 @@ type Content struct {
 	EmailHeadline  string `json:"email_headline"`
 	EmailCTALabel  string `json:"email_cta_label"`
 	EmailCTAURL    string `json:"email_cta_url"`
+	// EmailTemplate is a person's choice of design. Models only write text.
+	EmailTemplate string `json:"email_template"`
 }
 
 // Limits holds the longest first name per channel in the audience, which
@@ -74,7 +77,7 @@ func (l Limits) Keep(c Content) Content {
 	}
 	if l.SkipEmail {
 		c.EmailSubject, c.EmailBody = "", ""
-		c.EmailPreheader, c.EmailHeadline, c.EmailCTALabel, c.EmailCTAURL = "", "", "", ""
+		c.EmailPreheader, c.EmailHeadline, c.EmailCTALabel, c.EmailCTAURL, c.EmailTemplate = "", "", "", "", ""
 	}
 	return c
 }
@@ -113,6 +116,7 @@ func ParseGenerated(raw []byte, limits Limits, offerSource string) (Content, err
 		return Content{}, malformed("trailing content after the object")
 	}
 	decoded = limits.Keep(decoded)
+	decoded.EmailTemplate = ""
 	issues := append(CheckMessages(decoded, limits), CheckDiscounts(decoded, offerSource)...)
 	if len(issues) > 0 {
 		return Content{}, &ValidationError{Issues: issues}
@@ -144,6 +148,9 @@ func CheckMessages(c Content, limits Limits) []Issue {
 		}
 	}
 	if !limits.SkipEmail {
+		if c.EmailTemplate != "" && !slices.Contains(EmailTemplates, c.EmailTemplate) {
+			issues = append(issues, Issue{FieldEmailTemplate, "unknown_template", "This email template does not exist."})
+		}
 		issues = append(issues, checkEmailDesign(c, limits)...)
 	}
 	if strings.ContainsAny(c.EmailSubject, "\r\n") {

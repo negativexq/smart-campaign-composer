@@ -16,12 +16,14 @@ import {
   type SampleRecipient,
 } from "../api/campaigns";
 import EmailPreview from "../components/EmailPreview.vue";
+import EmailTemplatePicker from "../components/EmailTemplatePicker.vue";
 import MessageEditor from "../components/MessageEditor.vue";
 import OriginTag from "../components/OriginTag.vue";
 import PhonePreview from "../components/PhonePreview.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { channelLabel, firstMessagePath } from "../lib/campaignSteps";
 import { isDraftStatus } from "../lib/campaignStatus";
+import { EMAIL_TEMPLATES } from "../lib/emailTemplates";
 import { navigate } from "../lib/navigation";
 
 const EMAIL_FIELDS: MessageField[] = ["email_subject", "email_preheader", "email_headline", "email_body", "email_cta_label", "email_cta_url"];
@@ -39,12 +41,12 @@ const generating = ref(false);
 const saving = ref(false);
 const issues = ref<ContentIssue[]>([]);
 const instruction = ref("");
-const messages = reactive<Messages>({ sms: "", email_subject: "", email_preheader: "", email_headline: "", email_body: "", email_cta_label: "", email_cta_url: "" });
+const messages = reactive<Messages>({ sms: "", email_subject: "", email_preheader: "", email_headline: "", email_body: "", email_cta_label: "", email_cta_url: "", email_template: "" });
 let controller: AbortController | null = null;
 
 const stored = computed(() => campaign.value?.content);
 const dirty = computed(() =>
-  stored.value ? (Object.keys(messages) as MessageField[]).some((field) => messages[field] !== stored.value?.[field]) : false,
+  stored.value ? (Object.keys(messages) as MessageField[]).some((field) => messages[field] !== (stored.value?.[field] ?? "")) : false,
 );
 const canGenerate = computed(() => !generating.value && !saving.value);
 const name = computed(() => channelLabel(props.channel));
@@ -63,6 +65,10 @@ const next = computed(() =>
     ? { href: `/campaigns/${props.campaignId}/email`, label: "Continue to email" }
     : { href: `/campaigns/${props.campaignId}/review`, label: "Continue to review" },
 );
+const template = computed({
+  get: () => messages.email_template || EMAIL_TEMPLATES[0].id,
+  set: (id: string) => (messages.email_template = id),
+});
 const buttonHasProblem = computed(() => Boolean(issueFor("email_cta_label") || issueFor("email_cta_url")));
 
 // The one state of this message. "Validated" only ever comes from the backend.
@@ -99,6 +105,8 @@ function editorState(field: MessageField) {
 async function generate(input: { instruction?: string } = {}) {
   controller = new AbortController();
   const before = stored.value;
+  // A template picked just now is not saved yet, and new text should not undo it.
+  const pickedTemplate = messages.email_template;
   generating.value = true;
   generationError.value = "";
   saveError.value = "";
@@ -118,10 +126,12 @@ async function generate(input: { instruction?: string } = {}) {
       controller.signal,
     );
     fill(campaign.value.content);
+    messages.email_template = pickedTemplate || messages.email_template;
     instruction.value = "";
   } catch (failure) {
     // Nothing unvalidated stays on screen.
     fill(before);
+    messages.email_template = pickedTemplate;
     if (controller?.signal.aborted) stopped.value = true;
     else generationError.value = errorMessage(failure);
   } finally {
@@ -247,6 +257,7 @@ onBeforeUnmount(() => controller?.abort());
             :problem="issueFor('sms')"
           />
           <template v-else>
+            <EmailTemplatePicker v-model="template" :disabled="generating" />
             <MessageEditor v-model="messages.email_subject" plain no-variables label="Subject" :limit="80" :rows="1" :state="editorState('email_subject')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_subject')" />
             <MessageEditor v-model="messages.email_preheader" plain no-variables label="Preview text" :limit="120" :rows="2" :state="editorState('email_preheader')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_preheader')" />
             <MessageEditor v-model="messages.email_headline" plain no-variables label="Headline" :limit="80" :rows="1" :state="editorState('email_headline')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_headline')" />

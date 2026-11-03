@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"html/template"
 	"regexp"
+	"slices"
 	"strings"
 )
 
 //go:embed email.html
 var emailSource string
+
+// EmailTemplates are the designs a campaign can choose. The first is the default.
+var EmailTemplates = []string{"classic", "banner", "offer"}
 
 var (
 	emailTemplate = template.Must(template.New("email").Parse(emailSource))
@@ -24,8 +28,8 @@ type Email struct {
 	Text    string `json:"text"`
 }
 
-// RenderEmail fills the one template every campaign uses. People and models only
-// ever write text, which html/template escapes, so neither can add markup or an
+// RenderEmail fills the campaign's template. People and models only ever write
+// text, which html/template escapes, so neither can add markup or an
 // unsafe link. Without an unsubscribeURL this is a preview, whose footer goes nowhere.
 func RenderEmail(c Content, firstName, unsubscribeURL string) (Email, error) {
 	body := Render(c.EmailBody, firstName)
@@ -47,7 +51,7 @@ func RenderEmail(c Content, firstName, unsubscribeURL string) (Email, error) {
 		data.Unsubscribe = "#"
 	}
 	var html bytes.Buffer
-	if err := emailTemplate.Execute(&html, data); err != nil {
+	if err := emailTemplate.ExecuteTemplate(&html, templateName(c.EmailTemplate), data); err != nil {
 		return Email{}, fmt.Errorf("render email: %w", err)
 	}
 
@@ -65,6 +69,15 @@ func RenderEmail(c Content, firstName, unsubscribeURL string) (Email, error) {
 		parts = append(parts, "Unsubscribe: the link is added when this is sent")
 	}
 	return Email{Subject: data.Subject, HTML: html.String(), Text: strings.Join(parts, "\n\n")}, nil
+}
+
+// templateName falls back to the default, so older drafts and anything already
+// stored still send.
+func templateName(name string) string {
+	if slices.Contains(EmailTemplates, name) {
+		return name
+	}
+	return EmailTemplates[0]
 }
 
 func paragraphs(body string) [][]string {

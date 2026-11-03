@@ -1,4 +1,4 @@
-<!doctype html>
+{{define "top"}}<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -11,7 +11,8 @@
   .sheet { width: 100% !important; border-radius: 0 !important; border-width: 0 !important; }
   .pad { padding: 28px 20px !important; }
   .headline { font-size: 24px !important; line-height: 30px !important; }
-  .cta, .cta a { display: block !important; text-align: center !important; }
+  table.cta { width: 100% !important; }
+  .cta a { display: block !important; text-align: center !important; }
 }
 </style>
 </head>
@@ -21,21 +22,9 @@
 {{- end}}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F5F7FA">
 <tr><td class="frame" align="center" style="padding:32px 16px">
-  <table role="presentation" class="sheet" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:100%;background-color:#FFFFFF;border:1px solid #E4E8EF;border-radius:12px">
-  <tr><td class="pad" style="padding:40px;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#172033;font-size:16px;line-height:26px">
-    {{- if .Headline}}
-    <h1 class="headline" style="margin:0 0 20px;font-size:28px;line-height:36px;font-weight:600;color:#172033">{{.Headline}}</h1>
-    {{- end}}
-    {{- range .Paragraphs}}
-    <p style="margin:0 0 16px;overflow-wrap:anywhere">{{range $index, $line := .}}{{if $index}}<br>{{end}}{{$line}}{{end}}</p>
-    {{- end}}
-    {{- if .CTAURL}}
-    <table role="presentation" class="cta" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px">
-    <tr><td class="cta" style="border-radius:8px;background-color:#315BE8"><a role="button" href="{{.CTAURL}}" target="_blank" rel="noopener" style="display:inline-block;padding:12px 24px;font-weight:600;color:#FFFFFF;text-decoration:none;border-radius:8px">{{.CTALabel}}</a></td></tr>
-    </table>
-    {{- end}}
-  </td></tr>
-  </table>
+{{- end}}
+
+{{define "bottom"}}
   <table role="presentation" class="sheet" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:100%">
   <tr><td class="pad" style="padding:20px 40px;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:13px;line-height:20px;color:#5B6577;text-align:center">
     You received this because you agreed to campaign emails.
@@ -46,3 +35,64 @@
 </table>
 </body>
 </html>
+{{end}}
+
+{{define "paragraphs"}}
+    {{- range .Paragraphs}}
+    <p style="margin:0 0 16px;overflow-wrap:anywhere">{{range $index, $line := .}}{{if $index}}<br>{{end}}{{$line}}{{end}}</p>
+    {{- end}}
+{{- end}}
+
+{{define "classic"}}{{template "top" .}}
+  <table role="presentation" class="sheet" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:100%;background-color:#FFFFFF;border:1px solid #E4E8EF;border-radius:12px">
+  <tr><td class="pad" style="padding:40px;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#172033;font-size:16px;line-height:26px">
+    {{- if .Headline}}
+    <h1 class="headline" style="margin:0 0 20px;font-size:28px;line-height:36px;font-weight:600;color:#172033">{{.Headline}}</h1>
+    {{- end}}
+    {{- template "paragraphs" .}}
+    {{- if .CTAURL}}
+    <table role="presentation" class="cta" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px">
+    <tr><td class="cta" style="border-radius:8px;background-color:#315BE8"><a role="button" href="{{.CTAURL}}" target="_blank" rel="noopener" style="display:inline-block;padding:12px 24px;font-weight:600;color:#FFFFFF;text-decoration:none;border-radius:8px">{{.CTALabel}}</a></td></tr>
+    </table>
+    {{- end}}
+  </td></tr>
+  </table>
+{{- template "bottom" .}}{{end}}
+
+{{define "banner"}}{{template "top" .}}
+  <table role="presentation" class="sheet" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:100%;background-color:#FFFFFF;border-radius:12px;overflow:hidden">
+  <tr><td class="pad" style="padding:{{if .Headline}}44px 40px{{else}}12px 40px{{end}};background-color:#172F86;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;border-radius:12px 12px 0 0">
+    {{- if .Headline}}
+    <h1 class="headline" style="margin:0;font-size:32px;line-height:40px;font-weight:700;color:#FFFFFF">{{.Headline}}</h1>
+    {{- end}}
+  </td></tr>
+  <tr><td class="pad" style="padding:32px 40px 40px;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#172033;font-size:16px;line-height:26px">
+    {{- template "paragraphs" .}}
+    {{- if .CTAURL}}
+    <table role="presentation" class="cta" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px">
+    <tr><td class="cta" style="border-radius:999px;background-color:#172F86"><a role="button" href="{{.CTAURL}}" target="_blank" rel="noopener" style="display:inline-block;padding:13px 28px;font-weight:600;color:#FFFFFF;text-decoration:none;border-radius:999px">{{.CTALabel}}</a></td></tr>
+    </table>
+    {{- end}}
+  </td></tr>
+  </table>
+{{- template "bottom" .}}{{end}}
+
+{{define "offer"}}{{template "top" .}}
+  <table role="presentation" class="sheet" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:100%;background-color:#FFFFFF;border-top:6px solid #C2410C;border-radius:4px">
+  <tr><td class="pad" align="center" style="padding:40px;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#172033;font-size:16px;line-height:26px;text-align:center">
+    {{- if .Headline}}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px">
+    <tr><td style="padding:28px 20px;background-color:#FFF4ED;border:2px dashed #C2410C;border-radius:8px">
+      <h1 class="headline" style="margin:0;font-size:30px;line-height:38px;font-weight:700;color:#9A3412">{{.Headline}}</h1>
+    </td></tr>
+    </table>
+    {{- end}}
+    {{- template "paragraphs" .}}
+    {{- if .CTAURL}}
+    <table role="presentation" class="cta" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:24px auto 0">
+    <tr><td class="cta" style="border-radius:6px;background-color:#C2410C"><a role="button" href="{{.CTAURL}}" target="_blank" rel="noopener" style="display:inline-block;padding:15px 40px;font-size:17px;font-weight:700;color:#FFFFFF;text-decoration:none;border-radius:6px">{{.CTALabel}}</a></td></tr>
+    </table>
+    {{- end}}
+  </td></tr>
+  </table>
+{{- template "bottom" .}}{{end}}

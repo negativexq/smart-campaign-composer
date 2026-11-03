@@ -19,7 +19,7 @@ const ready: Campaign = {
   conditions: [{ field: "city", label: "City is", value: "İstanbul" }],
   audience: { total: 9, sms: 7, email: 6 },
   blockers: [],
-  content: { sms: "Hi {{first_name}}", email_subject: "Subject", email_preheader: "", email_headline: "", email_body: "Body", email_cta_label: "", email_cta_url: "", edited: [] },
+  content: { sms: "Hi {{first_name}}", email_subject: "Subject", email_preheader: "", email_headline: "", email_body: "Body", email_cta_label: "", email_cta_url: "", email_template: "", edited: [] },
   content_limits: { sms_name_length: 21, email_name_length: 21 },
   content_warnings: [],
   created_at: "2026-11-03T12:00:00Z",

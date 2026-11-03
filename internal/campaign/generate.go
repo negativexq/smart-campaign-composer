@@ -330,10 +330,13 @@ func issueReasons(invalid *content.ValidationError) []string {
 // merged puts newly written messages next to the channel this generation left
 // alone, which keeps its text and its record of what a person changed.
 func (g *Generation) merged(generated content.Content) StoredContent {
+	stored := g.view.Content
+	if stored != nil {
+		generated.EmailTemplate = stored.EmailTemplate
+	}
 	if g.channel == "" {
 		return StoredContent{Content: generated, Edited: []string{}}
 	}
-	stored := g.view.Content
 	merged := StoredContent{Content: generated, Edited: []string{}}
 	if g.channel == "sms" {
 		merged.Content = stored.Content
@@ -478,6 +481,7 @@ func changedFields(before, after content.Content) []string {
 		{content.FieldEmailBody, before.EmailBody, after.EmailBody},
 		{content.FieldEmailCTALabel, before.EmailCTALabel, after.EmailCTALabel},
 		{content.FieldEmailCTAURL, before.EmailCTAURL, after.EmailCTAURL},
+		{content.FieldEmailTemplate, before.EmailTemplate, after.EmailTemplate},
 	} {
 		if field.before != field.after {
 			changed = append(changed, field.name)
@@ -488,7 +492,7 @@ func changedFields(before, after content.Content) []string {
 
 func mergeEdited(existing, changed []string) []string {
 	merged := []string{}
-	for _, field := range []string{content.FieldSMS, content.FieldEmailSubject, content.FieldEmailPreheader, content.FieldEmailHeadline, content.FieldEmailBody, content.FieldEmailCTALabel, content.FieldEmailCTAURL} {
+	for _, field := range []string{content.FieldSMS, content.FieldEmailSubject, content.FieldEmailPreheader, content.FieldEmailHeadline, content.FieldEmailBody, content.FieldEmailCTALabel, content.FieldEmailCTAURL, content.FieldEmailTemplate} {
 		for _, list := range [][]string{existing, changed} {
 			if contains(list, field) {
 				merged = append(merged, field)

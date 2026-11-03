@@ -23,7 +23,7 @@ const base: Campaign = {
   created_at: "2026-11-03T12:00:00Z",
   updated_at: "2026-11-03T12:00:00Z",
 };
-const stored = { sms: "Hi {{first_name}}", email_subject: "Subject", email_preheader: "", email_headline: "", email_body: "Body", email_cta_label: "", email_cta_url: "", edited: [] };
+const stored = { sms: "Hi {{first_name}}", email_subject: "Subject", email_preheader: "", email_headline: "", email_body: "Body", email_cta_label: "", email_cta_url: "", email_template: "", edited: [] };
 const ready: Campaign = { ...base, status: "READY_FOR_REVIEW", content: stored };
 const recipients = [
   { id: 1, label: "Ayşe", first_name: "Ayşe" },
@@ -251,6 +251,42 @@ describe("content page", () => {
 
     const [, init] = generateCalls(fetchMock)[0];
     expect(JSON.parse(init!.body as string).channel).toBe("sms");
+  });
+
+  it("previews the template as soon as it is picked and saves it when moving on", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const put = vi.fn(() => ({ ok: true, status: 200, json: async () => ({ ...ready, content: { ...stored, email_template: "banner", edited: ["email_template"] } }) }));
+    const fetchMock = stub(ready, undefined, put);
+    const wrapper = open("email");
+    await flushPromises();
+    expect((wrapper.find("[data-testid=email-template-classic]").element as HTMLInputElement).checked).toBe(true);
+
+    await wrapper.find("[data-testid=email-template-banner]").setValue();
+    expect(wrapper.find("[data-testid=message-state]").text()).toContain("Unsaved changes");
+    expect(wrapper.find("[data-testid=message-state]").text()).not.toContain("Edited");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    const previews = fetchMock.mock.calls.filter(([url]) => url.endsWith("/api/email-preview"));
+    expect(JSON.parse(previews.at(-1)![1]!.body as string).email_template).toBe("banner");
+
+    await wrapper.find("[data-testid=continue]").trigger("click");
+    await flushPromises();
+    vi.useRealTimers();
+    const [, init] = fetchMock.mock.calls.find(([, options]) => options?.method === "PUT")!;
+    expect(JSON.parse(init!.body as string).email_template).toBe("banner");
+  });
+
+  it("keeps a template picked just now when the text is regenerated", async () => {
+    const newText = { ...ready, content: { ...stored, email_subject: "New" } };
+    stub(ready, async () => ({ ok: true, status: 200, body: streamOf(event("done", newText)) }));
+    const wrapper = open("email");
+    await flushPromises();
+
+    await wrapper.find("[data-testid=email-template-offer]").setValue();
+    await wrapper.find("form").trigger("submit");
+    await vi.waitFor(() => expect(wrapper.findAll("textarea")[0].element.value).toBe("New"));
+
+    expect((wrapper.find("[data-testid=email-template-offer]").element as HTMLInputElement).checked).toBe(true);
   });
 
   it("shows only the warnings of this channel", async () => {
