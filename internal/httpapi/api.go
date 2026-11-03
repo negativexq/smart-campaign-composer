@@ -35,25 +35,32 @@ type api struct {
 func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provider, metrics *telemetry.Metrics) {
 	a := &api{campaigns, provider, metrics}
 	mux.HandleFunc("GET /api/config", a.config)
-	mux.HandleFunc("GET /api/overview", a.overview)
-	mux.HandleFunc("GET /api/campaigns", a.list)
-	mux.HandleFunc("POST /api/campaigns", a.create)
-	mux.HandleFunc("GET /api/campaigns/{id}", a.get)
-	mux.HandleFunc("PATCH /api/campaigns/{id}", a.rename)
-	mux.HandleFunc("POST /api/campaigns/{id}/segment", a.proposeSegment)
-	mux.HandleFunc("GET /api/campaigns/{id}/audience", a.audience)
-	mux.HandleFunc("POST /api/campaigns/{id}/generate", a.generate)
-	mux.HandleFunc("PUT /api/campaigns/{id}/content", a.saveContent)
-	mux.HandleFunc("GET /api/campaigns/{id}/sample-recipients", a.sampleRecipients)
-	mux.HandleFunc("POST /api/campaigns/{id}/approve", a.approve)
-	mux.HandleFunc("POST /api/campaigns/{id}/dispatch", a.dispatch)
-	mux.HandleFunc("POST /api/campaigns/{id}/schedule", a.schedule)
-	mux.HandleFunc("DELETE /api/campaigns/{id}/schedule", a.cancelSchedule)
-	mux.HandleFunc("GET /api/campaigns/{id}/progress", a.progress)
-	mux.HandleFunc("GET /api/campaigns/{id}/events", a.events)
-	mux.HandleFunc("GET /api/campaigns/{id}/deliveries", a.deliveries)
-	mux.HandleFunc("GET /api/campaigns/{id}/deliveries/{delivery}/attempts", a.deliveryAttempts)
-	mux.HandleFunc("GET /api/campaigns/{id}/activity", a.activity)
+	mux.HandleFunc("GET /api/session", a.session)
+	mux.HandleFunc("POST /api/session", a.signIn)
+	mux.HandleFunc("DELETE /api/session", a.signOut)
+	for pattern, handler := range map[string]http.HandlerFunc{
+		"GET /api/overview":                                      a.overview,
+		"GET /api/campaigns":                                     a.list,
+		"POST /api/campaigns":                                    a.create,
+		"GET /api/campaigns/{id}":                                a.get,
+		"PATCH /api/campaigns/{id}":                              a.rename,
+		"POST /api/campaigns/{id}/segment":                       a.proposeSegment,
+		"GET /api/campaigns/{id}/audience":                       a.audience,
+		"POST /api/campaigns/{id}/generate":                      a.generate,
+		"PUT /api/campaigns/{id}/content":                        a.saveContent,
+		"GET /api/campaigns/{id}/sample-recipients":              a.sampleRecipients,
+		"POST /api/campaigns/{id}/approve":                       a.approve,
+		"POST /api/campaigns/{id}/dispatch":                      a.dispatch,
+		"POST /api/campaigns/{id}/schedule":                      a.schedule,
+		"DELETE /api/campaigns/{id}/schedule":                    a.cancelSchedule,
+		"GET /api/campaigns/{id}/progress":                       a.progress,
+		"GET /api/campaigns/{id}/events":                         a.events,
+		"GET /api/campaigns/{id}/deliveries":                     a.deliveries,
+		"GET /api/campaigns/{id}/deliveries/{delivery}/attempts": a.deliveryAttempts,
+		"GET /api/campaigns/{id}/activity":                       a.activity,
+	} {
+		mux.HandleFunc(pattern, signedIn(handler))
+	}
 }
 
 func (a *api) config(w http.ResponseWriter, _ *http.Request) {

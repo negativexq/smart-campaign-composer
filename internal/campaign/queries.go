@@ -158,6 +158,8 @@ type ActivityEntry struct {
 	CampaignID string          `json:"campaign_id"`
 	Name       string          `json:"campaign_name"`
 	Type       string          `json:"type"`
+	ActorType  string          `json:"actor_type"`
+	Actor      *string         `json:"actor"`
 	Details    json.RawMessage `json:"details"`
 	OccurredAt time.Time       `json:"occurred_at"`
 }
@@ -178,7 +180,7 @@ func (s *Service) Activity(ctx context.Context, id string) ([]ActivityEntry, err
 // first when id is nil.
 func (s *Service) queryActivity(ctx context.Context, id *pgtype.UUID, limit int) ([]ActivityEntry, error) {
 	query := `
-		SELECT a.campaign_id::text, c.name, a.event_type, a.details, a.occurred_at
+		SELECT a.campaign_id::text, c.name, a.event_type, a.actor_type, a.actor, a.details, a.occurred_at
 		FROM audit_events a JOIN campaigns c ON c.id = a.campaign_id `
 	var args []any
 	if id != nil {
@@ -194,7 +196,7 @@ func (s *Service) queryActivity(ctx context.Context, id *pgtype.UUID, limit int)
 	}
 	entries, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ActivityEntry, error) {
 		var entry ActivityEntry
-		err := row.Scan(&entry.CampaignID, &entry.Name, &entry.Type, &entry.Details, &entry.OccurredAt)
+		err := row.Scan(&entry.CampaignID, &entry.Name, &entry.Type, &entry.ActorType, &entry.Actor, &entry.Details, &entry.OccurredAt)
 		return entry, err
 	})
 	if err != nil {

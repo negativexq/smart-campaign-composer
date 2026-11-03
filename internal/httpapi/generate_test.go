@@ -39,7 +39,7 @@ func readEvents(t *testing.T, body string) []sseEvent {
 func generate(t *testing.T, api http.Handler, id, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	recorder := httptest.NewRecorder()
-	api.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/campaigns/"+id+"/generate", strings.NewReader(body)))
+	api.ServeHTTP(recorder, signIn(httptest.NewRequest(http.MethodPost, "/api/campaigns/"+id+"/generate", strings.NewReader(body))))
 	return recorder
 }
 
@@ -299,7 +299,7 @@ func TestEventsFollowACampaignWhileItCanChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := http.DefaultClient.Do(request)
+	response, err := http.DefaultClient.Do(signIn(request))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestEventsEndForACampaignThatCannotChange(t *testing.T) {
 	api := newAPI(t, fastMock())
 	id := campaignWithAudience(t, api)
 	recorder := httptest.NewRecorder()
-	api.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/campaigns/"+id+"/events", nil))
+	api.ServeHTTP(recorder, signIn(httptest.NewRequest(http.MethodGet, "/api/campaigns/"+id+"/events", nil)))
 	events := readEvents(t, recorder.Body.String())
 	if len(events) != 2 || events[0].name != "update" || events[1].name != "end" {
 		t.Fatalf("events: %+v", events)

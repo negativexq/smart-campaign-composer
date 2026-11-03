@@ -70,6 +70,7 @@ type View struct {
 	NameSource   string              `json:"name_source"`
 	Brief        string              `json:"brief"`
 	Status       string              `json:"status"`
+	CreatedBy    *string             `json:"created_by"`
 	Version      int                 `json:"version"`
 	Provider     string              `json:"provider,omitempty"`
 	Model        string              `json:"model,omitempty"`
@@ -116,7 +117,7 @@ func (s *Service) Create(ctx context.Context, brief string) (string, error) {
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
 	var id string
-	if err := tx.QueryRow(ctx, `INSERT INTO campaigns (brief, name) VALUES ($1, $2) RETURNING id::text`, brief, provisionalName(brief)).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO campaigns (brief, name, created_by) VALUES ($1, $2, $3) RETURNING id::text`, brief, provisionalName(brief), personFrom(ctx)).Scan(&id); err != nil {
 		return "", fmt.Errorf("insert campaign: %w", err)
 	}
 	if err := recordAudit(ctx, tx, id, eventCreated, map[string]any{"brief_characters": utf8.RuneCountInString(brief)}); err != nil {
@@ -429,7 +430,11 @@ func recordAudit(ctx context.Context, tx pgx.Tx, id, event string, details map[s
 	if err != nil {
 		return fmt.Errorf("encode audit details: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (campaign_id, event_type, details) VALUES ($1, $2, $3)`, id, event, encoded); err != nil {
+	actorType, actor := actorSystem, personFrom(ctx)
+	if actor != nil {
+		actorType = actorUser
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (campaign_id, event_type, details, actor_type, actor) VALUES ($1, $2, $3, $4, $5)`, id, event, encoded, actorType, actor); err != nil {
 		return fmt.Errorf("record audit event: %w", err)
 	}
 	return nil
@@ -482,12 +487,12 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 		approvedAt   *time.Time
 	)
 	err := s.db.QueryRow(ctx, `
-		SELECT c.name, c.name_source, c.brief, c.status, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at
+		SELECT c.name, c.name_source, c.brief, c.status, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt)
+		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}

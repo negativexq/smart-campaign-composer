@@ -572,3 +572,35 @@ func TestMissedIntervalsBecomeOneRunAndThenStayOnTime(t *testing.T) {
 		t.Fatalf("schedule: %+v", view.Schedule)
 	}
 }
+
+func TestAScheduledRunIsTheSystemsOnBehalfOfWhoeverSetItUp(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := campaign.WithActor(context.Background(), "marketer@example.com")
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: nextHour()}); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	if ran, err := scheduler(h, nextHour().Add(time.Second)).RunDue(context.Background()); err != nil || ran != 1 {
+		t.Fatalf("run: %d %v", ran, err)
+	}
+	entries, err := h.service.Activity(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var setUp, run *campaign.ActivityEntry
+	for i := range entries {
+		switch entries[i].Type {
+		case "campaign.scheduled":
+			setUp = &entries[i]
+		case "campaign.run":
+			run = &entries[i]
+		}
+	}
+	if setUp == nil || setUp.ActorType != "user" || setUp.Actor == nil || *setUp.Actor != "marketer@example.com" {
+		t.Fatalf("set up: %+v", setUp)
+	}
+	if run == nil || run.ActorType != "system" || run.Actor != nil || !strings.Contains(string(run.Details), "marketer@example.com") {
+		t.Fatalf("run: %+v", run)
+	}
+}
+

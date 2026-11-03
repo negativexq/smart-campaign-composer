@@ -39,6 +39,7 @@ func call(t *testing.T, method, path string, body any, wantStatus int) []byte {
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
+	request.AddCookie(&http.Cookie{Name: "scc_session", Value: "e2e@example.com"})
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, path, err)

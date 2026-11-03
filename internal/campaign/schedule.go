@@ -36,6 +36,7 @@ type ScheduleView struct {
 	Spec        schedule.Spec `json:"spec"`
 	Description string        `json:"description"`
 	NextRunAt   *time.Time    `json:"next_run_at"`
+	CreatedBy   *string       `json:"created_by"`
 	LastRunAt   *time.Time    `json:"last_run_at"`
 	Runs        int           `json:"runs"`
 }
@@ -71,8 +72,8 @@ func (s *Service) Schedule(ctx context.Context, id string, spec schedule.Spec) (
 		return View{}, fmt.Errorf("encode schedule: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO campaign_schedules (campaign_id, spec, next_run_at) VALUES ($1, $2, $3)
-		ON CONFLICT (campaign_id) DO UPDATE SET spec = EXCLUDED.spec, next_run_at = EXCLUDED.next_run_at`, id, encoded, next); err != nil {
+		INSERT INTO campaign_schedules (campaign_id, spec, next_run_at, created_by) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (campaign_id) DO UPDATE SET spec = EXCLUDED.spec, next_run_at = EXCLUDED.next_run_at, created_by = EXCLUDED.created_by`, id, encoded, next, personFrom(ctx)); err != nil {
 		return View{}, fmt.Errorf("save schedule: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1`, id, statusScheduled); err != nil {
@@ -139,8 +140,8 @@ func (s *Service) loadSchedule(ctx context.Context, id string) (*ScheduleView, e
 		view    ScheduleView
 		encoded []byte
 	)
-	err := s.db.QueryRow(ctx, `SELECT spec, next_run_at, last_run_at, runs FROM campaign_schedules WHERE campaign_id = $1`, id).
-		Scan(&encoded, &view.NextRunAt, &view.LastRunAt, &view.Runs)
+	err := s.db.QueryRow(ctx, `SELECT spec, next_run_at, last_run_at, runs, created_by FROM campaign_schedules WHERE campaign_id = $1`, id).
+		Scan(&encoded, &view.NextRunAt, &view.LastRunAt, &view.Runs, &view.CreatedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil //nolint:nilnil // no schedule is a normal state
 	}
@@ -211,16 +212,17 @@ func (s *Scheduler) runOne(ctx context.Context) (bool, error) {
 		version          int
 		encodedSpec, seg []byte
 		scheduledFor     time.Time
+		scheduledBy      *string
 	)
 	err = tx.QueryRow(ctx, `
-		SELECT c.id::text, c.status, v.version, s.spec, v.segment, s.next_run_at
+		SELECT c.id::text, c.status, v.version, s.spec, v.segment, s.next_run_at, s.created_by
 		FROM campaign_schedules s
 		JOIN campaigns c ON c.id = s.campaign_id
 		JOIN campaign_versions v ON v.campaign_id = c.id AND v.approved_at IS NOT NULL
 		WHERE s.next_run_at <= $1 AND c.status IN ('SCHEDULED', 'DISPATCHING')
 		ORDER BY s.next_run_at
 		LIMIT 1
-		FOR UPDATE OF s, c SKIP LOCKED`, now).Scan(&id, &status, &version, &encodedSpec, &seg, &scheduledFor)
+		FOR UPDATE OF s, c SKIP LOCKED`, now).Scan(&id, &status, &version, &encodedSpec, &seg, &scheduledFor, &scheduledBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -260,7 +262,7 @@ func (s *Scheduler) runOne(ctx context.Context) (bool, error) {
 	if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1`, id, status); err != nil {
 		return false, fmt.Errorf("start run: %w", err)
 	}
-	if err := recordAudit(ctx, tx, id, eventRun, map[string]any{"scheduled_for": scheduledFor, "queued": queued, "skipped": skipped}); err != nil {
+	if err := recordAudit(ctx, tx, id, eventRun, map[string]any{"scheduled_for": scheduledFor, "scheduled_by": scheduledBy, "queued": queued, "skipped": skipped}); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(ctx); err != nil {

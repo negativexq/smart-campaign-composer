@@ -42,6 +42,7 @@ func request(method, url string, body any) (int, []byte, error) {
 	if err != nil {
 		return 0, nil, err
 	}
+	built.AddCookie(&http.Cookie{Name: "scc_session", Value: "chaos@example.com"})
 	response, err := http.DefaultClient.Do(built)
 	if err != nil {
 		return 0, nil, err

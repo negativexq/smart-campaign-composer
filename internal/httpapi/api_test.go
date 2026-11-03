@@ -49,9 +49,16 @@ func newAPI(t *testing.T, provider ai.Provider) http.Handler {
 	return mux
 }
 
+const testIdentity = "tester@example.com"
+
+func signIn(request *http.Request) *http.Request {
+	request.AddCookie(&http.Cookie{Name: "scc_session", Value: testIdentity})
+	return request
+}
+
 func call(t *testing.T, api http.Handler, method, path, body string) (int, map[string]any) {
 	t.Helper()
-	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request := signIn(httptest.NewRequest(method, path, strings.NewReader(body)))
 	recorder := httptest.NewRecorder()
 	api.ServeHTTP(recorder, request)
 	var decoded map[string]any
