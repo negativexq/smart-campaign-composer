@@ -3,6 +3,7 @@ package campaign_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -541,5 +542,81 @@ func TestAModelMayUseALinkFromTheInstruction(t *testing.T) {
 	}
 	if view.Content == nil || view.Content.EmailCTAURL != "https://shop.example.com/sale" {
 		t.Fatalf("content: %+v", view.Content)
+	}
+}
+
+func TestRegeneratingOneChannelLeavesTheOtherAlone(t *testing.T) {
+	t.Parallel()
+	h, provider, id := newContentHarness(t, step{output: validContent}, step{output: `{"sms":"New {{first_name}}"}`})
+	ctx := context.Background()
+	first, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	edited := first.Content.Content
+	edited.SMS = "My {{first_name}}"
+	edited.EmailSubject = "My subject"
+	if _, err := h.service.SaveContent(ctx, id, edited); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	view, _, err := run(t, h, id, campaign.GenerateInput{Channel: "sms"})
+	if err != nil {
+		t.Fatalf("regenerate: %v", err)
+	}
+	if view.Content.SMS != "New {{first_name}}" {
+		t.Fatalf("sms: %q", view.Content.SMS)
+	}
+	if view.Content.EmailSubject != "My subject" || view.Content.EmailBody != first.Content.EmailBody {
+		t.Fatalf("the email changed: %+v", view.Content)
+	}
+	if !slices.Equal(view.Content.Edited, []string{"email_subject"}) {
+		t.Fatalf("edited: %v", view.Content.Edited)
+	}
+	request := provider.contentCalls[len(provider.contentCalls)-1]
+	if !request.Limits.SkipEmail || request.Limits.SkipSMS {
+		t.Fatalf("limits: %+v", request.Limits)
+	}
+	if strings.Contains(string(request.Current), "My subject") {
+		t.Fatalf("the model was shown the other channel: %s", request.Current)
+	}
+}
+
+func TestRegeneratingTheEmailKeepsTheSMS(t *testing.T) {
+	t.Parallel()
+	h, _, id := newContentHarness(t, step{output: validContent}, step{output: `{"email_subject":"New subject","email_body":"New body"}`})
+	first, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	view, _, err := run(t, h, id, campaign.GenerateInput{Channel: "email"})
+	if err != nil {
+		t.Fatalf("regenerate: %v", err)
+	}
+	if view.Content.SMS != first.Content.SMS || view.Content.EmailSubject != "New subject" || view.Content.EmailBody != "New body" {
+		t.Fatalf("content: %+v", view.Content)
+	}
+}
+
+func TestAFirstGenerationWritesEveryChannel(t *testing.T) {
+	t.Parallel()
+	h, provider, id := newContentHarness(t, step{output: validContent})
+
+	if _, _, err := run(t, h, id, campaign.GenerateInput{Channel: "email"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if request := provider.contentCalls[0]; request.Limits.SkipSMS || request.Limits.SkipEmail {
+		t.Fatalf("limits: %+v", request.Limits)
+	}
+}
+
+func TestOnlyAChosenChannelCanBeRegenerated(t *testing.T) {
+	t.Parallel()
+	h, _, id := newContentHarness(t, step{output: validContent})
+	for _, channel := range []string{"push", "SMS"} {
+		if _, err := h.service.StartGeneration(context.Background(), id, campaign.GenerateInput{Channel: channel}); !errors.Is(err, campaign.ErrInvalidChannels) {
+			t.Fatalf("%s: got %v", channel, err)
+		}
 	}
 }
