@@ -480,8 +480,15 @@ func (w *Worker) finishCampaign(ctx context.Context, id string) error {
 		return fmt.Errorf("count deliveries: %w", err)
 	}
 
-	status := "COMPLETED"
-	if counts[statusFailed]+counts[statusUnknown] > 0 {
+	var moreRuns bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM campaign_schedules WHERE campaign_id = $1 AND next_run_at IS NOT NULL)`, id).Scan(&moreRuns); err != nil {
+		return fmt.Errorf("read schedule: %w", err)
+	}
+	status, event := "COMPLETED", "campaign.completed"
+	switch {
+	case moreRuns:
+		status, event = "SCHEDULED", "campaign.run_finished"
+	case counts[statusFailed]+counts[statusUnknown] > 0:
 		status = "COMPLETED_WITH_FAILURES"
 	}
 	result, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1 AND status = 'DISPATCHING'`, id, status)
@@ -497,7 +504,7 @@ func (w *Worker) finishCampaign(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("encode audit details: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (campaign_id, event_type, details) VALUES ($1, 'campaign.completed', $2)`, id, details); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (campaign_id, event_type, details) VALUES ($1, $2, $3)`, id, event, details); err != nil {
 		return fmt.Errorf("record completion: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

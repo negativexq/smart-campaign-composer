@@ -222,3 +222,35 @@ func TestApproveAndDispatch(t *testing.T) {
 		t.Fatalf("unknown delivery: %d", status)
 	}
 }
+
+func TestScheduling(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, fastMock())
+	id := campaignWithAudience(t, api)
+	generate(t, api, id, "")
+	call(t, api, http.MethodPost, "/api/campaigns/"+id+"/approve", "")
+	path := "/api/campaigns/" + id + "/schedule"
+
+	status, body := call(t, api, http.MethodPost, path, `{"kind":"weekly","days":[],"time":"09:00","timezone":"Europe/Istanbul"}`)
+	if status != http.StatusBadRequest || !strings.Contains(body["error"].(string), "day") {
+		t.Fatalf("invalid: %d %+v", status, body)
+	}
+	status, view := call(t, api, http.MethodPost, path, `{"kind":"weekly","days":["mon","wed"],"time":"09:30","timezone":"Europe/Istanbul"}`)
+	if status != http.StatusOK || view["status"] != "SCHEDULED" {
+		t.Fatalf("schedule: %d %+v", status, view)
+	}
+	rule := view["schedule"].(map[string]any)
+	if rule["description"] != "Monday and Wednesday at 09:30 (Europe/Istanbul)" || rule["next_run_at"] == nil {
+		t.Fatalf("rule: %+v", rule)
+	}
+	if status, _ := call(t, api, http.MethodPost, "/api/campaigns/"+id+"/dispatch", ""); status != http.StatusConflict {
+		t.Fatalf("send now while scheduled: %d", status)
+	}
+	status, view = call(t, api, http.MethodDelete, path, "")
+	if status != http.StatusOK || view["status"] != "APPROVED" {
+		t.Fatalf("cancel: %d %+v", status, view)
+	}
+	if status, _ := call(t, api, http.MethodDelete, path, ""); status != http.StatusConflict {
+		t.Fatalf("cancel again: %d", status)
+	}
+}

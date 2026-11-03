@@ -14,6 +14,7 @@ import (
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
 	"github.com/negativexq/smart-campaign-composer/internal/campaign"
 	"github.com/negativexq/smart-campaign-composer/internal/content"
+	"github.com/negativexq/smart-campaign-composer/internal/schedule"
 	"github.com/negativexq/smart-campaign-composer/internal/telemetry"
 )
 
@@ -41,6 +42,8 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 	mux.HandleFunc("GET /api/campaigns/{id}/sample-recipients", a.sampleRecipients)
 	mux.HandleFunc("POST /api/campaigns/{id}/approve", a.approve)
 	mux.HandleFunc("POST /api/campaigns/{id}/dispatch", a.dispatch)
+	mux.HandleFunc("POST /api/campaigns/{id}/schedule", a.schedule)
+	mux.HandleFunc("DELETE /api/campaigns/{id}/schedule", a.cancelSchedule)
 	mux.HandleFunc("GET /api/campaigns/{id}/progress", a.progress)
 	mux.HandleFunc("GET /api/campaigns/{id}/deliveries", a.deliveries)
 	mux.HandleFunc("GET /api/campaigns/{id}/deliveries/{delivery}/attempts", a.deliveryAttempts)
@@ -273,6 +276,33 @@ func (a *api) dispatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, view)
 }
 
+func (a *api) schedule(w http.ResponseWriter, r *http.Request) {
+	var spec schedule.Spec
+	if !decode(w, r, &spec) {
+		return
+	}
+	view, err := a.campaigns.Schedule(r.Context(), r.PathValue("id"), spec)
+	var invalid *schedule.InvalidError
+	if errors.As(err, &invalid) {
+		writeJSON(w, http.StatusBadRequest, errorBody(invalid.Message))
+		return
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *api) cancelSchedule(w http.ResponseWriter, r *http.Request) {
+	view, err := a.campaigns.CancelSchedule(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
 func (a *api) progress(w http.ResponseWriter, r *http.Request) {
 	progress, err := a.campaigns.Progress(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -342,6 +372,10 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusConflict, "This campaign has no messages ready to approve."
 	case errors.Is(err, campaign.ErrNotApproved):
 		status, message = http.StatusConflict, "This campaign must be approved before it can be sent."
+	case errors.Is(err, campaign.ErrAlreadyScheduled):
+		status, message = http.StatusConflict, "This campaign is scheduled. Cancel the schedule to send it now."
+	case errors.Is(err, campaign.ErrNoSchedule):
+		status, message = http.StatusConflict, "This campaign has no schedule to cancel."
 	case errors.Is(err, campaign.ErrUnknownFilter):
 		status, message = http.StatusBadRequest, "This delivery filter does not exist."
 	case errors.Is(err, campaign.ErrInvalidInstruction):

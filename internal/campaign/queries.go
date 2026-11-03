@@ -24,7 +24,7 @@ const (
 // group, so overview counts add up; cancelled campaigns only appear under all.
 var groupStatuses = map[string][]string{
 	"drafts":    {"DRAFT", "GENERATING", "READY_FOR_REVIEW"},
-	"active":    {"APPROVED", "DISPATCHING"},
+	"active":    {"APPROVED", "SCHEDULED", "DISPATCHING"},
 	"completed": {"COMPLETED"},
 	"failed":    {"GENERATION_FAILED", "COMPLETED_WITH_FAILURES"},
 }

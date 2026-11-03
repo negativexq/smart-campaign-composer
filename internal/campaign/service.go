@@ -84,6 +84,7 @@ type View struct {
 	// ContentWarnings are differences from the brief for a person to judge.
 	ContentWarnings []content.Issue `json:"content_warnings"`
 	ApprovedAt      time.Time       `json:"approved_at,omitzero"`
+	Schedule        *ScheduleView   `json:"schedule,omitempty"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 }
@@ -439,6 +440,9 @@ func recordAudit(ctx context.Context, tx pgx.Tx, id, event string, details map[s
 func (s *Service) Get(ctx context.Context, id string) (View, error) {
 	view, err := s.load(ctx, id)
 	if err != nil {
+		return View{}, err
+	}
+	if view.Schedule, err = s.loadSchedule(ctx, id); err != nil {
 		return View{}, err
 	}
 	if view.Proposal == nil {

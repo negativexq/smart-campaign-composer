@@ -19,6 +19,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel"
 
+	"github.com/negativexq/smart-campaign-composer/internal/campaign"
 	"github.com/negativexq/smart-campaign-composer/internal/db"
 	"github.com/negativexq/smart-campaign-composer/internal/delivery"
 	"github.com/negativexq/smart-campaign-composer/internal/health"
@@ -97,6 +98,7 @@ func run() error {
 			slog.Error("delivery loop stopped", "error", err)
 		}
 	})
+	running.Go(func() { campaign.NewScheduler(pool, otel.Tracer("schedule"), time.Now).Run(ctx) })
 	defer running.Wait()
 
 	return server.Run(ctx, ":"+server.Env("OPS_PORT", "8080"), mux)

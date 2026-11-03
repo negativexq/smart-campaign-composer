@@ -1,7 +1,7 @@
 //go:build e2e
 
 // Package e2e holds the acceptance test for the whole campaign chain. It runs
-// against a stack started with `make up` and stays out of `make test`. It is
+// against a stack started with `make up` and stays out of `make test`, and
 // covers the path from a brief to a finished campaign.
 package e2e
 

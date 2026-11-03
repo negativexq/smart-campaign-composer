@@ -75,7 +75,7 @@ func (s *Service) Approve(ctx context.Context, id string) (View, error) {
 	}
 	switch status {
 	case statusReady:
-	case statusApproved, statusDispatching, "COMPLETED", "COMPLETED_WITH_FAILURES":
+	case statusApproved, statusScheduled, statusDispatching, "COMPLETED", "COMPLETED_WITH_FAILURES":
 		return s.Get(ctx, id)
 	default:
 		return View{}, ErrNotReviewable
@@ -113,7 +113,8 @@ func (s *Service) Approve(ctx context.Context, id string) (View, error) {
 
 // Dispatch fixes the recipients and queues one delivery per person and channel.
 // People without consent are recorded as skipped, so the report can account for
-// everyone. Repeating it changes nothing.
+// everyone. Only someone skipped, who was therefore never messaged, can be queued
+// by a later run. Repeating it changes nothing.
 func (s *Service) Dispatch(ctx context.Context, id string) (view View, err error) {
 	ctx, span := s.tracer.Start(ctx, "campaign.dispatch", trace.WithAttributes(attribute.String("campaign.id", id)))
 	defer func() {
@@ -137,6 +138,8 @@ func (s *Service) Dispatch(ctx context.Context, id string) (view View, err error
 	case statusApproved:
 	case statusDispatching, "COMPLETED", "COMPLETED_WITH_FAILURES":
 		return s.Get(ctx, id)
+	case statusScheduled:
+		return View{}, ErrAlreadyScheduled
 	default:
 		return View{}, ErrNotApproved
 	}
@@ -190,7 +193,9 @@ func insertDeliveries(ctx context.Context, tx pgx.Tx, id string, version int, sp
 			CROSS JOIN (VALUES ('sms'), ('email')) AS ch (channel)
 			LEFT JOIN consents consent ON consent.user_id = u.id AND consent.channel = ch.channel
 			WHERE `+where+`
-			ON CONFLICT (campaign_id, user_id, channel) DO NOTHING
+			ON CONFLICT (campaign_id, user_id, channel) DO UPDATE
+			SET status = 'QUEUED', last_error = NULL, next_attempt_at = now(), updated_at = now(), trace_context = EXCLUDED.trace_context
+			WHERE campaign_deliveries.status = 'SKIPPED' AND EXCLUDED.status = 'QUEUED'
 			RETURNING status
 		)
 		SELECT count(*) FILTER (WHERE status = 'QUEUED'), count(*) FILTER (WHERE status = 'SKIPPED') FROM inserted`, args...).Scan(&queued, &skipped)
