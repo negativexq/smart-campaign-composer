@@ -220,3 +220,99 @@ func TestSchemaOffersTheEmailPartsButRequiresOnlySubjectAndBody(t *testing.T) {
 		t.Fatal("an SMS campaign is not asked for a headline")
 	}
 }
+
+func TestEveryEmailTemplateHasEveryPart(t *testing.T) {
+	t.Parallel()
+	rendered := map[string]string{}
+	for _, name := range content.EmailTemplates {
+		c := fullEmail
+		c.EmailTemplate = name
+		email := renderEmail(t, c, "Ayşe")
+		for _, want := range []string{
+			`name="viewport"`,
+			"It is still waiting for you",
+			"Welcome back, Ayşe",
+			"second line",
+			`href="https://shop.example.com/cart?a=1&amp;b=2"`,
+			">See your cart<",
+			`href="https://app.example.com/api/unsubscribe/token"`,
+		} {
+			if !strings.Contains(email.HTML, want) {
+				t.Errorf("%s: missing %q", name, want)
+			}
+		}
+		rendered[email.HTML] = name
+	}
+	if len(rendered) != len(content.EmailTemplates) {
+		t.Fatalf("templates must look different: %d of %d", len(rendered), len(content.EmailTemplates))
+	}
+}
+
+func TestEveryEmailTemplateEscapesWhatPeopleWrite(t *testing.T) {
+	t.Parallel()
+	for _, name := range content.EmailTemplates {
+		hostile := fullEmail
+		hostile.EmailTemplate = name
+		hostile.EmailHeadline = `<img src=x onerror=alert(1)>`
+		hostile.EmailBody = `<script>alert(1)</script>`
+		hostile.EmailCTAURL = "javascript:alert(1)"
+		html := renderEmail(t, hostile, "Ann").HTML
+		for _, bad := range []string{"<img", "<script", "javascript:"} {
+			if strings.Contains(html, bad) {
+				t.Errorf("%s: %q reached the HTML", name, bad)
+			}
+		}
+	}
+}
+
+func TestEveryEmailTemplateReadsWithOnlyTheRequiredParts(t *testing.T) {
+	t.Parallel()
+	for _, name := range content.EmailTemplates {
+		email := renderEmail(t, content.Content{EmailTemplate: name, EmailSubject: "Hello", EmailBody: "Just text."}, "")
+		if !strings.Contains(email.HTML, "Just text.") || strings.Contains(email.HTML, "<a role=") || strings.Contains(email.HTML, "<h1") {
+			t.Errorf("%s: %s", name, email.HTML)
+		}
+	}
+}
+
+func TestAnEmailWithoutATemplateLooksLikeTheClassicOne(t *testing.T) {
+	t.Parallel()
+	classic := fullEmail
+	classic.EmailTemplate = content.EmailTemplates[0]
+	want := renderEmail(t, classic, "Ayşe").HTML
+	if got := renderEmail(t, fullEmail, "Ayşe").HTML; got != want {
+		t.Fatal("older drafts have no template and must keep rendering")
+	}
+	unknown := fullEmail
+	unknown.EmailTemplate = "nope"
+	if got := renderEmail(t, unknown, "Ayşe").HTML; got != want {
+		t.Fatal("an unknown template must not break a send")
+	}
+}
+
+func TestOnlyAKnownEmailTemplateCanBeChosen(t *testing.T) {
+	t.Parallel()
+	base := content.Content{SMS: "Hi", EmailSubject: "Hello", EmailBody: "Text"}
+	for _, name := range append([]string{""}, content.EmailTemplates...) {
+		base.EmailTemplate = name
+		if issues := content.CheckMessages(base, content.Limits{}); len(issues) != 0 {
+			t.Fatalf("%q: %+v", name, issues)
+		}
+	}
+	base.EmailTemplate = "nope"
+	issues := content.CheckMessages(base, content.Limits{})
+	if len(issues) != 1 || issues[0].Field != content.FieldEmailTemplate || issues[0].Reason != "unknown_template" {
+		t.Fatalf("issues: %+v", issues)
+	}
+}
+
+func TestAModelCannotChooseTheEmailTemplate(t *testing.T) {
+	t.Parallel()
+	generated, err := content.ParseGenerated([]byte(`{"sms":"Hi","email_subject":"Hello","email_body":"Text","email_template":"banner"}`), content.Limits{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generated.EmailTemplate != "" {
+		t.Fatalf("template: %q", generated.EmailTemplate)
+	}
+}

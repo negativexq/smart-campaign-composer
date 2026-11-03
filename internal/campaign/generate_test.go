@@ -620,3 +620,31 @@ func TestOnlyAChosenChannelCanBeRegenerated(t *testing.T) {
 		}
 	}
 }
+
+func TestTheChosenEmailTemplateIsSavedAndSurvivesRegenerating(t *testing.T) {
+	t.Parallel()
+	h, _, id := newContentHarness(t, step{output: validContent})
+	first, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	chosen := first.Content.Content
+	chosen.EmailTemplate = "banner"
+	saved, err := h.service.SaveContent(context.Background(), id, chosen)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if saved.Content.EmailTemplate != "banner" || !slices.Contains(saved.Content.Edited, "email_template") {
+		t.Fatalf("saved: %+v", saved.Content)
+	}
+
+	for _, channel := range []string{"sms", "email", ""} {
+		view, _, err := run(t, h, id, campaign.GenerateInput{Channel: channel})
+		if err != nil {
+			t.Fatalf("regenerate %q: %v", channel, err)
+		}
+		if view.Content.EmailTemplate != "banner" {
+			t.Fatalf("regenerate %q lost the template: %+v", channel, view.Content)
+		}
+	}
+}
