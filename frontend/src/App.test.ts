@@ -8,7 +8,7 @@ function stubReadiness(response: Partial<Response> | Error) {
   const fetchMock =
     response instanceof Error
       ? vi.fn().mockRejectedValue(response)
-      : vi.fn(async (url: string) => (url === "/api/system" ? { json: async () => ({ checks: { database: "ok" } }), ...response } : response));
+      : vi.fn(async (url: string) => (url === "/api/system" ? { json: async () => ({ checks: { database: "ok" } }), ...response } : { ok: response.ok }));
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
