@@ -52,6 +52,8 @@ const (
 var (
 	ErrInvalidBrief     = errors.New("brief is empty or too long")
 	ErrInvalidChannels  = errors.New("channels must be sms, email or both")
+	ErrInvalidOptions   = errors.New("tone, offer or exclusion is not valid")
+	ErrOfferConflict    = errors.New("brief mentions a different discount than the offer")
 	ErrInvalidName      = errors.New("campaign name is empty or too long")
 	ErrNotFound         = errors.New("campaign not found")
 	ErrNotEditable      = errors.New("campaign can no longer be edited")
@@ -67,22 +69,27 @@ type ProposeInput struct {
 
 // View is a campaign as the marketer sees it.
 type View struct {
-	ID           string              `json:"id"`
-	Name         string              `json:"name"`
-	NameSource   string              `json:"name_source"`
-	Brief        string              `json:"brief"`
-	Status       string              `json:"status"`
-	Channels     []string            `json:"channels"`
-	CreatedBy    *string             `json:"created_by"`
-	Version      int                 `json:"version"`
-	Provider     string              `json:"provider,omitempty"`
-	Model        string              `json:"model,omitempty"`
-	Proposal     *segment.Proposal   `json:"proposal,omitempty"`
-	Conditions   []segment.Condition `json:"conditions"`
-	Audience     segment.Counts      `json:"audience"`
-	AudienceAsOf time.Time           `json:"audience_as_of,omitzero"`
-	Blockers     []string            `json:"blockers"`
-	Content      *StoredContent      `json:"content,omitempty"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	NameSource   string   `json:"name_source"`
+	Brief        string   `json:"brief"`
+	Status       string   `json:"status"`
+	Channels     []string `json:"channels"`
+	Tone         string   `json:"tone"`
+	OfferPercent *int     `json:"offer_percent"`
+	// NotMessagedWithinDays is what the form asked for; the audience rule that
+	// applies is in Proposal.
+	NotMessagedWithinDays *int                `json:"not_messaged_within_days"`
+	CreatedBy             *string             `json:"created_by"`
+	Version               int                 `json:"version"`
+	Provider              string              `json:"provider,omitempty"`
+	Model                 string              `json:"model,omitempty"`
+	Proposal              *segment.Proposal   `json:"proposal,omitempty"`
+	Conditions            []segment.Condition `json:"conditions"`
+	Audience              segment.Counts      `json:"audience"`
+	AudienceAsOf          time.Time           `json:"audience_as_of,omitzero"`
+	Blockers              []string            `json:"blockers"`
+	Content               *StoredContent      `json:"content,omitempty"`
 	// ContentLimits is how long {{first_name}} can get in this audience.
 	ContentLimits content.Limits `json:"content_limits"`
 	// ContentWarnings are differences from the brief for a person to judge.
@@ -109,12 +116,50 @@ func NewService(db *pgxpool.Pool, provider ai.Provider, metrics *telemetry.Metri
 
 // Create stores a new draft and returns its ID.
 func (s *Service) Create(ctx context.Context, brief string, chosen ...string) (string, error) {
-	brief, err := cleanBrief(brief)
+	return s.CreateWith(ctx, NewCampaign{Brief: brief, Channels: chosen})
+}
+
+// NewCampaign is what a marketer fills in. Only the brief is required.
+type NewCampaign struct {
+	Brief                 string
+	Channels              []string
+	Tone                  string
+	OfferPercent          *int
+	NotMessagedWithinDays *int
+}
+
+func (n NewCampaign) validate() error {
+	if !slices.Contains([]string{"", "friendly", "formal", "urgent"}, n.Tone) {
+		return ErrInvalidOptions
+	}
+	if n.OfferPercent != nil && (*n.OfferPercent < 1 || *n.OfferPercent > 100) {
+		return ErrInvalidOptions
+	}
+	if n.NotMessagedWithinDays != nil && (*n.NotMessagedWithinDays < 1 || *n.NotMessagedWithinDays > 365) {
+		return ErrInvalidOptions
+	}
+	return checkOffer(n.Brief, n.OfferPercent)
+}
+
+// checkOffer refuses two different offers rather than guessing which one is meant.
+func checkOffer(brief string, offer *int) error {
+	if offer != nil && !content.OfferAgrees(brief, *offer) {
+		return ErrOfferConflict
+	}
+	return nil
+}
+
+// CreateWith stores a new draft with the choices made on the form.
+func (s *Service) CreateWith(ctx context.Context, campaign NewCampaign) (string, error) {
+	brief, err := cleanBrief(campaign.Brief)
 	if err != nil {
 		return "", err
 	}
-	chosen, err = normalizeChannels(chosen)
+	chosen, err := normalizeChannels(campaign.Channels)
 	if err != nil {
+		return "", err
+	}
+	if err := campaign.validate(); err != nil {
 		return "", err
 	}
 	tx, err := s.db.Begin(ctx)
@@ -124,10 +169,13 @@ func (s *Service) Create(ctx context.Context, brief string, chosen ...string) (s
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
 	var id string
-	if err := tx.QueryRow(ctx, `INSERT INTO campaigns (brief, name, created_by, channels) VALUES ($1, $2, $3, $4) RETURNING id::text`, brief, provisionalName(brief), personFrom(ctx), chosen).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO campaigns (brief, name, created_by, channels, tone, offer_percent, not_messaged_within_days)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id::text`,
+		brief, provisionalName(brief), personFrom(ctx), chosen, campaign.Tone, campaign.OfferPercent, campaign.NotMessagedWithinDays).Scan(&id); err != nil {
 		return "", fmt.Errorf("insert campaign: %w", err)
 	}
-	if err := recordAudit(ctx, tx, id, eventCreated, map[string]any{"brief_characters": utf8.RuneCountInString(brief), "channels": chosen}); err != nil {
+	if err := recordAudit(ctx, tx, id, eventCreated, map[string]any{"brief_characters": utf8.RuneCountInString(brief), "channels": chosen, "tone": campaign.Tone, "offer_percent": campaign.OfferPercent, "not_messaged_within_days": campaign.NotMessagedWithinDays}); err != nil {
 		return "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -202,6 +250,15 @@ func (s *Service) Unsubscribe(ctx context.Context, userID int64) error {
 	return nil
 }
 
+// writingBrief is the brief as a message writer and its checks see it, with the
+// offer from the form stated like any other.
+func (v View) writingBrief() string {
+	if v.OfferPercent == nil {
+		return v.Brief
+	}
+	return fmt.Sprintf("%s\n\nOffer set by the marketer: %d%% discount.", v.Brief, *v.OfferPercent)
+}
+
 // normalizeChannels puts a choice in the product's order. Saying nothing means
 // both, while an empty list is a choice of none and is refused.
 func normalizeChannels(chosen []string) ([]string, error) {
@@ -262,6 +319,9 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 		if request.Brief, err = cleanBrief(*input.Brief); err != nil {
 			return View{}, err
 		}
+		if err := checkOffer(request.Brief, stored.OfferPercent); err != nil {
+			return View{}, err
+		}
 		request.Refinement = ""
 	} else if input.Refinement != "" && stored.Proposal != nil {
 		if request.Current, err = json.Marshal(stored.Proposal); err != nil {
@@ -275,6 +335,10 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 	proposal, attempts, err := s.generateProposal(ctx, request)
 	if err != nil {
 		return View{}, err
+	}
+	// A refinement starts from the current rule, so a person can still ask to drop it.
+	if request.Refinement == "" && stored.NotMessagedWithinDays != nil {
+		proposal.Segment.NotMessagedWithinDays = stored.NotMessagedWithinDays
 	}
 
 	asOf := s.now()
@@ -515,7 +579,7 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 		SkipSMS: !slices.Contains(view.Channels, "sms"), SkipEmail: !slices.Contains(view.Channels, "email"),
 	}
 	if view.Content != nil {
-		view.ContentWarnings = append(view.ContentWarnings, content.CheckDiscounts(view.Content.Content, view.Brief)...)
+		view.ContentWarnings = append(view.ContentWarnings, content.CheckDiscounts(view.Content.Content, view.writingBrief())...)
 	}
 	return view, nil
 }
@@ -536,12 +600,12 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 		approvedAt   *time.Time
 	)
 	err := s.db.QueryRow(ctx, `
-		SELECT c.name, c.name_source, c.brief, c.status, c.channels, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at
+		SELECT c.name, c.name_source, c.brief, c.status, c.channels, c.tone, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.Channels, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt)
+		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.Channels, &view.Tone, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}

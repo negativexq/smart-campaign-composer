@@ -25,12 +25,13 @@ type Spec struct {
 	NoPurchaseSinceCart    *bool   `json:"no_purchase_since_cart,omitempty"`
 	PurchasedWithinDays    *int    `json:"purchased_within_days,omitempty"`
 	NotPurchasedWithinDays *int    `json:"not_purchased_within_days,omitempty"`
+	NotMessagedWithinDays  *int    `json:"not_messaged_within_days,omitempty"`
 }
 
 // IsEmpty reports whether the spec applies no filter at all.
 func (s Spec) IsEmpty() bool {
 	return s.City == nil && s.Language == nil && s.CartAddedWithinDays == nil &&
-		!s.noPurchaseSinceCart() && s.PurchasedWithinDays == nil && s.NotPurchasedWithinDays == nil
+		!s.noPurchaseSinceCart() && s.PurchasedWithinDays == nil && s.NotPurchasedWithinDays == nil && s.NotMessagedWithinDays == nil
 }
 
 func (s Spec) noPurchaseSinceCart() bool {
@@ -154,6 +155,7 @@ func (p *Proposal) validate(cities []string) *ValidationError {
 		{"cart_added_within_days", spec.CartAddedWithinDays},
 		{"purchased_within_days", spec.PurchasedWithinDays},
 		{"not_purchased_within_days", spec.NotPurchasedWithinDays},
+		{"not_messaged_within_days", spec.NotMessagedWithinDays},
 	} {
 		if window.days != nil && (*window.days < 1 || *window.days > maxWindowDays) {
 			problems.add("window_out_of_range", fmt.Sprintf("%s must be between 1 and %d", window.field, maxWindowDays))
@@ -179,7 +181,7 @@ func (p *Proposal) validate(cities []string) *ValidationError {
 
 var filterFields = []string{
 	"city", "language", "cart_added_within_days", "no_purchase_since_cart",
-	"purchased_within_days", "not_purchased_within_days",
+	"purchased_within_days", "not_purchased_within_days", "not_messaged_within_days",
 }
 
 var cityFolder = strings.NewReplacer("İ", "i", "I", "i", "ı", "i")
@@ -226,6 +228,9 @@ func Describe(spec Spec) []Condition {
 	if spec.NotPurchasedWithinDays != nil {
 		conditions = append(conditions, Condition{"not_purchased_within_days", "No purchase in the last", days(*spec.NotPurchasedWithinDays)})
 	}
+	if spec.NotMessagedWithinDays != nil {
+		conditions = append(conditions, Condition{"not_messaged_within_days", "No message from us in the last", days(*spec.NotMessagedWithinDays)})
+	}
 	return conditions
 }
 
@@ -259,6 +264,7 @@ func JSONSchema() map[string]any {
 					"no_purchase_since_cart":    map[string]any{"type": "boolean", "description": "Did not purchase after that cart event; requires cart_added_within_days"},
 					"purchased_within_days":     integer("Purchased within this many days, 1 to 365"),
 					"not_purchased_within_days": integer("Did not purchase within this many days, 1 to 365"),
+					"not_messaged_within_days":  integer("Received no campaign message within this many days, 1 to 365"),
 				},
 			},
 			"assumptions": map[string]any{

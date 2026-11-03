@@ -154,7 +154,7 @@ func (g *Generation) generate(ctx context.Context, emit func(GenerationEvent)) (
 	if err != nil {
 		return content.Content{}, 0, ai.Usage{}, err
 	}
-	offerSource := content.OfferSource(g.view.Brief, g.instruction)
+	offerSource := content.OfferSource(g.view.writingBrief(), g.instruction)
 
 	var (
 		lastInvalid *content.ValidationError
@@ -193,7 +193,8 @@ func (g *Generation) generate(ctx context.Context, emit func(GenerationEvent)) (
 
 func (g *Generation) request() (ai.ContentRequest, error) {
 	request := ai.ContentRequest{
-		Brief:       g.view.Brief,
+		Brief:       g.view.writingBrief(),
+		Tone:        g.view.Tone,
 		Schema:      content.JSONSchema(g.view.Channels...),
 		Limits:      g.view.ContentLimits,
 		Instruction: g.instruction,

@@ -116,11 +116,16 @@ func (a *api) create(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Brief    string   `json:"brief"`
 		Channels []string `json:"channels"`
+		Tone     string   `json:"tone"`
+		Offer    *int     `json:"offer_percent"`
+		Skip     *int     `json:"not_messaged_within_days"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	id, err := a.campaigns.Create(r.Context(), body.Brief, body.Channels...)
+	id, err := a.campaigns.CreateWith(r.Context(), campaign.NewCampaign{
+		Brief: body.Brief, Channels: body.Channels, Tone: body.Tone, OfferPercent: body.Offer, NotMessagedWithinDays: body.Skip,
+	})
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -474,6 +479,10 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusBadRequest, "Write a brief of up to 2000 characters."
 	case errors.Is(err, campaign.ErrInvalidChannels):
 		status, message = http.StatusBadRequest, "Choose SMS, email or both."
+	case errors.Is(err, campaign.ErrInvalidOptions):
+		status, message = http.StatusBadRequest, "Check the tone, the discount of 1 to 100 percent and the days to skip of 1 to 365."
+	case errors.Is(err, campaign.ErrOfferConflict):
+		status, message = http.StatusBadRequest, "The brief mentions a different discount than the one you entered. Change one of them."
 	case errors.Is(err, campaign.ErrInvalidName):
 		status, message = http.StatusBadRequest, "Write a campaign name of up to 80 characters."
 	case errors.Is(err, campaign.ErrUnknownGroup):

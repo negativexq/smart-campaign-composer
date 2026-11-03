@@ -48,6 +48,7 @@ type Response struct {
 // ContentRequest asks for messages. Current and Instruction are set when
 // regenerating; PreviousOutput and ValidationError when repairing.
 type ContentRequest struct {
+	Tone            string
 	Brief           string
 	Conditions      []string
 	Schema          map[string]any

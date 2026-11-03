@@ -59,6 +59,12 @@ func Compile(spec Spec, now time.Time) (string, []any) {
 		conditions = append(conditions, "NOT EXISTS (SELECT 1 FROM purchase_events p WHERE p.user_id = u.id AND p.occurred_at >= "+
 			cutoff(*spec.NotPurchasedWithinDays)+")")
 	}
+	if spec.NotMessagedWithinDays != nil {
+		// Only what went out before now, so a campaign's own messages do not shrink
+		// the audience it was approved with.
+		conditions = append(conditions, "NOT EXISTS (SELECT 1 FROM campaign_deliveries d WHERE d.user_id = u.id AND d.status IN ('SENT', 'UNKNOWN') AND d.updated_at >= "+
+			cutoff(*spec.NotMessagedWithinDays)+" AND d.updated_at < "+param(now)+")")
+	}
 	if len(conditions) == 0 {
 		return "FALSE", nil
 	}

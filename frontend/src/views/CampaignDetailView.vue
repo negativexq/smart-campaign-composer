@@ -233,6 +233,8 @@ onBeforeUnmount(() => stopWatching?.());
         <div><dt class="muted small">Created by</dt><dd data-testid="created-by">{{ campaign.created_by ?? "Not recorded" }}</dd></div>
         <div><dt class="muted small">Created</dt><dd>{{ formatDateTime(campaign.created_at) }}</dd></div>
         <div><dt class="muted small">Last updated</dt><dd>{{ formatDateTime(campaign.updated_at) }}</dd></div>
+        <div v-if="campaign.tone" data-testid="campaign-tone"><dt class="muted small">Tone</dt><dd>{{ campaign.tone[0].toUpperCase() + campaign.tone.slice(1) }}</dd></div>
+        <div v-if="campaign.offer_percent" data-testid="campaign-offer"><dt class="muted small">Discount</dt><dd>{{ campaign.offer_percent }}%</dd></div>
         <div v-if="campaign.approved_at" data-testid="approved-version"><dt class="muted small">Approved</dt><dd>Version {{ campaign.version }}, {{ formatDateTime(campaign.approved_at) }}</dd></div>
       </dl>
     </section>

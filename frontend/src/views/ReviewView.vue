@@ -39,7 +39,7 @@ const checks = computed<Check[]>(() => {
     { label: "Limits", detail: current.content ? "Every message fits its limit for the longest name in this audience." : "The messages are not written yet.", ok: Boolean(current.content) },
     {
       label: "Offer",
-      detail: current.content_warnings.length ? current.content_warnings.map((warning) => warning.message).join(" ") : "Any discount matches the brief.",
+      detail: current.content_warnings.length ? current.content_warnings.map((warning) => warning.message).join(" ") : current.offer_percent ? `Every message carries the ${current.offer_percent}% discount you entered.` : "Any discount matches the brief.",
       ok: !current.content_warnings.length,
     },
   ];

@@ -209,3 +209,51 @@ describe("email preview", () => {
     expect(wrapper.find("[data-testid=email-body]").text()).toBe("Hello Ayşe");
   });
 });
+
+describe("campaign options", () => {
+  function composeStub() {
+    const fetchMock = vi.fn(async (url: string) => {
+      const body = url === "/api/campaigns" ? { id: "c9" } : smsOnly;
+      return { ok: true, status: 200, json: async () => body } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+  const sentBody = (fetchMock: ReturnType<typeof composeStub>) => {
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/campaigns") as unknown as [string, RequestInit];
+    return JSON.parse(init.body as string);
+  };
+
+  it("sends only what was chosen", async () => {
+    const fetchMock = composeStub();
+    const wrapper = mount(ComposeView);
+    await wrapper.find("#brief").setValue("Spring sale");
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+
+    expect(sentBody(fetchMock)).toEqual({ brief: "Spring sale", channels: ["sms", "email"] });
+  });
+
+  it("sends the tone, discount and days to skip", async () => {
+    const fetchMock = composeStub();
+    const wrapper = mount(ComposeView);
+    await wrapper.find("#brief").setValue("Spring sale");
+    await wrapper.find("#campaign-tone").setValue("formal");
+    await wrapper.find("#campaign-offer").setValue(30);
+    await wrapper.find("#campaign-quiet").setValue("7");
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+
+    expect(sentBody(fetchMock)).toMatchObject({ tone: "formal", offer_percent: 30, not_messaged_within_days: 7 });
+  });
+
+  it("says why a discount cannot be used", async () => {
+    composeStub();
+    const wrapper = mount(ComposeView);
+    await wrapper.find("#brief").setValue("Spring sale");
+    await wrapper.find("#campaign-offer").setValue(150);
+
+    expect(wrapper.find("button[type=submit]").attributes("disabled")).toBeDefined();
+    expect(wrapper.find("[data-testid=brief-hint]").text()).toBe("Enter a discount from 1 to 100.");
+  });
+});

@@ -152,3 +152,23 @@ func TestMockWritesOnlyForTheChosenChannels(t *testing.T) {
 		t.Fatalf("content: %+v", got)
 	}
 }
+
+func TestMockFindsTheRuleAboutRecentMessages(t *testing.T) {
+	t.Parallel()
+	for brief, want := range map[string]int{
+		"Istanbul cart in the last 30 days, not messaged in the last 7 days": 7,
+		"İstanbul son 5 gündür mesaj almayan, 30 günde sepete ekleyen":       5,
+	} {
+		response, err := ai.NewMock().ProposeSegment(context.Background(), ai.SegmentRequest{Brief: brief, Cities: []string{"İstanbul"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var proposal segment.Proposal
+		if err := json.Unmarshal(response.Output, &proposal); err != nil {
+			t.Fatal(err)
+		}
+		if got := proposal.Segment; got.NotMessagedWithinDays == nil || *got.NotMessagedWithinDays != want || got.CartAddedWithinDays == nil || *got.CartAddedWithinDays != 30 {
+			t.Fatalf("%q: %+v", brief, got)
+		}
+	}
+}

@@ -179,7 +179,7 @@ func TestAudienceSkipsPeopleMessagedRecently(t *testing.T) {
 	if err := pool.QueryRow(ctx, `INSERT INTO campaigns (brief, name) VALUES ('other', 'other') RETURNING id::text`).Scan(&campaignID); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `INSERT INTO campaign_versions (campaign_id, version, segment) VALUES ($1, 1, '{}') RETURNING id::text`, campaignID).Scan(&versionID); err != nil {
+	if err := pool.QueryRow(ctx, `INSERT INTO campaign_versions (campaign_id, version, segment, content) VALUES ($1, 1, '{}', '{}') RETURNING id::text`, campaignID).Scan(&versionID); err != nil {
 		t.Fatal(err)
 	}
 	deliver := func(user int64, channel, status string, at time.Time) {

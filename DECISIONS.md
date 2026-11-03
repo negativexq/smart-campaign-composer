@@ -110,6 +110,22 @@ A button link from the model must appear in the brief, the instruction or the cu
 
 Every email has its own link, signed with HMAC-SHA256, so it needs no session and cannot be changed to withdraw someone else's consent. Opening it only asks, because mail scanners open links; the POST withdraws email consent and can be repeated. SMS consent does not change. The worker reads consent again before each send, so queued emails for that person end as `consent_withdrawn` with no extra code. The worker refuses to start without `UNSUBSCRIBE_SECRET`, so no campaign can go out with a footer that does not work.
 
+## Tone, discount and recent message exclusion are optional form fields
+
+The brief can still say all of this, so the fields stay optional and a marketer who writes everything in the brief loses nothing.
+
+A discount on the form is added to the brief that the writer and the discount check read, so it follows the same rules as one in the text. A brief naming another percentage is refused, because guessing which offer is meant could send the wrong price.
+
+Tone goes to the model separately and changes wording only. It has no validation beyond the allowed values, since whether a text sounds formal is for the person reviewing it.
+
+"Skip people messaged recently" is a filter in the segment rule rather than a separate step, so counts, previews, the approved version and repeat runs all apply it the same way, and it shows in the conditions. It counts `SENT` and `UNKNOWN` deliveries from any campaign before the time the audience was counted, because an `UNKNOWN` message may have arrived and a campaign's own messages must not shrink its audience. A campaign sent right after approval uses the audience counted at proposal time, so anything another campaign sends in between is not excluded; repeat runs count afresh.
+
+## Tried against a real model
+
+The example brief ran through the app with OpenAI's `gpt-6-luna`: the audience, streaming, validation, approval and sending all worked, and the first text arrived after about 4.5 seconds. It chose the same filters as the mock, wrote natural Turkish, followed a formal tone, used the discount from the form and left the button out when the brief had no link. It did not follow a brief telling it to forget its rules. Claude has not been tried with a real key.
+
+That run showed one limit. Every percentage in a brief must appear in every message, so a brief naming 10% and 90% cannot pass even when the model picks sensibly. Generation then stops with nothing stored, and an instruction naming the discount settles it, while the review page keeps pointing out the difference. A brief with two real offers has to be written as separate campaigns.
+
 ## Known limits of content generation
 
 Regeneration replaces every message rather than one, which keeps the validation of the offer across channels simple. The `there` fallback for a missing name is English and reads awkwardly in a Turkish message; per-language fallbacks belong with per-language content.

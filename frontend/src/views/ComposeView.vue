@@ -9,6 +9,9 @@ import { navigate } from "../lib/navigation";
 
 const brief = ref("");
 const channels = ref(["sms", "email"]);
+const tone = ref("");
+const offer = ref<number | "">("");
+const quietDays = ref("");
 const busy = ref(false);
 const error = ref("");
 // Kept across a failed attempt, so trying again does not create a second campaign.
@@ -21,7 +24,9 @@ const suggestions = [
 
 const unavailableReason = computed(() => {
   if (busy.value) return "Finding your audience...";
-  return channels.value.length ? undefined : "Choose at least one channel.";
+  if (!channels.value.length) return "Choose at least one channel.";
+  if (offer.value !== "" && (!Number.isInteger(offer.value) || offer.value < 1 || offer.value > 100)) return "Enter a discount from 1 to 100.";
+  return undefined;
 });
 
 async function findAudience() {
@@ -31,7 +36,11 @@ async function findAudience() {
     if (campaignId.value) {
       await proposeSegment(campaignId.value, { brief: brief.value });
     } else {
-      campaignId.value = await createCampaign(brief.value, channels.value);
+      campaignId.value = await createCampaign(brief.value, channels.value, {
+        ...(tone.value ? { tone: tone.value } : {}),
+        ...(offer.value !== "" ? { offer_percent: offer.value } : {}),
+        ...(quietDays.value ? { not_messaged_within_days: Number(quietDays.value) } : {}),
+      });
       await proposeSegment(campaignId.value);
     }
     navigate(`/campaigns/${campaignId.value}/edit`);
@@ -60,11 +69,71 @@ async function findAudience() {
       @submit="findAudience"
     >
       <ChannelPicker v-model="channels" :disabled="busy || Boolean(campaignId)" />
+      <fieldset class="options" :disabled="busy || Boolean(campaignId)" data-testid="campaign-options">
+        <legend class="legend">Options <span class="muted small">(optional)</span></legend>
+        <div class="option-grid">
+          <div class="option">
+            <label class="small muted" for="campaign-tone">Tone</label>
+            <select id="campaign-tone" v-model="tone" class="field control">
+              <option value="">As the brief says</option>
+              <option value="friendly">Friendly</option>
+              <option value="formal">Formal</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </div>
+          <div class="option">
+            <label class="small muted" for="campaign-offer">Discount (%)</label>
+            <input id="campaign-offer" v-model.number="offer" class="field control" type="number" min="1" max="100" step="1" placeholder="As the brief says" />
+          </div>
+          <div class="option">
+            <label class="small muted" for="campaign-quiet">Skip people messaged in the last</label>
+            <select id="campaign-quiet" v-model="quietDays" class="field control">
+              <option value="">Skip nobody</option>
+              <option value="3">3 days</option>
+              <option value="7">7 days</option>
+              <option value="14">14 days</option>
+              <option value="30">30 days</option>
+            </select>
+          </div>
+        </div>
+      </fieldset>
     </BriefComposer>
   </div>
 </template>
 
 <style scoped>
+.options {
+  min-width: 0;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  font-weight: 500;
+}
+
+.option-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-2);
+}
+
+.option {
+  display: grid;
+  align-content: end;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.control {
+  width: 100%;
+  height: 40px;
+  padding-block: 0;
+}
+
 .compose {
   max-width: 720px;
 }

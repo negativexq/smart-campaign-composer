@@ -44,6 +44,7 @@ var (
 	cartPattern   = regexp.MustCompile(`sepet|cart|abandon`)
 	noBuyPattern  = regexp.MustCompile(`aliş ?veriş yapma|satin alma|almayan|did not buy|didn't buy|did not purchase|didn't purchase|not purchased|not bought|no purchase|haven't purchased|without purchas|without buy|abandon`)
 	boughtPattern = regexp.MustCompile(`purchased|bought|satin alan|aliş ?veriş yapan`)
+	quietPattern  = regexp.MustCompile(`(?:not messaged|no message)[^0-9]*(\d+)\s*days?|(\d+)\s*g[uü]n\S*\s*mesaj almayan`)
 	clearPattern  = regexp.MustCompile(`remove|drop|ignore|kaldir|çikar`)
 )
 
@@ -95,6 +96,13 @@ func addUnsupported(proposal *segment.Proposal, folded string) {
 
 func applyFilters(proposal *segment.Proposal, folded string, cities []string) {
 	spec := &proposal.Segment
+	if match := quietPattern.FindStringSubmatch(folded); match != nil {
+		if days, err := strconv.Atoi(match[1] + match[2]); err == nil {
+			spec.NotMessagedWithinDays = &days
+		}
+		// The rest of the text has its own day count.
+		folded = strings.Replace(folded, match[0], "", 1)
+	}
 	for _, city := range cities {
 		if strings.Contains(folded, mockFold(city)) {
 			spec.City = &city
@@ -183,6 +191,7 @@ var (
 func (m *Mock) StreamContent(ctx context.Context, request ContentRequest, handler StreamHandler) (Response, error) {
 	source := content.OfferSource(request.Brief, request.Instruction)
 	draft := mockDraft(mockTurkish.MatchString(request.Brief), mockDiscount.FindString(source), string(request.Current))
+	draft = mockTone(draft, request.Tone, mockTurkish.MatchString(request.Brief))
 	if link := mockLink.FindString(request.Brief + " " + request.Instruction); link != "" {
 		draft.EmailCTAURL, draft.EmailCTALabel = link, "See the offer"
 		if mockTurkish.MatchString(request.Brief) {
@@ -221,6 +230,26 @@ func mockDraft(turkish bool, offer, current string) content.Content {
 		return mockWording(turkish, 1, offerSMS, offerEmail)
 	}
 	return first
+}
+
+// mockTone makes the chosen tone visible, as a real model's wording would.
+func mockTone(draft content.Content, tone string, turkish bool) content.Content {
+	switch tone {
+	case "formal":
+		greeting := strings.NewReplacer("Hi {{", "Dear {{", "Hello {{", "Dear {{")
+		if turkish {
+			greeting = strings.NewReplacer("Merhaba {{", "Sayın {{", "Selam {{", "Sayın {{")
+		}
+		draft.SMS, draft.EmailBody = greeting.Replace(draft.SMS), greeting.Replace(draft.EmailBody)
+	case "urgent":
+		hurry := " Hurry!"
+		if turkish {
+			hurry = " Acele et!"
+		}
+		draft.SMS += hurry
+		draft.EmailBody += hurry
+	}
+	return draft
 }
 
 func mustJSON(text string) string {

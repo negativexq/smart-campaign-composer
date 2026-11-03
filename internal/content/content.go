@@ -286,6 +286,16 @@ func discounts(text string) []int {
 	return found
 }
 
+// OfferAgrees reports whether text mentions no discount other than percent.
+func OfferAgrees(text string, percent int) bool {
+	for _, found := range discounts(text) {
+		if found != percent {
+			return false
+		}
+	}
+	return true
+}
+
 // OfferSource picks the text that defines the offer: an instruction that names a
 // discount overrides the brief, because a person just asked for it.
 func OfferSource(brief, instruction string) string {

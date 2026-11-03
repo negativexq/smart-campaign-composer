@@ -72,6 +72,8 @@ export type Campaign = {
   brief: string;
   status: string;
   channels: string[];
+  tone?: string;
+  offer_percent?: number | null;
   version: number;
   proposal?: { assumptions: Assumption[]; unsupported_conditions: string[] };
   conditions: Condition[];
@@ -155,8 +157,10 @@ function post<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-export async function createCampaign(brief: string, channels: string[]): Promise<string> {
-  return (await post<{ id: string }>("/api/campaigns", { brief, channels })).id;
+export type CampaignOptions = { tone?: string; offer_percent?: number; not_messaged_within_days?: number };
+
+export async function createCampaign(brief: string, channels: string[], options: CampaignOptions = {}): Promise<string> {
+  return (await post<{ id: string }>("/api/campaigns", { brief, channels, ...options })).id;
 }
 
 export function proposeSegment(id: string, input: { brief?: string; refinement?: string } = {}): Promise<Campaign> {
