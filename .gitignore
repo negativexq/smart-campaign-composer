@@ -1,0 +1,18 @@
+# Secrets
+.env
+.env.local
+
+# Go
+/bin/
+*.test
+coverage.out
+
+# Frontend
+node_modules/
+frontend/dist/
+frontend/coverage/
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/

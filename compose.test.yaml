@@ -1,0 +1,63 @@
+# Test infrastructure. `make test` runs everything inside containers, so Docker
+# is the only requirement. Data lives on tmpfs because test runs are disposable.
+name: scc-test
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: scc
+      POSTGRES_PASSWORD: scc
+      POSTGRES_DB: scc_test
+    ports:
+      - "55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scc -d scc_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  test-go:
+    profiles: [runner]
+    # Debian-based image: the race detector needs cgo and a C toolchain.
+    image: golang:1.26
+    working_dir: /src
+    command: go test -race -count=1 ./...
+    environment:
+      TEST_DATABASE_URL: postgres://scc:scc@postgres:5432/scc_test?sslmode=disable
+      TEST_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - .:/src:ro
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  test-frontend:
+    profiles: [runner]
+    image: node:22-alpine
+    working_dir: /src
+    command: sh -c "npm ci --no-audit --no-fund && npm test"
+    volumes:
+      - ./frontend:/src:ro
+      - frontend-node-modules:/src/node_modules
+
+volumes:
+  go-mod-cache:
+  go-build-cache:
+  frontend-node-modules:
