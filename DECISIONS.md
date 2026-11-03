@@ -66,10 +66,32 @@ Telemetry says how the system behaves; `audit_events` says what was decided. The
 
 ## A campaign workspace, with creation as a flow inside it
 
-The app opens on an overview rather than a form, because the system manages campaigns over time: `/` is the overview, `/campaigns` the list, `/campaigns/new` and `/campaigns/:id/edit` the creation wizard, and `/campaigns/:id` the detail page. Everything shown comes from the database, and sections without real data do not exist yet: the Content and Deliveries tabs, for example, arrive with those stages rather than as empty placeholders. For the same reason there is no Settings page and no separate Activity page.
+The app opens on an overview rather than a form, because the system manages campaigns over time: `/` is the overview, `/campaigns` the list, `/campaigns/new` and `/campaigns/:id/edit` the creation wizard, and `/campaigns/:id` the detail page. Everything shown comes from the database, and sections without real data do not exist yet: the Deliveries tab, for example, arrives with that stage rather than as an empty placeholder, and the Content tab only appears once a campaign has messages. For the same reason there is no Settings page and no separate Activity page.
 
 Each status belongs to at most one list filter, so the overview's counts match what the filters show. `COMPLETED_WITH_FAILURES` sits under Failed, where someone will look for it.
 
 A campaign starts with a provisional name cut from its brief. The proposal suggests a better one, which passes the same validation as the rest of the model's output, and anyone can rename the campaign. `name_source` records who chose the name, so a suggestion never replaces a name someone typed. Renaming works in every status, because a name labels the campaign rather than being part of the immutable approved version. It is still recorded in the audit trail.
 
 The Activity tab is written from `audit_events`, not from spans. There are no user accounts in this case, so entries say what happened but cannot say who did it.
+
+## Streamed content is a preview, and only the finished output counts
+
+Messages stream to the browser field by field, because waiting in silence for a model feels broken. That text is display only. A small parser pulls the fields out of the partial JSON, but nothing is stored or marked as validated until the complete output passes `content.ParseGenerated`. If validation fails and a repair runs, or Anthropic's server-side fallback restarts the response on another model, a `reset` event clears the screen, so abandoned text cannot be mistaken for the result. On failure the browser goes back to what the backend last accepted.
+
+Generation is tied to the request: closing the page or pressing Stop cancels the call and puts the campaign back as it was, and that is not recorded as a failure. `POST /generate` claims the campaign with a conditional update, so two generations cannot run at once. A claim older than five minutes, longer than every attempt combined, is treated as left behind by a dead process and can be taken over. Browsers' `EventSource` cannot send a POST, so the client reads the stream with `fetch`.
+
+## Limits are checked against the longest name that will really be sent
+
+`{{first_name}}` has a different length for everyone, so checking the template as written would let a message pass and then exceed the limit for some recipients. Limits use the longest first name among people who consented to that channel, or the fallback if it is longer. The editor counts the same way, and previews offer the longest name and a missing name alongside a typical one.
+
+## A discount mismatch stops the model but only warns a person
+
+The model may not invent or drop an offer: a percentage that differs from the brief fails validation and goes through repair. An instruction such as "make it 40%" becomes the source for that run, because the marketer asked for it. A marketer's own edit can also change the offer, since they are the authority on it, so it passes with a visible warning and stays visible until the brief and message agree. Length, variable and empty-field rules are hard for both, because a person editing cannot make an SMS fit by intent.
+
+## Changing the audience clears the content
+
+Messages are written for a specific audience, and its longest name sets the limits. Keeping them after a change would leave text checked against limits that no longer apply, so a new proposal puts the campaign back to a draft without content, and the page says so before it happens.
+
+## Known limits of content generation
+
+Regeneration replaces all three messages rather than one, which keeps the validation of the offer across channels simple. The `there` fallback for a missing name is English and reads awkwardly in a Turkish message; per-language fallbacks belong with per-language content.
