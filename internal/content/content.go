@@ -48,6 +48,20 @@ type Content struct {
 type Limits struct {
 	SMSName   int `json:"sms_name_length"`
 	EmailName int `json:"email_name_length"`
+	// SkipSMS and SkipEmail mark channels the campaign does not use.
+	SkipSMS   bool `json:"-"`
+	SkipEmail bool `json:"-"`
+}
+
+// Keep clears text for channels the campaign does not use, whoever wrote it.
+func (l Limits) Keep(c Content) Content {
+	if l.SkipSMS {
+		c.SMS = ""
+	}
+	if l.SkipEmail {
+		c.EmailSubject, c.EmailBody = "", ""
+	}
+	return c
 }
 
 // Issue is one problem with a field. Reason is a fixed code, safe as a metric
@@ -83,6 +97,7 @@ func ParseGenerated(raw []byte, limits Limits, offerSource string) (Content, err
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return Content{}, malformed("trailing content after the object")
 	}
+	decoded = limits.Keep(decoded)
 	issues := append(CheckMessages(decoded, limits), CheckDiscounts(decoded, offerSource)...)
 	if len(issues) > 0 {
 		return Content{}, &ValidationError{Issues: issues}
@@ -103,12 +118,15 @@ func CheckMessages(c Content, limits Limits) []Issue {
 	for _, rule := range []struct {
 		field, label, text string
 		max, nameLength    int
+		skip               bool
 	}{
-		{FieldSMS, "SMS", c.SMS, MaxSMS, limits.SMSName},
-		{FieldEmailSubject, "Email subject", c.EmailSubject, MaxEmailSubject, limits.EmailName},
-		{FieldEmailBody, "Email body", c.EmailBody, MaxEmailBody, limits.EmailName},
+		{FieldSMS, "SMS", c.SMS, MaxSMS, limits.SMSName, limits.SkipSMS},
+		{FieldEmailSubject, "Email subject", c.EmailSubject, MaxEmailSubject, limits.EmailName, limits.SkipEmail},
+		{FieldEmailBody, "Email body", c.EmailBody, MaxEmailBody, limits.EmailName, limits.SkipEmail},
 	} {
-		issues = append(issues, checkField(rule.field, rule.label, rule.text, rule.max, rule.nameLength)...)
+		if !rule.skip {
+			issues = append(issues, checkField(rule.field, rule.label, rule.text, rule.max, rule.nameLength)...)
+		}
 	}
 	if strings.ContainsAny(c.EmailSubject, "\r\n") {
 		issues = append(issues, Issue{FieldEmailSubject, "line_break", "Email subject must be a single line."})
@@ -166,7 +184,8 @@ func Render(template, firstName string) string {
 }
 
 // CheckDiscounts compares percentages in the messages with those in source.
-// Each message must carry the offer and none may mention another one.
+// Each message written must carry the offer and none may mention another one. A
+// channel with no text is left out here, and CheckMessages decides if it may be.
 func CheckDiscounts(c Content, source string) []Issue {
 	allowed := discounts(source)
 	var issues []Issue
@@ -184,10 +203,10 @@ func CheckDiscounts(c Content, source string) []Issue {
 	}
 	emailText := c.EmailSubject + " " + c.EmailBody
 	for _, offer := range allowed {
-		if !slices.Contains(discounts(c.SMS), offer) {
+		if c.SMS != "" && !slices.Contains(discounts(c.SMS), offer) {
 			issues = append(issues, Issue{FieldSMS, "missing_discount", fmt.Sprintf("SMS does not mention the %d%% discount from the brief.", offer)})
 		}
-		if !slices.Contains(discounts(emailText), offer) {
+		if strings.TrimSpace(emailText) != "" && !slices.Contains(discounts(emailText), offer) {
 			issues = append(issues, Issue{FieldEmailBody, "missing_discount", fmt.Sprintf("Email does not mention the %d%% discount from the brief.", offer)})
 		}
 	}
@@ -216,18 +235,25 @@ func OfferSource(brief, instruction string) string {
 
 // JSONSchema is the output format requested from LLM providers. It only shapes
 // the output; length and variable rules are enforced by ParseGenerated.
-func JSONSchema() map[string]any {
+func JSONSchema(channels ...string) map[string]any {
 	text := func(description string) map[string]any {
 		return map[string]any{"type": "string", "description": description}
+	}
+	required := []string{}
+	properties := map[string]any{}
+	if len(channels) == 0 || slices.Contains(channels, "sms") {
+		required = append(required, FieldSMS)
+		properties[FieldSMS] = text("SMS text")
+	}
+	if len(channels) == 0 || slices.Contains(channels, "email") {
+		required = append(required, FieldEmailSubject, FieldEmailBody)
+		properties[FieldEmailSubject] = text("Email subject on a single line")
+		properties[FieldEmailBody] = text("Email body in plain text")
 	}
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
-		"required":             []string{FieldSMS, FieldEmailSubject, FieldEmailBody},
-		"properties": map[string]any{
-			FieldSMS:          text("SMS text"),
-			FieldEmailSubject: text("Email subject on a single line"),
-			FieldEmailBody:    text("Email body in plain text"),
-		},
+		"required":             required,
+		"properties":           properties,
 	}
 }

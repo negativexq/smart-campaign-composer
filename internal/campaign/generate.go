@@ -194,7 +194,7 @@ func (g *Generation) generate(ctx context.Context, emit func(GenerationEvent)) (
 func (g *Generation) request() (ai.ContentRequest, error) {
 	request := ai.ContentRequest{
 		Brief:       g.view.Brief,
-		Schema:      content.JSONSchema(),
+		Schema:      content.JSONSchema(g.view.Channels...),
 		Limits:      g.view.ContentLimits,
 		Instruction: g.instruction,
 	}
@@ -363,6 +363,7 @@ func (s *Service) SaveContent(ctx context.Context, id string, edited content.Con
 	if view.Status != statusReady || view.Content == nil {
 		return View{}, ErrNotEditable
 	}
+	edited = view.ContentLimits.Keep(edited)
 	if issues := content.CheckMessages(edited, view.ContentLimits); len(issues) > 0 {
 		return View{}, &content.ValidationError{Issues: issues}
 	}

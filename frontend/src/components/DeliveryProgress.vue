@@ -8,10 +8,12 @@ import MetricCard from "./MetricCard.vue";
 const props = defineProps<{ progress: Progress; live: boolean }>();
 
 const percent = computed(() => (props.progress.total ? Math.round((props.progress.processed / props.progress.total) * 100) : 0));
-const channels = [
-  { id: "sms", label: "SMS" },
-  { id: "email", label: "Email" },
-];
+const channels = computed(() =>
+  [
+    { id: "sms", label: "SMS" },
+    { id: "email", label: "Email" },
+  ].filter((channel) => Object.keys(props.progress.by_channel[channel.id] ?? {}).length),
+);
 const columns: DeliveryStatus[] = ["SENT", "FAILED", "UNKNOWN", "SKIPPED"];
 const waiting = (id: string) => {
   const counts = props.progress.by_channel[id] ?? {};

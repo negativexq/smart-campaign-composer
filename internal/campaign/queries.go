@@ -70,7 +70,7 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 
 	rows, err := s.db.Query(ctx, `
 		SELECT c.id::text, c.name, c.brief, c.status,
-		       COALESCE(d.channels, '{}'), COALESCE(d.total, 0), COALESCE(d.processed, 0),
+		       c.channels, COALESCE(d.total, 0), COALESCE(d.processed, 0),
 		       c.created_at, c.updated_at
 		-- Choosing the page first means only its campaigns get counted.
 		FROM (
@@ -81,8 +81,7 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 			LIMIT $3
 		) c
 		LEFT JOIN LATERAL (
-			SELECT array_agg(DISTINCT channel ORDER BY channel) AS channels,
-			       sum(n)::bigint AS total,
+			SELECT sum(n)::bigint AS total,
 			       (sum(n) FILTER (WHERE status IN ('SENT', 'FAILED', 'SKIPPED', 'UNKNOWN')))::bigint AS processed
 			FROM (
 				SELECT channel, status, count(*) AS n

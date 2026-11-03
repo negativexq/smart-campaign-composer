@@ -12,6 +12,7 @@ const base: Campaign = {
   name_source: "ai",
   brief: "Istanbul cart reminder",
   status: "DRAFT",
+  channels: ["sms", "email"],
   version: 1,
   proposal: { assumptions: [], unsupported_conditions: [] },
   conditions: [],

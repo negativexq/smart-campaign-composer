@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
+	"github.com/negativexq/smart-campaign-composer/internal/content"
 	"github.com/negativexq/smart-campaign-composer/internal/seed"
 	"github.com/negativexq/smart-campaign-composer/internal/segment"
 )
@@ -129,5 +130,25 @@ func TestFactoryRefusesMissingKeyInsteadOfFallingBackToMock(t *testing.T) {
 		return ""
 	}); err == nil {
 		t.Error("unknown provider must fail at startup")
+	}
+}
+
+func TestMockWritesOnlyForTheChosenChannels(t *testing.T) {
+	t.Parallel()
+	mock := ai.NewMock()
+	mock.StreamDelay = 0
+	response, err := mock.StreamContent(context.Background(), ai.ContentRequest{
+		Brief:  "Spring sale",
+		Limits: content.Limits{SkipEmail: true},
+	}, ai.StreamHandler{OnText: func(string) {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got content.Content
+	if err := json.Unmarshal(response.Output, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.SMS == "" || got.EmailSubject != "" || got.EmailBody != "" {
+		t.Fatalf("content: %+v", got)
 	}
 }

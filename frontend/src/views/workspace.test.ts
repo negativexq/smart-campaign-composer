@@ -41,6 +41,7 @@ const campaign: Campaign = {
   version: 1,
   proposal: { assumptions: [], unsupported_conditions: [] },
   conditions: [{ field: "city", label: "City is", value: "İstanbul" }],
+  channels: ["sms", "email"],
   audience: { total: 1284, sms: 900, email: 1000 },
   audience_as_of: "2026-11-03T12:00:00Z",
   blockers: [],

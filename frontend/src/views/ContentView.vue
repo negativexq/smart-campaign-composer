@@ -185,6 +185,7 @@ onBeforeUnmount(() => controller?.abort());
     <div class="grid">
       <div class="editors">
         <MessageEditor
+          v-if="campaign.channels.includes('sms')"
           v-model="messages.sms"
           label="SMS"
           :limit="160"
@@ -195,6 +196,7 @@ onBeforeUnmount(() => controller?.abort());
           :problem="issueFor('sms')"
         />
         <MessageEditor
+          v-if="campaign.channels.includes('email')"
           v-model="messages.email_subject"
           label="Email subject"
           :limit="80"
@@ -205,6 +207,7 @@ onBeforeUnmount(() => controller?.abort());
           :problem="issueFor('email_subject')"
         />
         <MessageEditor
+          v-if="campaign.channels.includes('email')"
           v-model="messages.email_body"
           label="Email body"
           :limit="5000"
@@ -232,7 +235,7 @@ onBeforeUnmount(() => controller?.abort());
                 {{ stored ? "Regenerate" : generationError ? "Try again" : "Write messages" }}
               </button>
             </div>
-            <p v-if="stored" class="muted small">This replaces all three messages, including your edits.</p>
+            <p v-if="stored" class="muted small">This replaces the messages, including your edits.</p>
           </form>
         </template>
 
@@ -250,10 +253,14 @@ onBeforeUnmount(() => controller?.abort());
       </div>
 
       <aside v-if="recipients.length" class="previews" aria-label="Message previews">
-        <h2>SMS</h2>
-        <PhonePreview :message="messages.sms" :recipients="recipients" />
-        <h2>Email</h2>
-        <EmailPreview :subject="messages.email_subject" :body="messages.email_body" :recipients="recipients" />
+        <template v-if="campaign.channels.includes('sms')">
+          <h2>SMS</h2>
+          <PhonePreview :message="messages.sms" :recipients="recipients" />
+        </template>
+        <template v-if="campaign.channels.includes('email')">
+          <h2>Email</h2>
+          <EmailPreview :subject="messages.email_subject" :body="messages.email_body" :recipients="recipients" />
+        </template>
       </aside>
     </div>
   </div>

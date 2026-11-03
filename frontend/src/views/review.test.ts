@@ -13,6 +13,7 @@ const ready: Campaign = {
   name_source: "ai",
   brief: "Reminder",
   status: "READY_FOR_REVIEW",
+  channels: ["sms", "email"],
   version: 1,
   proposal: { assumptions: [], unsupported_conditions: [] },
   conditions: [{ field: "city", label: "City is", value: "İstanbul" }],

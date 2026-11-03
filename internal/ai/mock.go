@@ -181,7 +181,7 @@ var (
 // switching when regenerating, and carries the discount the text asks for.
 func (m *Mock) StreamContent(ctx context.Context, request ContentRequest, handler StreamHandler) (Response, error) {
 	source := content.OfferSource(request.Brief, request.Instruction)
-	draft := mockDraft(mockTurkish.MatchString(request.Brief), mockDiscount.FindString(source), string(request.Current))
+	draft := request.Limits.Keep(mockDraft(mockTurkish.MatchString(request.Brief), mockDiscount.FindString(source), string(request.Current)))
 	output, err := json.Marshal(draft)
 	if err != nil {
 		return Response{}, fmt.Errorf("%w: %w", ErrInvalidOutput, err)

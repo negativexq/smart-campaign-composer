@@ -20,6 +20,7 @@ const campaign: Campaign = {
     { field: "city", label: "City is", value: "İstanbul" },
     { field: "cart_added_within_days", label: "Added to cart in the last", value: "30 days" },
   ],
+  channels: ["sms", "email"],
   audience: { total: 1284, sms: 900, email: 1000 },
   audience_as_of: "2026-11-03T12:00:00Z",
   blockers: [],
@@ -78,7 +79,7 @@ describe("brief to audience", () => {
     await wrapper.find("form").trigger("submit");
     await flushPromises();
 
-    expect(JSON.parse(postsTo(fetchMock, "/api/campaigns")[0][1]!.body as string)).toEqual({ brief: "Istanbul cart reminder" });
+    expect(JSON.parse(postsTo(fetchMock, "/api/campaigns")[0][1]!.body as string)).toEqual({ brief: "Istanbul cart reminder", channels: ["sms", "email"] });
     expect(currentPath.value).toBe("/campaigns/c1/edit");
     expect(wrapper.find("[aria-current=step]").text()).toContain("Audience");
     expect(wrapper.text()).toContain("1,284");

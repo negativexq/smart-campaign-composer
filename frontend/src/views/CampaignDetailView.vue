@@ -219,8 +219,8 @@ onBeforeUnmount(() => stopWatching?.());
       <template v-if="campaign.proposal">
         <div class="metrics">
           <MetricCard label="Matching customers" :value="campaign.audience.total" />
-          <MetricCard label="Reachable by SMS" :value="campaign.audience.sms" hint="Consented to SMS" />
-          <MetricCard label="Reachable by email" :value="campaign.audience.email" hint="Consented to email" />
+          <MetricCard v-if="campaign.channels.includes('sms')" label="Reachable by SMS" :value="campaign.audience.sms" hint="Consented to SMS" />
+          <MetricCard v-if="campaign.channels.includes('email')" label="Reachable by email" :value="campaign.audience.email" hint="Consented to email" />
         </div>
       </template>
       <p v-else class="muted">This campaign has no audience yet.</p>
@@ -254,11 +254,11 @@ onBeforeUnmount(() => stopWatching?.());
       <ValidationNotice v-for="warning in campaign.content_warnings" :key="warning.field + warning.reason" tone="warning" title="Differs from the brief">
         {{ warning.message }}
       </ValidationNotice>
-      <article class="message card" data-testid="content-sms">
+      <article v-if="campaign.channels.includes('sms')" class="message card" data-testid="content-sms">
         <div class="message-head"><h2>SMS</h2><OriginTag :origin="originOf('sms')" /></div>
         <p class="message-text">{{ campaign.content.sms }}</p>
       </article>
-      <article class="message card" data-testid="content-email">
+      <article v-if="campaign.channels.includes('email')" class="message card" data-testid="content-email">
         <div class="message-head"><h2>Email</h2><OriginTag :origin="originOf('email_body')" /></div>
         <p class="message-subject">{{ campaign.content.email_subject }}</p>
         <p class="message-text">{{ campaign.content.email_body }}</p>
@@ -266,7 +266,7 @@ onBeforeUnmount(() => stopWatching?.());
     </section>
 
     <section v-else-if="tab === 'deliveries'" id="panel-deliveries" class="panel" role="tabpanel" aria-labelledby="tab-deliveries">
-      <DeliveriesPanel :campaign-id="campaignId" :refresh-key="refreshKey" :progress="progress" />
+      <DeliveriesPanel :campaign-id="campaignId" :channels="campaign.channels" :refresh-key="refreshKey" :progress="progress" />
     </section>
 
     <section v-else id="panel-activity" class="panel" role="tabpanel" aria-labelledby="tab-activity">

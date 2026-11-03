@@ -71,6 +71,7 @@ export type Campaign = {
   name_source: "brief" | "ai" | "user";
   brief: string;
   status: string;
+  channels: string[];
   version: number;
   proposal?: { assumptions: Assumption[]; unsupported_conditions: string[] };
   conditions: Condition[];
@@ -154,8 +155,8 @@ function post<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-export async function createCampaign(brief: string): Promise<string> {
-  return (await post<{ id: string }>("/api/campaigns", { brief })).id;
+export async function createCampaign(brief: string, channels: string[]): Promise<string> {
+  return (await post<{ id: string }>("/api/campaigns", { brief, channels })).id;
 }
 
 export function proposeSegment(id: string, input: { brief?: string; refinement?: string } = {}): Promise<Campaign> {

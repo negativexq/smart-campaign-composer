@@ -150,7 +150,7 @@ func (s *Service) Dispatch(ctx context.Context, id string) (view View, err error
 		return View{}, err
 	}
 
-	queued, skipped, err := insertDeliveries(ctx, tx, id, stored.Version, stored.Proposal.Segment, stored.AudienceAsOf, traceParent(ctx))
+	queued, skipped, err := insertDeliveries(ctx, tx, id, stored.Version, stored.Channels, stored.Proposal.Segment, stored.AudienceAsOf, traceParent(ctx))
 	if err != nil {
 		return View{}, err
 	}
@@ -173,12 +173,13 @@ func traceParent(ctx context.Context) string {
 	return carrier.Get("traceparent")
 }
 
-func insertDeliveries(ctx context.Context, tx pgx.Tx, id string, version int, spec segment.Spec, asOf time.Time, parent string) (queued, skipped int, err error) {
+func insertDeliveries(ctx context.Context, tx pgx.Tx, id string, version int, channels []string, spec segment.Spec, asOf time.Time, parent string) (queued, skipped int, err error) {
 	where, args := segment.Compile(spec, asOf)
 	campaignParam := fmt.Sprintf("$%d", len(args)+1)
 	versionParam := fmt.Sprintf("$%d", len(args)+2)
 	traceParam := fmt.Sprintf("$%d", len(args)+3)
-	args = append(args, id, version, parent)
+	channelsParam := fmt.Sprintf("$%d", len(args)+4)
+	args = append(args, id, version, parent, channels)
 
 	// The compiled conditions are the fixed fragments from segment.Compile, and
 	// all of their values stay parameters.
@@ -192,7 +193,7 @@ func insertDeliveries(ctx context.Context, tx pgx.Tx, id string, version int, sp
 			       CASE WHEN consent.allowed THEN NULL ELSE '`+reasonWithoutConsent+`' END,
 			       NULLIF(`+traceParam+`::text, '')
 			FROM users u
-			CROSS JOIN (VALUES ('sms'), ('email')) AS ch (channel)
+			CROSS JOIN unnest(`+channelsParam+`::text[]) AS ch (channel)
 			LEFT JOIN consents consent ON consent.user_id = u.id AND consent.channel = ch.channel
 			WHERE `+where+`
 			ON CONFLICT (campaign_id, user_id, channel) DO UPDATE

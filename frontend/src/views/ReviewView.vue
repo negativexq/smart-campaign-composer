@@ -89,19 +89,19 @@ onMounted(async () => {
         <li v-for="condition in campaign.conditions" :key="condition.field">{{ condition.label }} <strong>{{ condition.value }}</strong></li>
       </ul>
       <div class="metrics">
-        <MetricCard label="SMS" :value="campaign.audience.sms" hint="People who consented" />
-        <MetricCard label="Email" :value="campaign.audience.email" hint="People who consented" />
+        <MetricCard v-if="campaign.channels.includes('sms')" label="SMS" :value="campaign.audience.sms" hint="People who consented" />
+        <MetricCard v-if="campaign.channels.includes('email')" label="Email" :value="campaign.audience.email" hint="People who consented" />
       </div>
       <p class="muted small">Consent is checked again just before each message, so the final count can be lower.</p>
     </section>
 
     <section v-if="campaign.content" class="section">
       <h2>What they read</h2>
-      <article class="message card" data-testid="review-sms">
+      <article v-if="campaign.channels.includes('sms')" class="message card" data-testid="review-sms">
         <h3 class="muted small">SMS</h3>
         <p class="text">{{ campaign.content.sms }}</p>
       </article>
-      <article class="message card" data-testid="review-email">
+      <article v-if="campaign.channels.includes('email')" class="message card" data-testid="review-email">
         <h3 class="muted small">Email</h3>
         <p class="subject">{{ campaign.content.email_subject }}</p>
         <p class="text">{{ campaign.content.email_body }}</p>
@@ -145,7 +145,7 @@ onMounted(async () => {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: var(--space-3);
 }
 

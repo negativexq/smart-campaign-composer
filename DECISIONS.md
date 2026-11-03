@@ -94,9 +94,13 @@ The model may not invent or drop an offer: a percentage that differs from the br
 
 Messages are written for a specific audience, and its longest name sets the limits. Keeping them after a change would leave text checked against limits that no longer apply, so a new proposal puts the campaign back to a draft without content, and the page says so before it happens.
 
+## A campaign chooses its channels when it is created
+
+A campaign uses SMS, email or both, and that choice is fixed once it exists. It is stored on the campaign rather than derived from which text was written, because the choice decides what gets written: the model is asked only for the chosen fields, text for any other field is dropped whoever wrote it, and deliveries are only created on the chosen channels. Reachable counts are zeroed for an unused channel before the approval checks run, so a campaign is not blocked by missing consent on a channel it does not use, and the number on the approve button stays exact.
+
 ## Known limits of content generation
 
-Regeneration replaces all three messages rather than one, which keeps the validation of the offer across channels simple. The `there` fallback for a missing name is English and reads awkwardly in a Turkish message; per-language fallbacks belong with per-language content.
+Regeneration replaces every message rather than one, which keeps the validation of the offer across channels simple. The `there` fallback for a missing name is English and reads awkwardly in a Turkish message; per-language fallbacks belong with per-language content.
 
 ## Scheduling repeats a campaign without repeating a message
 

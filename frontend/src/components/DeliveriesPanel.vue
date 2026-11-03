@@ -13,7 +13,7 @@ const PAGE = 100;
 const REASON_OPTIONS = ["no_consent", "consent_withdrawn", "server_error", "rejected", "timeout", "lease_expired"];
 const PROBLEM_OPTIONS = ["rate_limited", "server_error", "rejected", "timeout"];
 
-const props = defineProps<{ campaignId: string; refreshKey?: number; progress?: Progress | null }>();
+const props = defineProps<{ campaignId: string; channels: string[]; refreshKey?: number; progress?: Progress | null }>();
 
 const rows = ref<Delivery[] | null>(null);
 const query = ref<DeliveryQuery>(noFilter());
@@ -97,8 +97,8 @@ onMounted(() => load(PAGE));
         <span class="small muted">Channel</span>
         <select v-model="query.channel" class="field select" data-testid="filter-channel" @change="changeFilter">
           <option value="">All</option>
-          <option value="sms">SMS</option>
-          <option value="email">Email</option>
+          <option v-if="channels.includes('sms')" value="sms">SMS</option>
+          <option v-if="channels.includes('email')" value="email">Email</option>
         </select>
       </label>
       <label class="filter">

@@ -604,3 +604,27 @@ func TestAScheduledRunIsTheSystemsOnBehalfOfWhoeverSetItUp(t *testing.T) {
 	}
 }
 
+
+func TestAScheduledRunStaysOnTheCampaignsChannels(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.pool.Exec(ctx, `UPDATE campaigns SET channels = '{email}' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: nextHour()}); err != nil {
+		t.Fatal(err)
+	}
+	if ran, err := scheduler(h, nextHour().Add(time.Second)).RunDue(ctx); err != nil || ran != 1 {
+		t.Fatalf("run: %d %v", ran, err)
+	}
+	rows := deliveryRows(t, h, id)
+	if len(rows) == 0 {
+		t.Fatal("nothing was queued")
+	}
+	for key := range rows {
+		if !strings.HasSuffix(key, ":email") {
+			t.Fatalf("delivery outside the campaign's channels: %s", key)
+		}
+	}
+}

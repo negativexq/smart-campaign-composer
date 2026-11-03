@@ -128,8 +128,8 @@ onMounted(async () => {
         <h2>Audience size</h2>
         <div class="metrics">
           <MetricCard class="metrics-total" label="Matching customers" :value="campaign.audience.total" prominent />
-          <MetricCard label="Reachable by SMS" :value="campaign.audience.sms" hint="Consented to SMS" />
-          <MetricCard label="Reachable by email" :value="campaign.audience.email" hint="Consented to email" />
+          <MetricCard v-if="campaign.channels.includes('sms')" label="Reachable by SMS" :value="campaign.audience.sms" hint="Consented to SMS" />
+          <MetricCard v-if="campaign.channels.includes('email')" label="Reachable by email" :value="campaign.audience.email" hint="Consented to email" />
         </div>
         <p v-if="asOf" class="muted small" data-testid="as-of">Counted on {{ asOf }}. Customers without consent are never messaged.</p>
       </section>
@@ -223,7 +223,7 @@ onMounted(async () => {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: var(--space-3);
 }
 

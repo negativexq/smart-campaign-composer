@@ -100,12 +100,13 @@ func (a *api) activity(w http.ResponseWriter, r *http.Request) {
 
 func (a *api) create(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Brief string `json:"brief"`
+		Brief    string   `json:"brief"`
+		Channels []string `json:"channels"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	id, err := a.campaigns.Create(r.Context(), body.Brief)
+	id, err := a.campaigns.Create(r.Context(), body.Brief, body.Channels...)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -457,6 +458,8 @@ func describeError(r *http.Request, err error) (int, string) {
 	switch {
 	case errors.Is(err, campaign.ErrInvalidBrief):
 		status, message = http.StatusBadRequest, "Write a brief of up to 2000 characters."
+	case errors.Is(err, campaign.ErrInvalidChannels):
+		status, message = http.StatusBadRequest, "Choose SMS, email or both."
 	case errors.Is(err, campaign.ErrInvalidName):
 		status, message = http.StatusBadRequest, "Write a campaign name of up to 80 characters."
 	case errors.Is(err, campaign.ErrUnknownGroup):

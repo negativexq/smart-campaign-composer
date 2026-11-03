@@ -36,6 +36,8 @@ function submit() {
       @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
     ></textarea>
 
+    <slot />
+
     <div class="actions">
       <button class="button button--primary" type="submit" :disabled="Boolean(blockedReason)">
         {{ actionLabel }}

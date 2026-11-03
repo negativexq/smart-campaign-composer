@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -50,6 +51,7 @@ const (
 // Errors the API maps to responses.
 var (
 	ErrInvalidBrief     = errors.New("brief is empty or too long")
+	ErrInvalidChannels  = errors.New("channels must be sms, email or both")
 	ErrInvalidName      = errors.New("campaign name is empty or too long")
 	ErrNotFound         = errors.New("campaign not found")
 	ErrNotEditable      = errors.New("campaign can no longer be edited")
@@ -70,6 +72,7 @@ type View struct {
 	NameSource   string              `json:"name_source"`
 	Brief        string              `json:"brief"`
 	Status       string              `json:"status"`
+	Channels     []string            `json:"channels"`
 	CreatedBy    *string             `json:"created_by"`
 	Version      int                 `json:"version"`
 	Provider     string              `json:"provider,omitempty"`
@@ -105,8 +108,12 @@ func NewService(db *pgxpool.Pool, provider ai.Provider, metrics *telemetry.Metri
 }
 
 // Create stores a new draft and returns its ID.
-func (s *Service) Create(ctx context.Context, brief string) (string, error) {
+func (s *Service) Create(ctx context.Context, brief string, chosen ...string) (string, error) {
 	brief, err := cleanBrief(brief)
+	if err != nil {
+		return "", err
+	}
+	chosen, err = normalizeChannels(chosen)
 	if err != nil {
 		return "", err
 	}
@@ -117,10 +124,10 @@ func (s *Service) Create(ctx context.Context, brief string) (string, error) {
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
 	var id string
-	if err := tx.QueryRow(ctx, `INSERT INTO campaigns (brief, name, created_by) VALUES ($1, $2, $3) RETURNING id::text`, brief, provisionalName(brief), personFrom(ctx)).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO campaigns (brief, name, created_by, channels) VALUES ($1, $2, $3, $4) RETURNING id::text`, brief, provisionalName(brief), personFrom(ctx), chosen).Scan(&id); err != nil {
 		return "", fmt.Errorf("insert campaign: %w", err)
 	}
-	if err := recordAudit(ctx, tx, id, eventCreated, map[string]any{"brief_characters": utf8.RuneCountInString(brief)}); err != nil {
+	if err := recordAudit(ctx, tx, id, eventCreated, map[string]any{"brief_characters": utf8.RuneCountInString(brief), "channels": chosen}); err != nil {
 		return "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -184,6 +191,29 @@ func provisionalName(brief string) string {
 		kept.WriteString(string([]rune(name)[:maxProvisionalName-1]))
 	}
 	return kept.String() + "…"
+}
+
+// normalizeChannels puts a choice in the product's order. Saying nothing means
+// both, while an empty list is a choice of none and is refused.
+func normalizeChannels(chosen []string) ([]string, error) {
+	if chosen == nil {
+		return []string{"sms", "email"}, nil
+	}
+	normalized := make([]string, 0, 2)
+	for _, channel := range []string{"sms", "email"} {
+		if slices.Contains(chosen, channel) {
+			normalized = append(normalized, channel)
+		}
+	}
+	for _, channel := range chosen {
+		if !slices.Contains(normalized, channel) {
+			return nil, ErrInvalidChannels
+		}
+	}
+	if len(normalized) == 0 {
+		return nil, ErrInvalidChannels
+	}
+	return normalized, nil
 }
 
 func cleanBrief(brief string) (string, error) {
@@ -457,6 +487,13 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 	if view.Audience, err = segment.Count(ctx, s.db, view.Proposal.Segment, view.AudienceAsOf); err != nil {
 		return View{}, err
 	}
+	// Reachable means on a channel this campaign uses.
+	if !slices.Contains(view.Channels, "sms") {
+		view.Audience.SMS = 0
+	}
+	if !slices.Contains(view.Channels, "email") {
+		view.Audience.Email = 0
+	}
 	for _, blocker := range blockersFor(*view.Proposal, view.Audience) {
 		view.Blockers = append(view.Blockers, blocker.message)
 	}
@@ -464,7 +501,10 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
-	view.ContentLimits = content.Limits{SMSName: lengths.SMS, EmailName: lengths.Email}
+	view.ContentLimits = content.Limits{
+		SMSName: lengths.SMS, EmailName: lengths.Email,
+		SkipSMS: !slices.Contains(view.Channels, "sms"), SkipEmail: !slices.Contains(view.Channels, "email"),
+	}
 	if view.Content != nil {
 		view.ContentWarnings = append(view.ContentWarnings, content.CheckDiscounts(view.Content.Content, view.Brief)...)
 	}
@@ -487,12 +527,12 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 		approvedAt   *time.Time
 	)
 	err := s.db.QueryRow(ctx, `
-		SELECT c.name, c.name_source, c.brief, c.status, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at
+		SELECT c.name, c.name_source, c.brief, c.status, c.channels, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt)
+		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.Channels, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}
@@ -545,7 +585,7 @@ func blockersFor(proposal segment.Proposal, counts segment.Counts) []blocker {
 	case counts.Total == 0:
 		blockers = append(blockers, blocker{reasonEmpty, "No users match these conditions. Refine the audience to widen it."})
 	case counts.SMS == 0 && counts.Email == 0:
-		blockers = append(blockers, blocker{reasonNoConsent, "None of the matching users have consented to SMS or email."})
+		blockers = append(blockers, blocker{reasonNoConsent, "None of the matching users have consented to the channels this campaign uses."})
 	}
 	return blockers
 }
