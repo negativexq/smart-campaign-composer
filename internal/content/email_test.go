@@ -316,3 +316,53 @@ func TestAModelCannotChooseTheEmailTemplate(t *testing.T) {
 		t.Fatalf("template: %q", generated.EmailTemplate)
 	}
 }
+
+func TestGeneratedMessagesCannotStateFactsTheBriefDoesNot(t *testing.T) {
+	t.Parallel()
+	const source = "Ankara'daki müşterilere son 14 günde %30 indirim. Telefon yok."
+	cities := []string{"İstanbul", "Ankara", "İzmir"}
+	base := content.Content{SMS: "Merhaba {{first_name}}, Ankara'ya özel %30!", EmailSubject: "Son 14 gün", EmailBody: "Ankara'daki müşterilerimize."}
+	if issues := content.CheckFacts(base, source, cities); len(issues) != 0 {
+		t.Fatalf("grounded: %+v", issues)
+	}
+	for name, tt := range map[string]struct {
+		change func(*content.Content)
+		field  string
+		reason string
+	}{
+		"another city":    {func(c *content.Content) { c.SMS = "İzmir'e özel" }, content.FieldSMS, "invented_city"},
+		"city in subject": {func(c *content.Content) { c.EmailSubject = "İstanbul fırsatı" }, content.FieldEmailSubject, "invented_city"},
+		"a deadline":      {func(c *content.Content) { c.EmailBody = "Son 3 gün!" }, content.FieldEmailBody, "invented_number"},
+		"a phone number":  {func(c *content.Content) { c.EmailHeadline = "Ara: 4441234" }, content.FieldEmailHeadline, "invented_number"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			changed := base
+			tt.change(&changed)
+			issues := content.CheckFacts(changed, source, cities)
+			if len(issues) != 1 || issues[0].Field != tt.field || issues[0].Reason != tt.reason {
+				t.Fatalf("issues: %+v", issues)
+			}
+		})
+	}
+}
+
+func TestChannelsMustNotPromiseDifferentDiscounts(t *testing.T) {
+	t.Parallel()
+	same := content.Content{SMS: "%30", EmailSubject: "30% off", EmailBody: "Save"}
+	for name, c := range map[string]content.Content{
+		"same":    same,
+		"none":    {SMS: "Hi", EmailSubject: "Hello", EmailBody: "Text"},
+		"one has": {SMS: "Hi", EmailSubject: "30% off", EmailBody: "Save"},
+	} {
+		if content.DiscountsDiffer(c) {
+			t.Errorf("%s: flagged", name)
+		}
+	}
+	if !content.DiscountsDiffer(content.Content{SMS: "%50", EmailSubject: "30% off", EmailBody: "Save"}) {
+		t.Error("50 and 30 differ")
+	}
+	if !content.NewDiscount("make it %50", "Brief with 30% off") || content.NewDiscount("make it 30%", "Brief with 30% off") || content.NewDiscount("shorter", "Brief with 30% off") {
+		t.Error("an instruction changes the offer only by naming a new discount")
+	}
+}

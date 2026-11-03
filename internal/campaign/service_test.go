@@ -518,3 +518,80 @@ func TestARewrittenBriefMustAgreeWithTheChosenDiscount(t *testing.T) {
 		t.Fatalf("brief: %q", view.Brief)
 	}
 }
+
+func TestARuleThatContradictsTheBriefIsRepairedOrNotStored(t *testing.T) {
+	t.Parallel()
+	const brief = "Ankara'daki müşterilere haber ver"
+	wrong := `{"segment":{"city":"İzmir"},"assumptions":[],"unsupported_conditions":[]}`
+	right := `{"segment":{"city":"Ankara"},"assumptions":[],"unsupported_conditions":[]}`
+
+	h := newHarness(t, step{output: wrong}, step{output: right})
+	ctx := context.Background()
+	id, err := h.service.Create(ctx, brief)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{})
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if *view.Proposal.Segment.City != "Ankara" || !strings.Contains(h.provider.requests[1].ValidationError, "İzmir") {
+		t.Fatalf("view %+v, repair %q", view.Proposal.Segment, h.provider.requests[1].ValidationError)
+	}
+
+	stubborn := newHarness(t, step{output: wrong})
+	id, err = stubborn.service.Create(ctx, brief)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stubborn.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); !errors.Is(err, campaign.ErrProposalRejected) {
+		t.Fatalf("got %v", err)
+	}
+	if view, _ := stubborn.service.Get(ctx, id); view.Proposal != nil {
+		t.Fatalf("stored: %+v", view.Proposal)
+	}
+}
+
+func TestARefinementMustKeepTheRuleAndTheBriefTogether(t *testing.T) {
+	t.Parallel()
+	const brief = "Son 30 günde sepete ekleyip almayan Ankara kullanıcıları"
+	current := `{"segment":{"city":"Ankara","cart_added_within_days":30,"no_purchase_since_cart":true},"assumptions":[],"unsupported_conditions":[]}`
+	h := newHarness(t, step{output: current}, step{output: withUpdatedBrief(current, brief)})
+	ctx := context.Background()
+	id, err := h.service.Create(ctx, brief)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	// The new brief says 14 days while the rule stays at 30.
+	h.provider.steps = []step{{output: withUpdatedBrief(current, "Son 14 günde sepete ekleyip almayan Ankara kullanıcıları")}}
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{Refinement: "14 gün yap"}); !errors.Is(err, campaign.ErrProposalRejected) {
+		t.Fatalf("got %v", err)
+	}
+	view, _ := h.service.Get(ctx, id)
+	if view.Brief != brief {
+		t.Fatalf("brief: %q", view.Brief)
+	}
+}
+
+func TestWhatTheRuleLeavesOutBlocksApproval(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, step{output: `{"segment":{"city":"Ankara"},"assumptions":[],"unsupported_conditions":[]}`})
+	ctx := context.Background()
+	id, err := h.service.Create(ctx, "Ankara ve İzmir kullanıcıları")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{})
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if len(view.Blockers) == 0 || !strings.Contains(strings.Join(view.Blockers, " "), "İzmir") {
+		t.Fatalf("blockers: %v", view.Blockers)
+	}
+	if _, err := h.service.StartGeneration(ctx, id, campaign.GenerateInput{}); !errors.Is(err, campaign.ErrAudienceBlocked) {
+		t.Fatalf("got %v", err)
+	}
+}

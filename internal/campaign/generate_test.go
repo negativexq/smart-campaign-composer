@@ -648,3 +648,71 @@ func TestTheChosenEmailTemplateIsSavedAndSurvivesRegenerating(t *testing.T) {
 		}
 	}
 }
+
+func TestOneChannelCannotBeGivenADifferentDiscount(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	provider := &contentProvider{scriptedProvider: scriptedProvider{steps: []step{{output: validProposal}}}, contentSteps: []step{
+		{output: `{"sms":"30% {{first_name}}","email_subject":"30% off","email_body":"Your 30% is waiting."}`},
+	}}
+	h.service = h.serviceWith(provider)
+	ctx := context.Background()
+	id, err := h.service.Create(ctx, secretBrief+" with a 30% discount")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.StartGeneration(ctx, id, campaign.GenerateInput{Channel: "sms", Instruction: "make it 50%"}); !errors.Is(err, campaign.ErrChannelDiscount) {
+		t.Fatalf("got %v", err)
+	}
+	view, err := h.service.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("status: %s", view.Status)
+	}
+}
+
+func TestAHandEditedDiscountMustMatchAcrossChannelsToApprove(t *testing.T) {
+	t.Parallel()
+	h, _, id := newContentHarness(t, step{output: `{"sms":"30% {{first_name}}","email_subject":"30% off","email_body":"Your 30% is waiting."}`})
+	ctx := context.Background()
+	first, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err == nil {
+		edited := first.Content.Content
+		edited.SMS = "50% {{first_name}}"
+		if _, err = h.service.SaveContent(ctx, id, edited); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+		if _, err = h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrChannelDiscount) {
+			t.Fatalf("approve: %v", err)
+		}
+		return
+	}
+	t.Fatalf("run: %v", err)
+}
+
+func TestGeneratedMessagesAreCheckedAgainstTheBrief(t *testing.T) {
+	t.Parallel()
+	for name, output := range map[string]string{
+		"another city": `{"sms":"Ankara'ya özel {{first_name}}","email_subject":"Hello","email_body":"Text"}`,
+		"a deadline":   `{"sms":"Son 3 gün {{first_name}}","email_subject":"Hello","email_body":"Text"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h, provider, id := newContentHarness(t, step{output: output})
+			if _, _, err := run(t, h, id, campaign.GenerateInput{}); !errors.Is(err, campaign.ErrContentRejected) {
+				t.Fatalf("got %v", err)
+			}
+			if len(provider.contentCalls) != campaign.MaxProposalAttempts {
+				t.Fatalf("calls: %d", len(provider.contentCalls))
+			}
+		})
+	}
+}
