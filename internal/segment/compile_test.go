@@ -52,8 +52,8 @@ func TestCompilePassesEveryValueAsParameter(t *testing.T) {
 
 func TestCountMatchesExampleBriefFixtures(t *testing.T) {
 	t.Parallel()
-	// Only fixtures, so the expected numbers are exact: 9 matching İstanbul users
-	// minus none, of which one has no consent, one is sms-only, one is email-only.
+	// Only fixtures, so the numbers are exact: 9 users match, of whom one has no
+	// consent, one is SMS-only and one is email-only.
 	pool, _ := seededDatabase(t, 13)
 
 	counts, err := segment.Count(context.Background(), pool, exampleSpec(), referenceTime)
