@@ -159,6 +159,9 @@ func (w *Worker) runHousekeeping(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if _, err := w.RecoverExpired(ctx); err != nil && ctx.Err() == nil {
+				slog.ErrorContext(ctx, "recover deliveries", "error", err)
+			}
 			if err := w.FinishCampaigns(ctx); err != nil && ctx.Err() == nil {
 				slog.ErrorContext(ctx, "finish campaigns", "error", err)
 			}
