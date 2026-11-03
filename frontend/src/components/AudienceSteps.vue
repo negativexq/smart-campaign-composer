@@ -1,24 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import type { AudienceBreakdown, Campaign, Condition } from "../api/campaigns";
+import type { AudienceBreakdown, Campaign } from "../api/campaigns";
+import { sourceOf } from "../lib/audience";
 
-const props = defineProps<{ campaign: Campaign; breakdown: AudienceBreakdown | null; failed: boolean; hideRule?: boolean }>();
+const props = defineProps<{ campaign: Campaign; breakdown: AudienceBreakdown | null; failed: boolean }>();
 
 const formatCount = (count: number) => count.toLocaleString("en-US");
 const assumptions = computed(() => props.campaign.proposal?.assumptions ?? []);
-// Older proposals were made before quotes existed, so they have nothing to say here.
-const evidence = computed(() => props.campaign.proposal?.evidence);
-
-/** Where a condition came from, never claiming words nobody wrote. */
-function sourceOf(condition: Condition): { quotes: string[]; text: string } {
-  const quotes = (evidence.value ?? []).filter((entry) => entry.field === condition.field).map((entry) => entry.quote);
-  if (quotes.length) return { quotes, text: "" };
-  if (condition.field === "not_messaged_within_days" && props.campaign.not_messaged_within_days) return { quotes, text: "From Options" };
-  if (!evidence.value || assumptions.value.some((assumption) => assumption.field === condition.field)) return { quotes, text: "" };
-  return { quotes, text: "Added by AI, not in your brief" };
-}
-
 const percentOfAll = (count: number) => `${((count / (props.breakdown?.everyone || 1)) * 100).toFixed(1)}%`;
 
 /** The dimension each condition cuts by, so a person can check what was picked for it. */
@@ -35,10 +24,9 @@ const dimensions: Record<string, { name: string; window?: boolean }> = {
 const steps = computed(() =>
   props.campaign.conditions.map((condition) => ({
     field: condition.field,
-    rule: `${condition.label} ${condition.value}`,
     dimension: dimensions[condition.field]?.name ?? condition.label,
     selected: dimensions[condition.field]?.window ? `Last ${condition.value}` : condition.value,
-    source: sourceOf(condition),
+    source: sourceOf(props.campaign, condition),
     notes: assumptions.value.filter((assumption) => assumption.field === condition.field),
     remaining: props.breakdown?.steps.find((step) => step.field === condition.field)?.remaining,
   })),
@@ -52,12 +40,6 @@ const otherNotes = computed(() => assumptions.value.filter((assumption) => !prop
   <div class="audience-steps">
     <p v-if="!campaign.conditions.length" class="muted">No condition could be applied from this brief.</p>
     <template v-else>
-      <p v-if="!hideRule" class="rule" data-testid="segment-rule">
-        <template v-for="(step, index) in steps" :key="step.field">
-          <span v-if="index" class="muted small">AND</span>
-          <code class="condition">{{ step.rule }}</code>
-        </template>
-      </p>
       <div class="matrix">
         <table>
           <thead>
@@ -104,23 +86,6 @@ const otherNotes = computed(() => assumptions.value.filter((assumption) => !prop
   display: grid;
   gap: var(--space-3);
   min-width: 0;
-}
-
-.rule {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0;
-}
-
-.condition {
-  padding: 2px var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  background: var(--color-surface);
-  font-family: inherit;
-  font-weight: 500;
 }
 
 .matrix {

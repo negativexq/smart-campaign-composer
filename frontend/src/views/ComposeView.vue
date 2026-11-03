@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-import { createCampaign, errorMessage, proposeSegment } from "../api/campaigns";
+import { createCampaign, errorMessage } from "../api/campaigns";
 import BriefComposer from "../components/BriefComposer.vue";
 import ChannelPicker from "../components/ChannelPicker.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { navigate } from "../lib/navigation";
+import { requestAudience } from "../lib/pendingAudience";
 
 const brief = ref("");
 const channels = ref(["sms", "email"]);
@@ -15,8 +16,6 @@ const offer = ref<number | "">("");
 const quietDays = ref("");
 const busy = ref(false);
 const error = ref("");
-// Kept across a failed attempt, so trying again does not create a second campaign.
-const campaignId = ref("");
 
 const suggestions = [
   "Send a 30% discount reminder to users in Istanbul who added to their cart in the last 30 days and did not buy. Keep it friendly and short.",
@@ -44,17 +43,13 @@ async function findAudience() {
   busy.value = true;
   error.value = "";
   try {
-    if (campaignId.value) {
-      await proposeSegment(campaignId.value, { brief: brief.value });
-    } else {
-      campaignId.value = await createCampaign(brief.value, channels.value, {
-        ...(tone.value ? { tone: tone.value } : {}),
-        ...(hasOffer.value && offer.value !== "" ? { offer_percent: offer.value } : {}),
-        ...(quietDays.value ? { not_messaged_within_days: Number(quietDays.value) } : {}),
-      });
-      await proposeSegment(campaignId.value);
-    }
-    navigate(`/campaigns/${campaignId.value}/edit`);
+    const id = await createCampaign(brief.value, channels.value, {
+      ...(tone.value ? { tone: tone.value } : {}),
+      ...(hasOffer.value && offer.value !== "" ? { offer_percent: offer.value } : {}),
+      ...(quietDays.value ? { not_messaged_within_days: Number(quietDays.value) } : {}),
+    });
+    requestAudience(id);
+    navigate(`/campaigns/${id}/edit`);
   } catch (failure) {
     error.value = errorMessage(failure);
   } finally {
@@ -70,7 +65,7 @@ async function findAudience() {
       <p class="muted">From an idea to a ready-to-send campaign, with control at every step.</p>
     </header>
 
-    <ValidationNotice v-if="error" class="error" tone="error" title="We could not find an audience">{{ error }}</ValidationNotice>
+    <ValidationNotice v-if="error" class="error" tone="error" title="We could not save this campaign">{{ error }}</ValidationNotice>
 
     <BriefComposer
       v-model="brief"
@@ -79,14 +74,14 @@ async function findAudience() {
       :unavailable-reason="unavailableReason"
       @submit="findAudience"
     >
-      <ChannelPicker v-model="channels" :disabled="busy || Boolean(campaignId)" />
+      <ChannelPicker v-model="channels" :disabled="busy" />
       <details class="more" data-testid="campaign-options">
         <summary class="more-toggle">
           <span>Options</span>
           <span class="muted small" data-testid="options-summary">{{ optionsSummary }}</span>
         </summary>
         <div class="option-groups">
-          <fieldset class="options" :disabled="busy || Boolean(campaignId)" data-testid="message-options">
+          <fieldset class="options" :disabled="busy" data-testid="message-options">
             <legend class="legend">The message</legend>
             <div class="option">
               <label class="small muted" for="campaign-tone">Tone</label>
@@ -106,7 +101,7 @@ async function findAudience() {
               <input id="campaign-offer" v-model.number="offer" class="field control" type="number" min="1" max="100" step="1" />
             </div>
           </fieldset>
-          <fieldset class="options" :disabled="busy || Boolean(campaignId)" data-testid="audience-options">
+          <fieldset class="options" :disabled="busy" data-testid="audience-options">
             <legend class="legend">Who to leave out</legend>
             <div class="option">
               <label class="small muted" for="campaign-quiet">People messaged in the last</label>

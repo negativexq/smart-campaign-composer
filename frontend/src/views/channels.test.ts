@@ -33,6 +33,7 @@ function stub(campaign: Campaign) {
     "fetch",
     vi.fn(async (url: string) => {
       const body = url.endsWith("/sample-recipients") ? { recipients: [{ first_name: "Ayşe" }] } : campaign;
+      if (String(url).endsWith("/audience/breakdown")) return { ok: true, status: 200, json: async () => ({ everyone: 10, steps: [] }) } as Response;
       return { ok: true, status: 200, json: async () => body } as Response;
     }),
   );
@@ -87,21 +88,6 @@ describe("choosing channels", () => {
 
     expect(wrapper.find("button[type=submit]").attributes("disabled")).toBeDefined();
     expect(wrapper.find("[data-testid=brief-hint]").text()).toBe("Choose at least one channel.");
-  });
-
-  it("cannot change them once the campaign exists", async () => {
-    const fetchMock = vi.fn(async (url: string) =>
-      url === "/api/campaigns"
-        ? ({ ok: true, status: 201, json: async () => ({ id: "c9" }) } as Response)
-        : ({ ok: false, status: 502, json: async () => ({ error: "Try again" }) } as Response),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const wrapper = mount(ComposeView);
-    await wrapper.find("#brief").setValue("Spring sale");
-    await wrapper.find("form").trigger("submit");
-    await flushPromises();
-
-    expect(wrapper.find("[data-testid=channel-picker]").attributes("disabled")).toBeDefined();
   });
 });
 

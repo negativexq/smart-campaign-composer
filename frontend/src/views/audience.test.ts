@@ -1,4 +1,4 @@
-import { flushPromises, mount } from "@vue/test-utils";
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "../App.vue";
@@ -58,18 +58,28 @@ function postsTo(fetchMock: ReturnType<typeof stubApi>, url: string) {
   return fetchMock.mock.calls.filter(([called, init]) => called === url && init?.method === "POST");
 }
 
+enableAutoUnmount(afterEach);
+
 afterEach(() => {
   navigate("/");
   vi.unstubAllGlobals();
 });
 
 describe("brief to audience", () => {
-  it("creates the campaign and opens its audience", async () => {
+  const unsearched = { ...campaign, proposal: undefined, conditions: [], audience_as_of: undefined };
+
+  it("opens the audience page at once and looks for the audience there", async () => {
+    let answer: (value: unknown) => void = () => {};
     const fetchMock = stubApi({
       ...shared,
       "POST /api/campaigns": { status: 201, body: { id: "c1" } },
       "POST /api/campaigns/c1/segment": { body: campaign },
-      "GET /api/campaigns/c1": { body: campaign },
+      "GET /api/campaigns/c1": { body: unsearched },
+    });
+    const respond = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/campaigns/c1/segment") await new Promise((resolve) => (answer = resolve));
+      return respond(url, init);
     });
     navigate("/campaigns/new");
     const wrapper = mount(App);
@@ -82,10 +92,18 @@ describe("brief to audience", () => {
     expect(JSON.parse(postsTo(fetchMock, "/api/campaigns")[0][1]!.body as string)).toEqual({ brief: "Istanbul cart reminder", channels: ["sms", "email"] });
     expect(currentPath.value).toBe("/campaigns/c1/edit");
     expect(wrapper.find("[aria-current=step]").text()).toContain("Audience");
-    expect(wrapper.text()).toContain("1,284");
+    expect(wrapper.find("[data-testid=brief-text]").text()).toBe("Istanbul cart reminder");
+    expect(wrapper.find("[data-testid=audience-loading]").exists()).toBe(true);
+    expect(wrapper.text()).not.toContain("1,284");
+
+    answer(null);
+    await flushPromises();
+    expect(wrapper.find("[data-testid=audience-loading]").exists()).toBe(false);
+    expect(wrapper.find(".rules--staged").exists()).toBe(true);
+    expect(wrapper.find(".rest--staged").text()).toContain("1,284");
   });
 
-  it("keeps the brief and reuses the campaign when finding an audience fails", async () => {
+  it("keeps the brief and can try again when finding an audience fails", async () => {
     const fetchMock = stubApi({
       ...shared,
       "POST /api/campaigns": { status: 201, body: { id: "c1" } },
@@ -93,7 +111,7 @@ describe("brief to audience", () => {
         { status: 422, body: { error: "Try naming a city." } },
         { body: campaign },
       ],
-      "GET /api/campaigns/c1": { body: campaign },
+      "GET /api/campaigns/c1": { body: unsearched },
     });
     navigate("/campaigns/new");
     const wrapper = mount(App);
@@ -101,16 +119,24 @@ describe("brief to audience", () => {
 
     await wrapper.find("textarea").setValue("hello");
     await wrapper.find("form").trigger("submit");
-    await flushPromises();
+    await vi.waitFor(() => expect(wrapper.find("[role=alert]").exists()).toBe(true));
 
     expect(wrapper.find("[role=alert]").text()).toContain("Try naming a city.");
-    expect((wrapper.find("textarea").element as HTMLTextAreaElement).value).toBe("hello");
+    expect(wrapper.find("[data-testid=brief-text]").exists()).toBe(true);
 
-    await wrapper.find("form").trigger("submit");
-    await flushPromises();
+    await wrapper.findAll("button").find((button) => button.text() === "Find audience")!.trigger("click");
+    await vi.waitFor(() => expect(wrapper.text()).toContain("1,284"));
 
     expect(postsTo(fetchMock, "/api/campaigns")).toHaveLength(1);
-    expect(currentPath.value).toBe("/campaigns/c1/edit");
+  });
+
+  it("does not start a model call just because a draft was reopened", async () => {
+    const fetchMock = stubApi({ ...shared, "GET /api/campaigns/c1": { body: unsearched } });
+    navigate("/campaigns/c1/edit");
+    mount(App);
+    await flushPromises();
+
+    expect(postsTo(fetchMock, "/api/campaigns/c1/segment")).toHaveLength(0);
   });
 
   it("names the mock so nobody mistakes it for a real model", async () => {
@@ -129,6 +155,14 @@ describe("audience page", () => {
     await flushPromises();
     return { wrapper, fetchMock };
   }
+
+  it("builds up in order only after a search, not when reopened", async () => {
+    const { wrapper } = await open({ "GET /api/campaigns/c1": { body: campaign } });
+    await flushPromises();
+
+    expect(wrapper.find(".funnel--staged").exists()).toBe(false);
+    expect(wrapper.find(".rest--staged").exists()).toBe(false);
+  });
 
   it("puts the conditions before the number and marks assumptions", async () => {
     const { wrapper } = await open({ "GET /api/campaigns/c1": { body: campaign } });
@@ -156,7 +190,8 @@ describe("audience page", () => {
     expect(steps[2].text()).toContain("Added to cart");
     expect(steps[2].text()).toContain("Last 30 days");
     expect(steps[1].text()).toContain("40.0%");
-    expect(wrapper.find("[data-testid=segment-rule]").text()).toBe("City is İstanbulANDAdded to cart in the last 30 days");
+    expect(wrapper.find("[data-testid=segment-rules]").text()).toContain("City is İstanbul");
+    expect(wrapper.find("[data-testid=audience-narrowing]").text()).toContain("3,000 excluded");
     expect(steps[2].text()).toContain("1,284");
     expect(wrapper.text()).not.toContain("cart_added_within_days");
   });
@@ -190,6 +225,31 @@ describe("audience page", () => {
     await flushPromises();
 
     expect(wrapper.find("[data-testid=step-source]").exists()).toBe(false);
+  });
+
+  it("shows a waiting state while the AI works, then the audience", async () => {
+    let answer: (value: unknown) => void = () => {};
+    const { wrapper, fetchMock } = await open({ "GET /api/campaigns/c1": { body: campaign } });
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        await new Promise((resolve) => (answer = resolve));
+        return { ok: true, status: 200, json: async () => campaign } as Response;
+      }
+      return original(url, init);
+    });
+    await wrapper.find("#refinement").setValue("make it 14 days");
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid=audience-loading]").text()).toContain("Updating the segment rule");
+    expect(wrapper.find("[data-testid=audience-narrowing]").exists()).toBe(false);
+
+    answer(null);
+    await flushPromises();
+    expect(wrapper.find("[data-testid=audience-loading]").exists()).toBe(false);
+    expect(wrapper.find("[data-testid=audience-narrowing]").exists()).toBe(true);
+    expect(wrapper.find(".funnel--staged").exists()).toBe(true);
   });
 
   it("still lists the conditions when the counts cannot be loaded", async () => {
