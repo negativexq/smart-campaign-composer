@@ -288,6 +288,34 @@ describe("audience page", () => {
     expect((wrapper.find("#refinement").element as HTMLInputElement).value).toBe("");
   });
 
+  it("shows the brief the refinement rewrote and says so", async () => {
+    const { wrapper } = await open({
+      "GET /api/campaigns/c1": { body: campaign },
+      "POST /api/campaigns/c1/segment": { body: { ...campaign, brief: "Ankara customers in the last 14 days" } },
+    });
+    expect(wrapper.find('[data-testid="brief-updated"]').exists()).toBe(false);
+
+    await wrapper.find("#refinement").setValue("make it 14 days");
+    await wrapper.findAll("form").at(-1)!.trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="brief-text"]').text()).toBe("Ankara customers in the last 14 days");
+    expect(wrapper.find('[data-testid="brief-updated"]').text()).toContain("make it 14 days");
+  });
+
+  it("does not say the brief changed when the refinement left it alone", async () => {
+    const { wrapper } = await open({
+      "GET /api/campaigns/c1": { body: campaign },
+      "POST /api/campaigns/c1/segment": { body: campaign },
+    });
+
+    await wrapper.find("#refinement").setValue("make it 14 days");
+    await wrapper.findAll("form").at(-1)!.trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="brief-updated"]').exists()).toBe(false);
+  });
+
   it("keeps the current audience and the refinement when refining fails", async () => {
     const { wrapper } = await open({
       "GET /api/campaigns/c1": { body: campaign },

@@ -62,7 +62,7 @@ func TestTheSuggestedNameReplacesTheProvisionalOne(t *testing.T) {
 
 func TestAProposalWithoutANameKeepsTheCurrentOne(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t, step{output: namedProposal}, step{output: validProposal})
+	h := newHarness(t, step{output: namedProposal}, step{output: withUpdatedBrief(validProposal, secretBrief)})
 	ctx := context.Background()
 	id := h.create(t)
 	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {

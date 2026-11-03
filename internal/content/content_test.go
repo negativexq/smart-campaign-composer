@@ -287,3 +287,20 @@ func TestSchemaAsksOnlyForTheChosenChannels(t *testing.T) {
 		t.Fatal("sms must not be offered")
 	}
 }
+
+func TestAddsOffersOrLinks(t *testing.T) {
+	t.Parallel()
+	const source = "Send 30% off to Ankara, see https://example.com/a"
+	for text, want := range map[string]bool{
+		"Send 30% off to Izmir, see https://example.com/a": false,
+		"Send to Izmir":                  false,
+		"Send 50% off to Izmir":          true,
+		"Send to Izmir, see https://x.y": true,
+		"Send %20 off, see example.com":  false,
+		"Send 40% off":                   false,
+	} {
+		if got := content.AddsOffersOrLinks(text, source, "make it %20 or 40%"); got != want {
+			t.Errorf("%q: got %v", text, got)
+		}
+	}
+}

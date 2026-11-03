@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -247,7 +248,7 @@ func TestProviderFailuresAreNotRetriedAsRepairs(t *testing.T) {
 func TestRefinementEditsTheSameDraft(t *testing.T) {
 	t.Parallel()
 	narrower := strings.Replace(validProposal, `"cart_added_within_days":30`, `"cart_added_within_days":4`, 1)
-	h := newHarness(t, step{output: validProposal}, step{output: narrower})
+	h := newHarness(t, step{output: validProposal}, step{output: withUpdatedBrief(narrower, secretBrief)})
 	id := h.create(t)
 	ctx := context.Background()
 
@@ -385,5 +386,135 @@ func TestSpansFormTheGenerationTraceWithoutPersonalData(t *testing.T) {
 		if !names[want] {
 			t.Errorf("missing span %s, got %v", want, names)
 		}
+	}
+}
+
+// withUpdatedBrief is a proposal as a model answers a refinement.
+func withUpdatedBrief(proposal, brief string) string {
+	return `{"updated_brief":` + strconv.Quote(brief) + `,` + strings.TrimPrefix(proposal, "{")
+}
+
+func TestARefinementUpdatesTheBrief(t *testing.T) {
+	t.Parallel()
+	const updated = "Ankara customers who bought in the last 14 days"
+	h := newHarness(t, step{output: validProposal}, step{output: withUpdatedBrief(validProposal, updated)})
+	id := h.create(t)
+	ctx := context.Background()
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+
+	view, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{Refinement: "make it 14 days"})
+	if err != nil {
+		t.Fatalf("refine: %v", err)
+	}
+	if view.Brief != updated {
+		t.Fatalf("brief: %q", view.Brief)
+	}
+	if view.Proposal.UpdatedBrief != "" {
+		t.Fatalf("the rewrite belongs on the campaign, not in the proposal: %q", view.Proposal.UpdatedBrief)
+	}
+
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{Refinement: "again"}); err != nil {
+		t.Fatalf("refine again: %v", err)
+	}
+	if h.provider.requests[2].Brief != updated {
+		t.Fatalf("the next refinement started from: %q", h.provider.requests[2].Brief)
+	}
+}
+
+func TestOnlyARefinementCanRewriteTheBrief(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, step{output: withUpdatedBrief(validProposal, "Something else entirely")})
+	id := h.create(t)
+
+	view, err := h.service.ProposeSegment(context.Background(), id, campaign.ProposeInput{})
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if view.Brief != secretBrief {
+		t.Fatalf("brief: %q", view.Brief)
+	}
+}
+
+func TestARewrittenBriefThatBreaksTheRulesIsNotKept(t *testing.T) {
+	t.Parallel()
+	for name, rewrite := range map[string]string{
+		"missing":           validProposal,
+		"blank":             withUpdatedBrief(validProposal, "   "),
+		"too long":          withUpdatedBrief(validProposal, strings.Repeat("a", campaign.MaxBriefLength+1)),
+		"invented discount": withUpdatedBrief(validProposal, secretBrief+" with 50% off"),
+		"invented link":     withUpdatedBrief(validProposal, secretBrief+" https://example.com/sale"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t, step{output: validProposal}, step{output: rewrite})
+			id := h.create(t)
+			ctx := context.Background()
+			if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
+				t.Fatalf("propose: %v", err)
+			}
+
+			_, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{Refinement: "make it 14 days"})
+			if !errors.Is(err, campaign.ErrProposalRejected) {
+				t.Fatalf("got %v", err)
+			}
+			if len(h.provider.requests) != 1+campaign.MaxProposalAttempts {
+				t.Fatalf("requests: %d", len(h.provider.requests))
+			}
+			view, err := h.service.Get(ctx, id)
+			if err != nil {
+				t.Fatalf("get: %v", err)
+			}
+			if view.Brief != secretBrief {
+				t.Fatalf("brief: %q", view.Brief)
+			}
+		})
+	}
+}
+
+func TestARefinementCanNameItsOwnDiscountAndLink(t *testing.T) {
+	t.Parallel()
+	const updated = secretBrief + " with 50% off at https://example.com/sale"
+	h := newHarness(t, step{output: validProposal}, step{output: withUpdatedBrief(validProposal, updated)})
+	id := h.create(t)
+	ctx := context.Background()
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+
+	view, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{Refinement: "offer 50% off at https://example.com/sale"})
+	if err != nil {
+		t.Fatalf("refine: %v", err)
+	}
+	if view.Brief != updated {
+		t.Fatalf("brief: %q", view.Brief)
+	}
+}
+
+func TestARewrittenBriefMustAgreeWithTheChosenDiscount(t *testing.T) {
+	t.Parallel()
+	const brief = "Ankara customers with 30% off"
+	offer := 30
+	h := newHarness(t, step{output: validProposal}, step{output: withUpdatedBrief(validProposal, "Ankara customers with 50% off")})
+	ctx := context.Background()
+	id, err := h.service.CreateWith(ctx, campaign.NewCampaign{Brief: brief, OfferPercent: &offer})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+
+	_, err = h.service.ProposeSegment(ctx, id, campaign.ProposeInput{Refinement: "make it 50% off"})
+	if !errors.Is(err, campaign.ErrOfferConflict) {
+		t.Fatalf("got %v", err)
+	}
+	view, err := h.service.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if view.Brief != brief {
+		t.Fatalf("brief: %q", view.Brief)
 	}
 }
