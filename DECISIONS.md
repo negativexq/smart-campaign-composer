@@ -120,11 +120,41 @@ A timeout means the provider may have accepted the message. Retrying with the sa
 
 Rate limiting says nothing about the message, so counting it would turn a busy provider into failed deliveries. The worker waits for Retry-After and tries again. This is why the report can show more responses than attempts, and the UI explains it.
 
-## Progress is polled in this version
+## Live progress reads the database and pushes over SSE
 
-The campaign page reads aggregates from the database every two seconds while sending. The cost does not grow with message volume, and a dropped connection needs no recovery logic. Pushing the same data over SSE is planned next.
+Each open campaign page has a stream that reads aggregates once a second and sends only changes. Workers can run anywhere, so the database is the one place that knows the truth, and a client that reconnects simply gets the current state. Viewers add load per connection: on a campaign of a million messages one read costs a few hundred milliseconds, so many people watching the same huge send would call for sharing one read between them.
+
+## One delivery table, not a table per campaign
+
+We measured this on 3.6 million deliveries, 2.9 million attempts and 2,000 campaigns, on one machine with generated data, so the numbers show size and direction rather than a benchmark.
+
+2,000 campaigns as separate partitions took the catalog from 477 to 10,477 relations with no real rows in them. Planning the worker's next-batch query took 340 to 415 ms against about 2 ms on the shared table, and a query across them held about 6,000 locks. The default lock table could not even create them in one transaction. A table per campaign would also move the unique rule, foreign keys and every migration into generated SQL, and every report across campaigns would need to reach thousands of tables.
+
+The shared table stays fast because of what the work actually needs. The queue indexes are partial, so they hold only unfinished messages and do not grow with history: the sweep for expired leases took 0.014 ms beside 3.6 million rows. Campaign-level reads go through indexes that start with campaign_id, so a campaign reads only its own rows.
+
+If history ever becomes the problem, the next step is partitioning by month with old months archived, not by campaign. Nothing we measured calls for that yet.
+
+## Indexes and query shapes follow measured plans
+
+The biggest gains came from rewriting queries, not adding indexes.
+
+| Query | Before | After | Change |
+| --- | --- | --- | --- |
+| Claim a batch with a million waiting | 724 ms | under 1 ms | Subquery instead of a join, so the planner reads the claimable index in order |
+| Provider responses for a large campaign | 2.9 s | 57 ms | `delivery_attempts.campaign_id` with an index |
+| Campaign list, 100 rows | 716 ms to 3.1 s | about 100 ms | Choose the page first, then count only its campaigns |
+
+The claim query mattered most: at 724 ms per batch of 32, the planner alone would have held sending under 100 messages a second.
+
+We left some out on purpose, because every index on the delivery table slows sending. An index for filtering deliveries by status took 206 MB and saved about 20 ms. Including `attempts` in the progress index took 177 MB rather than 26 MB without a clear gain, since rows change constantly during a send. An index on `user_id` or `sent_at` would speed up reports that no screen has yet (126 ms and 440 ms today).
+
+When dashboards need history across campaigns, a summary table updated when a campaign finishes will serve them better than more indexes on the queue. A filter that matches few rows late in a very large campaign can still take about 100 ms.
 
 ## Deferred: recovering messages left in flight
 
 A worker that crashes after claiming a message leaves that row in SENDING, and the campaign would not finish. Lease recovery is next on the list, and it is a known gap until then. A pause shared between workers after Retry-After is also still to come; today each call waits on its own.
+
+## Schedules live in the database
+
+A schedule is a row in `campaign_schedules`, including its next run time, and the scheduler keeps nothing in memory. Restarting any service or the machine loses nothing, and the data stays while the Postgres volume does: `make down` keeps it, `docker compose down -v` deletes it. Seeding skips a database that already has users. A one-time send whose time passed during downtime goes out when the system returns, and missed intervals become one run.
 
