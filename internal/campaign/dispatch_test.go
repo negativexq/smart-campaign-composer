@@ -5,9 +5,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
+
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/negativexq/smart-campaign-composer/internal/campaign"
 	"github.com/negativexq/smart-campaign-composer/internal/content"
+	"github.com/negativexq/smart-campaign-composer/internal/schedule"
 	"github.com/negativexq/smart-campaign-composer/internal/seed"
 )
 
@@ -281,5 +285,236 @@ func TestProgressAndDeliveriesAreReadable(t *testing.T) {
 	}
 	if _, err := h.service.Deliveries(ctx, id, campaign.DeliveryFilter{Status: "NOPE"}); !errors.Is(err, campaign.ErrUnknownFilter) {
 		t.Fatalf("bad filter: %v", err)
+	}
+}
+
+func nextHour() *time.Time {
+	future := referenceTime.Add(time.Hour)
+	return &future
+}
+
+func approvedCampaign(t *testing.T) (*harness, string) {
+	t.Helper()
+	h, id := readyCampaign(t)
+	if _, err := h.service.Approve(context.Background(), id); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	return h, id
+}
+
+func scheduler(h *harness, now time.Time) *campaign.Scheduler {
+	return campaign.NewScheduler(h.pool, noop.NewTracerProvider().Tracer("test"), func() time.Time { return now })
+}
+
+func TestSchedulingWaitsForTheTime(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+
+	view, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: nextHour()})
+	if err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	if view.Status != "SCHEDULED" || view.Schedule == nil || !view.Schedule.NextRunAt.Equal(*nextHour()) || view.Schedule.Description == "" {
+		t.Fatalf("view: %s %+v", view.Status, view.Schedule)
+	}
+	if got := h.auditEvents(t, id); got[len(got)-1] != "campaign.scheduled" {
+		t.Fatalf("audit: %v", got)
+	}
+
+	if ran, err := scheduler(h, referenceTime).RunDue(ctx); err != nil || ran != 0 {
+		t.Fatalf("too early: %d %v", ran, err)
+	}
+	if len(deliveryRows(t, h, id)) != 0 {
+		t.Fatal("nothing may be queued before the time")
+	}
+
+	if ran, err := scheduler(h, nextHour().Add(time.Second)).RunDue(ctx); err != nil || ran != 1 {
+		t.Fatalf("on time: %d %v", ran, err)
+	}
+	if statusOf(t, h, id) != "DISPATCHING" || len(deliveryRows(t, h, id)) != 18 {
+		t.Fatalf("status %s, rows %d", statusOf(t, h, id), len(deliveryRows(t, h, id)))
+	}
+	if ran, _ := scheduler(h, nextHour().Add(time.Minute)).RunDue(ctx); ran != 0 {
+		t.Fatal("a one-time schedule must not run again")
+	}
+	view, _ = h.service.Get(ctx, id)
+	if view.Schedule.NextRunAt != nil || view.Schedule.Runs != 1 {
+		t.Fatalf("schedule: %+v", view.Schedule)
+	}
+}
+
+func TestSchedulingNeedsApprovalAndAValidRule(t *testing.T) {
+	t.Parallel()
+	h, id := readyCampaign(t)
+	ctx := context.Background()
+	spec := schedule.Spec{Kind: schedule.KindOnce, At: nextHour()}
+	if _, err := h.service.Schedule(ctx, id, spec); !errors.Is(err, campaign.ErrNotApproved) {
+		t.Fatalf("before approval: %v", err)
+	}
+	if _, err := h.service.Approve(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	past := referenceTime.Add(-time.Hour)
+	var invalid *schedule.InvalidError
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: &past}); !errors.As(err, &invalid) {
+		t.Fatalf("past: %v", err)
+	}
+}
+
+func TestASchedulePendingCannotAlsoBeSentNow(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: nextHour()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Dispatch(ctx, id); !errors.Is(err, campaign.ErrAlreadyScheduled) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestChangingAScheduleReplacesIt(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: nextHour()}); err != nil {
+		t.Fatal(err)
+	}
+	view, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindInterval, EveryHours: 6})
+	if err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if view.Schedule.Spec.Kind != schedule.KindInterval {
+		t.Fatalf("schedule: %+v", view.Schedule)
+	}
+}
+
+func TestCancellingBeforeTheFirstSendGoesBackToApproved(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: nextHour()}); err != nil {
+		t.Fatal(err)
+	}
+	view, err := h.service.CancelSchedule(ctx, id)
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if view.Status != "APPROVED" || view.Schedule != nil {
+		t.Fatalf("view: %s %+v", view.Status, view.Schedule)
+	}
+	if ran, _ := scheduler(h, nextHour().Add(time.Second)).RunDue(ctx); ran != 0 {
+		t.Fatal("a cancelled schedule must not run")
+	}
+}
+
+func TestARepeatingScheduleNeverMessagesAnyoneTwice(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindInterval, EveryHours: 24}); err != nil {
+		t.Fatal(err)
+	}
+	first := referenceTime.Add(24 * time.Hour)
+	if ran, err := scheduler(h, first.Add(time.Second)).RunDue(ctx); err != nil || ran != 1 {
+		t.Fatalf("first run: %d %v", ran, err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE campaign_deliveries SET status = 'SENT' WHERE status = 'QUEUED'`); err != nil {
+		t.Fatal(err)
+	}
+	before := deliveryRows(t, h, id)
+
+	// Someone new starts matching: a user from elsewhere moves to Istanbul with a cart.
+	if _, err := h.pool.Exec(ctx, `UPDATE users SET city = 'İstanbul' WHERE id = $1`, seed.FixtureOtherCity); err != nil {
+		t.Fatal(err)
+	}
+	second := first.Add(24 * time.Hour)
+	if ran, err := scheduler(h, second.Add(time.Second)).RunDue(ctx); err != nil || ran != 1 {
+		t.Fatalf("second run: %d %v", ran, err)
+	}
+	after := deliveryRows(t, h, id)
+	for key, status := range before {
+		if after[key] != status {
+			t.Errorf("%s changed from %s to %s", key, status, after[key])
+		}
+	}
+	if after["5:sms"] != "QUEUED" || after["5:email"] != "QUEUED" || len(after) != len(before)+2 {
+		t.Fatalf("only the new person is queued: %v", after)
+	}
+	view, _ := h.service.Get(ctx, id)
+	if view.Schedule.Runs != 2 || view.Schedule.NextRunAt == nil {
+		t.Fatalf("schedule: %+v", view.Schedule)
+	}
+}
+
+func TestSomeoneWhoConsentsLaterIsReachedByALaterRun(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindInterval, EveryHours: 24}); err != nil {
+		t.Fatal(err)
+	}
+	first := referenceTime.Add(24 * time.Hour)
+	if _, err := scheduler(h, first.Add(time.Second)).RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if rows := deliveryRows(t, h, id); rows["10:sms"] != "SKIPPED" {
+		t.Fatalf("rows: %v", rows)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE consents SET allowed = true WHERE user_id = $1 AND channel = 'sms'`, seed.FixtureNoConsent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scheduler(h, first.Add(24*time.Hour+time.Second)).RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if rows := deliveryRows(t, h, id); rows["10:sms"] != "QUEUED" {
+		t.Fatalf("a skipped person was never messaged, so they can still be: %v", rows)
+	}
+}
+
+func TestParallelSchedulersRunOnce(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: nextHour()}); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan int, 4)
+	for range 4 {
+		go func() {
+			ran, err := scheduler(h, nextHour().Add(time.Second)).RunDue(ctx)
+			if err != nil {
+				t.Errorf("run: %v", err)
+			}
+			results <- ran
+		}()
+	}
+	total := 0
+	for range 4 {
+		total += <-results
+	}
+	if total != 1 {
+		t.Fatalf("ran %d times", total)
+	}
+	var audits int
+	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE campaign_id = $1 AND event_type = 'campaign.run'`, id).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if audits != 1 {
+		t.Fatalf("audits: %d", audits)
+	}
+}
+
+func TestScheduledCampaignsCountAsActive(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: nextHour()}); err != nil {
+		t.Fatal(err)
+	}
+	active, err := h.service.List(ctx, campaign.ListFilter{Group: "active"})
+	if err != nil || len(active) != 1 {
+		t.Fatalf("active: %d %v", len(active), err)
 	}
 }

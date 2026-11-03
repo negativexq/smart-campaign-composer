@@ -2,7 +2,7 @@
 
 // Package e2e holds the acceptance test for the whole campaign chain. It runs
 // against a stack started with `make up` and stays out of `make test`. It is
-// expected to fail until the Day 4 milestone wires the full flow together.
+// covers the path from a brief to a finished campaign.
 package e2e
 
 import (

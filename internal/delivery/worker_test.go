@@ -515,3 +515,23 @@ func TestDuplicatesReportedByTheProviderAreCounted(t *testing.T) {
 		t.Fatal("not counted")
 	}
 }
+
+func TestARepeatingCampaignWaitsForItsNextRun(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	ctx := context.Background()
+	if _, err := r.pool.Exec(ctx, `INSERT INTO campaign_schedules (campaign_id, spec, next_run_at) VALUES ($1, '{"kind":"interval","every_hours":24}', now() + interval '1 day')`, r.id); err != nil {
+		t.Fatal(err)
+	}
+	r.drain(t)
+	if r.campaignStatus(t) != "SCHEDULED" {
+		t.Fatalf("campaign: %s", r.campaignStatus(t))
+	}
+	var finished, completed int
+	if err := r.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE event_type = 'campaign.run_finished'), count(*) FILTER (WHERE event_type = 'campaign.completed') FROM audit_events WHERE campaign_id = $1`, r.id).Scan(&finished, &completed); err != nil {
+		t.Fatal(err)
+	}
+	if finished != 1 || completed != 0 {
+		t.Fatalf("finished %d, completed %d", finished, completed)
+	}
+}
