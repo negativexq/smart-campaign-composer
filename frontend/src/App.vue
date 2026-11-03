@@ -193,6 +193,7 @@ h1 {
 @media (max-width: 720px) {
   .shell {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
   }
 
   .sidebar {
