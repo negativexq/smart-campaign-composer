@@ -156,6 +156,8 @@ A worker that crashes after claiming a message leaves that row in SENDING with a
 
 A 429 pauses the whole channel through a shared Redis key, so every worker honours one Retry-After. The pause only ever gets longer and is capped at 30 seconds. If the provider cannot be reached at all, nothing was sent, so no attempt is used and the channel rests for 5 seconds. If the limiter itself is unavailable, nothing is sent until it returns.
 
+`make test-chaos` checks this on a running stack by killing the worker, stopping it, and stopping Redis, the provider and Postgres during a send. In a full run all five ended with every delivery finished and, where the test compares them, the provider's count matching our records. A message taken back after a crash is sent again with the same idempotency key, so the promise of no second message depends on the provider honouring that key, as the mock does.
+
 ## A simple sign-in that says who, not who you really are
 
 Signing in takes a username or email and no password. The name goes into an unsigned HttpOnly cookie for 30 days, and every campaign route answers 401 without it. This gives the audit trail a name to record and is not authentication: anyone can type any name or edit the cookie, and the page says so. A real login would replace the cookie handling in `internal/httpapi/session.go` and leave the rest alone.
