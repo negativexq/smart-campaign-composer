@@ -42,7 +42,7 @@ var (
 	genderPattern = regexp.MustCompile(`gender|cinsiyet`)
 	tierPattern   = regexp.MustCompile(`(^|[^a-z])vip([^a-z]|$)|loyal|sadik`)
 	cartPattern   = regexp.MustCompile(`sepet|cart|abandon`)
-	noBuyPattern  = regexp.MustCompile(`aliş ?veriş yapma|satin alma|almayan|did not buy|didn't buy|not purchased|not bought|no purchase|haven't purchased|without purchas|without buy|abandon`)
+	noBuyPattern  = regexp.MustCompile(`aliş ?veriş yapma|satin alma|almayan|did not buy|didn't buy|did not purchase|didn't purchase|not purchased|not bought|no purchase|haven't purchased|without purchas|without buy|abandon`)
 	boughtPattern = regexp.MustCompile(`purchased|bought|satin alan|aliş ?veriş yapan`)
 	clearPattern  = regexp.MustCompile(`remove|drop|ignore|kaldir|çikar`)
 )

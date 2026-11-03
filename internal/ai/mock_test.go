@@ -29,6 +29,7 @@ func TestMockUnderstandsTheExampleBriefInBothLanguages(t *testing.T) {
 	for _, brief := range []string{
 		"İstanbul'da son 30 günde sepete ürün ekleyip alışveriş yapmayan kullanıcılara %20 indirim hatırlatması gönder",
 		"Remind users in Istanbul who added to cart in the last 30 days and did not buy about a 20% discount",
+		"Remind users in Istanbul who added a product to their cart in the last 30 days and did not purchase",
 	} {
 		spec := proposeWithMock(t, ai.SegmentRequest{Brief: brief}).Segment
 		if spec.City == nil || *spec.City != seed.CityIstanbul {
