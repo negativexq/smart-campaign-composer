@@ -1,6 +1,7 @@
 package campaign_test
 
 import (
+	"slices"
 	"context"
 	"errors"
 	"strings"
@@ -626,5 +627,45 @@ func TestAScheduledRunStaysOnTheCampaignsChannels(t *testing.T) {
 		if !strings.HasSuffix(key, ":email") {
 			t.Fatalf("delivery outside the campaign's channels: %s", key)
 		}
+	}
+}
+
+func TestApprovalFreezesTheAudienceCounts(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	approved, err := h.service.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approved.AudienceSnapshot == nil {
+		t.Fatal("approval took no snapshot")
+	}
+	before, err := h.service.AudienceBreakdown(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Everyone withdraws consent and new carts arrive after the approval.
+	if _, err := h.pool.Exec(ctx, `UPDATE consents SET allowed = false`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `DELETE FROM users WHERE id IN (SELECT id FROM users ORDER BY id LIMIT 200)`); err != nil {
+		t.Fatal(err)
+	}
+
+	later, err := h.service.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if later.Audience != approved.Audience {
+		t.Fatalf("audience moved after approval: %+v became %+v", approved.Audience, later.Audience)
+	}
+	after, err := h.service.AudienceBreakdown(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Everyone != before.Everyone || !slices.Equal(after.Steps, before.Steps) {
+		t.Fatalf("breakdown moved after approval: %+v became %+v", before, after)
 	}
 }
