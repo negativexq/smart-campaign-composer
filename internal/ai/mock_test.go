@@ -13,13 +13,13 @@ import (
 func proposeWithMock(t *testing.T, request ai.SegmentRequest) segment.Proposal {
 	t.Helper()
 	request.Cities = seed.Cities
-	raw, err := ai.NewMock().ProposeSegment(context.Background(), request)
+	response, err := ai.NewMock().ProposeSegment(context.Background(), request)
 	if err != nil {
 		t.Fatalf("propose: %v", err)
 	}
-	proposal, err := segment.ParseProposal(raw, seed.Cities)
+	proposal, err := segment.ParseProposal(response.Output, seed.Cities)
 	if err != nil {
-		t.Fatalf("mock output must pass real validation: %v\n%s", err, raw)
+		t.Fatalf("mock output must pass real validation: %v\n%s", err, response.Output)
 	}
 	return proposal
 }
@@ -92,8 +92,8 @@ func TestMockIsDeterministic(t *testing.T) {
 	request := ai.SegmentRequest{Brief: "İzmir sepet", Cities: seed.Cities}
 	first, _ := ai.NewMock().ProposeSegment(context.Background(), request)
 	second, _ := ai.NewMock().ProposeSegment(context.Background(), request)
-	if string(first) != string(second) {
-		t.Fatalf("%s != %s", first, second)
+	if string(first.Output) != string(second.Output) {
+		t.Fatalf("%s != %s", first.Output, second.Output)
 	}
 }
 

@@ -53,16 +53,26 @@ type Proposal struct {
 
 // ValidationError lists everything wrong with a proposal, in words that work
 // both as repair instructions for the model and as a message for the marketer.
+// Reasons has one fixed code per problem; problems can quote model output, so
+// only reasons are safe as metric labels.
 type ValidationError struct {
 	Problems []string
+	Reasons  []string
 }
 
 func (e *ValidationError) Error() string {
 	return strings.Join(e.Problems, "; ")
 }
 
-func invalid(problems ...string) *ValidationError {
-	return &ValidationError{Problems: problems}
+func (e *ValidationError) add(reason, problem string) {
+	e.Reasons = append(e.Reasons, reason)
+	e.Problems = append(e.Problems, problem)
+}
+
+func invalid(reason, problem string) *ValidationError {
+	e := &ValidationError{}
+	e.add(reason, problem)
+	return e
 }
 
 // ParseProposal decodes and validates untrusted model output. City spellings
@@ -76,13 +86,13 @@ func ParseProposal(raw []byte, cities []string) (Proposal, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&decoded); err != nil {
-		return Proposal{}, invalid("output is not valid JSON for the schema: " + err.Error())
+		return Proposal{}, invalid("malformed_output", "output is not valid JSON for the schema: "+err.Error())
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return Proposal{}, invalid("output is not valid JSON for the schema: trailing content after the object")
+		return Proposal{}, invalid("malformed_output", "output is not valid JSON for the schema: trailing content after the object")
 	}
 	if decoded.Segment == nil {
-		return Proposal{}, invalid("segment is required")
+		return Proposal{}, invalid("missing_segment", "segment is required")
 	}
 
 	proposal := Proposal{
@@ -93,8 +103,8 @@ func ParseProposal(raw []byte, cities []string) (Proposal, error) {
 	if proposal.Assumptions == nil {
 		proposal.Assumptions = []Assumption{}
 	}
-	if problems := proposal.validate(cities); len(problems) > 0 {
-		return Proposal{}, invalid(problems...)
+	if problems := proposal.validate(cities); len(problems.Problems) > 0 {
+		return Proposal{}, problems
 	}
 	return proposal, nil
 }
@@ -109,21 +119,21 @@ func cleanConditions(conditions []string) []string {
 	return cleaned
 }
 
-func (p *Proposal) validate(cities []string) []string {
-	var problems []string
+func (p *Proposal) validate(cities []string) *ValidationError {
+	problems := &ValidationError{}
 	spec := &p.Segment
 
 	if spec.City != nil {
 		canonical, ok := resolveCity(*spec.City, cities)
 		if !ok {
-			problems = append(problems, fmt.Sprintf("city %q is not available; use one of: %s", *spec.City, strings.Join(cities, ", ")))
+			problems.add("unknown_city", fmt.Sprintf("city %q is not available; use one of: %s", *spec.City, strings.Join(cities, ", ")))
 		} else {
 			spec.City = &canonical
 		}
 	}
 	if spec.Language != nil {
 		if _, ok := languageNames[*spec.Language]; !ok {
-			problems = append(problems, fmt.Sprintf("language %q is not available; use tr or en", *spec.Language))
+			problems.add("unknown_language", fmt.Sprintf("language %q is not available; use tr or en", *spec.Language))
 		}
 	}
 	for _, window := range []struct {
@@ -135,22 +145,22 @@ func (p *Proposal) validate(cities []string) []string {
 		{"not_purchased_within_days", spec.NotPurchasedWithinDays},
 	} {
 		if window.days != nil && (*window.days < 1 || *window.days > maxWindowDays) {
-			problems = append(problems, fmt.Sprintf("%s must be between 1 and %d", window.field, maxWindowDays))
+			problems.add("window_out_of_range", fmt.Sprintf("%s must be between 1 and %d", window.field, maxWindowDays))
 		}
 	}
 	if spec.noPurchaseSinceCart() && spec.CartAddedWithinDays == nil {
-		problems = append(problems, "no_purchase_since_cart requires cart_added_within_days")
+		problems.add("cart_window_required", "no_purchase_since_cart requires cart_added_within_days")
 	}
 	if spec.PurchasedWithinDays != nil && spec.NotPurchasedWithinDays != nil &&
 		*spec.NotPurchasedWithinDays >= *spec.PurchasedWithinDays {
-		problems = append(problems, "purchased_within_days and not_purchased_within_days contradict each other")
+		problems.add("contradictory_windows", "purchased_within_days and not_purchased_within_days contradict each other")
 	}
 	if spec.IsEmpty() && len(p.UnsupportedConditions) == 0 {
-		problems = append(problems, "segment must have at least one filter")
+		problems.add("empty_segment", "segment must have at least one filter")
 	}
 	for _, assumption := range p.Assumptions {
 		if !slices.Contains(filterFields, assumption.Field) {
-			problems = append(problems, fmt.Sprintf("assumption refers to unknown field %q", assumption.Field))
+			problems.add("unknown_assumption_field", fmt.Sprintf("assumption refers to unknown field %q", assumption.Field))
 		}
 	}
 	return problems

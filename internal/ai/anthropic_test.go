@@ -24,7 +24,7 @@ func messageResponse(stopReason, text string) string {
 		"id": "msg_test", "type": "message", "role": "assistant", "model": "claude-opus-5-5",
 		"stop_reason": stopReason,
 		"content":     []map[string]any{{"type": "text", "text": text}},
-		"usage":       map[string]any{"input_tokens": 1, "output_tokens": 1},
+		"usage":       map[string]any{"input_tokens": 11, "output_tokens": 7},
 	})
 	return string(body)
 }
@@ -60,12 +60,15 @@ func segmentRequest() ai.SegmentRequest {
 func TestAnthropicReturnsModelOutput(t *testing.T) {
 	t.Parallel()
 	provider, _ := anthropicAgainst(t, 200, messageResponse("end_turn", proposalJSON))
-	raw, err := provider.ProposeSegment(context.Background(), segmentRequest())
+	response, err := provider.ProposeSegment(context.Background(), segmentRequest())
 	if err != nil {
 		t.Fatalf("propose: %v", err)
 	}
-	if string(raw) != proposalJSON {
-		t.Fatalf("got %s", raw)
+	if string(response.Output) != proposalJSON {
+		t.Fatalf("got %s", response.Output)
+	}
+	if response.Usage != (ai.Usage{InputTokens: 11, OutputTokens: 7}) {
+		t.Fatalf("usage: %+v", response.Usage)
 	}
 }
 
