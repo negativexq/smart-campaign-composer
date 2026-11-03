@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutGrid, PenLine } from "lucide-vue-next";
+import { Gauge, LayoutGrid, ListChecks, Plus } from "lucide-vue-next";
 
 import type { SystemStatus } from "../api/system";
 
@@ -11,7 +11,13 @@ defineProps<{
 }>();
 
 const groups = [
-  { title: "Workspace", links: [{ href: "/", label: "New campaign", icon: PenLine }] },
+  {
+    title: "Workspace",
+    links: [
+      { href: "/", label: "Overview", icon: Gauge },
+      { href: "/campaigns", label: "Campaigns", icon: ListChecks },
+    ],
+  },
   { title: "Reference", links: [{ href: "/design", label: "Design system", icon: LayoutGrid }] },
 ];
 
@@ -22,6 +28,10 @@ const statusLabels = { checking: "Checking", operational: "Operational", unavail
   <div class="shell">
     <aside class="sidebar">
       <a class="brand" href="/">Smart Campaign Composer</a>
+      <a class="button button--primary new-campaign" href="/campaigns/new" data-testid="new-campaign">
+        <Plus :size="16" aria-hidden="true" />
+        New campaign
+      </a>
       <nav class="nav" aria-label="Main">
         <div
           v-for="group in groups"
@@ -94,6 +104,11 @@ const statusLabels = { checking: "Checking", operational: "Operational", unavail
   color: var(--color-text);
   font-weight: 600;
   line-height: 1.3;
+  text-decoration: none;
+}
+
+.new-campaign {
+  justify-content: center;
   text-decoration: none;
 }
 
@@ -234,7 +249,27 @@ const statusLabels = { checking: "Checking", operational: "Operational", unavail
     padding: 0;
   }
 
+  .new-campaign {
+    order: 3;
+    width: 100%;
+  }
+
   .nav {
+    order: 4;
+    flex-basis: 100%;
+    margin-top: 0;
+  }
+
+  .nav-group {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .nav-title {
+    display: none;
+  }
+
+  .nav-group:last-child {
     display: none;
   }
 

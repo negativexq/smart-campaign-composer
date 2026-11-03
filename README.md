@@ -2,7 +2,7 @@
 
 Turns a marketer's plain-language brief into a validated audience and SMS and email messages, waits for human approval, sends through a mock provider, and shows delivery status live. No real messages are ever sent.
 
-> **Status: in development.** A brief can become a validated, refinable audience. Content generation, approval and sending are not built yet, so `make test-e2e` fails on purpose at `/generate`. The UI components are visible with sample data at http://localhost:8080/design.
+> **Status: in development.** The workspace (overview, campaign list, campaign detail) and the path from brief to a validated, refinable audience work. Content generation, approval and sending are not built yet, so `make test-e2e` fails on purpose at `/generate`. The UI components are visible with sample data at http://localhost:8080/design.
 
 ## Run
 

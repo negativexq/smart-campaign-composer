@@ -21,6 +21,8 @@ const campaign: Campaign = {
   audience: { total: 1284, sms: 900, email: 1000 },
   audience_as_of: "2026-11-03T12:00:00Z",
   blockers: [],
+  created_at: "2026-11-03T12:00:00Z",
+  updated_at: "2026-11-03T12:00:00Z",
 };
 
 type Route = { status?: number; body: unknown };
@@ -38,7 +40,13 @@ function stubApi(routes: Record<string, Route | Route[]>) {
   return fetchMock;
 }
 
-const shared = { "GET /readyz": { body: {} }, "GET /api/config": { body: { llm_provider: "mock", llm_model: "keyword-matcher" } } };
+const shared = {
+  "GET /readyz": { body: {} },
+  "GET /api/config": { body: { llm_provider: "mock", llm_model: "keyword-matcher" } },
+  "GET /api/overview": {
+    body: { counts: { total: 0, drafts: 0, active: 0, completed: 0, failed: 0 }, recent_campaigns: [], recent_activity: [] },
+  },
+};
 
 function postsTo(fetchMock: ReturnType<typeof stubApi>, url: string) {
   return fetchMock.mock.calls.filter(([called, init]) => called === url && init?.method === "POST");
@@ -57,6 +65,7 @@ describe("brief to audience", () => {
       "POST /api/campaigns/c1/segment": { body: campaign },
       "GET /api/campaigns/c1": { body: campaign },
     });
+    navigate("/campaigns/new");
     const wrapper = mount(App);
     await flushPromises();
 
@@ -65,7 +74,7 @@ describe("brief to audience", () => {
     await flushPromises();
 
     expect(JSON.parse(postsTo(fetchMock, "/api/campaigns")[0][1]!.body as string)).toEqual({ brief: "Istanbul cart reminder" });
-    expect(currentPath.value).toBe("/campaigns/c1");
+    expect(currentPath.value).toBe("/campaigns/c1/edit");
     expect(wrapper.find("[aria-current=step]").text()).toContain("Audience");
     expect(wrapper.text()).toContain("1,284");
   });
@@ -80,6 +89,7 @@ describe("brief to audience", () => {
       ],
       "GET /api/campaigns/c1": { body: campaign },
     });
+    navigate("/campaigns/new");
     const wrapper = mount(App);
     await flushPromises();
 
@@ -94,7 +104,7 @@ describe("brief to audience", () => {
     await flushPromises();
 
     expect(postsTo(fetchMock, "/api/campaigns")).toHaveLength(1);
-    expect(currentPath.value).toBe("/campaigns/c1");
+    expect(currentPath.value).toBe("/campaigns/c1/edit");
   });
 
   it("names the mock so nobody mistakes it for a real model", async () => {
@@ -107,7 +117,7 @@ describe("brief to audience", () => {
 
 describe("audience page", () => {
   async function open(routes: Record<string, Route | Route[]>) {
-    navigate("/campaigns/c1");
+    navigate("/campaigns/c1/edit");
     const fetchMock = stubApi({ ...shared, ...routes });
     const wrapper = mount(App);
     await flushPromises();

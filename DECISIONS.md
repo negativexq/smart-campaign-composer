@@ -63,3 +63,11 @@ Prometheus metrics, `slog` JSON logs, OpenTelemetry spans on critical flows, and
 Metric labels use fixed values only. Validation failures carry a reason code, because the human-readable message can quote model output. Campaign IDs, user data, briefs and message text never become labels. HTTP metrics use the route pattern, so IDs and scanner traffic cannot grow the series count.
 
 Telemetry says how the system behaves; `audit_events` says what was decided. The audit table is append-only and written in the same transaction as the change it describes, so it does not depend on telemetry retention.
+
+## A campaign workspace, with creation as a flow inside it
+
+The app opens on an overview rather than a form, because the system manages campaigns over time: `/` is the overview, `/campaigns` the list, `/campaigns/new` and `/campaigns/:id/edit` the creation wizard, and `/campaigns/:id` the detail page. Everything shown comes from the database, and sections without real data do not exist yet: the Content and Deliveries tabs, for example, arrive with those stages rather than as empty placeholders. For the same reason there is no Settings page and no separate Activity page.
+
+Each status belongs to at most one list filter, so the overview's counts match what the filters show. `COMPLETED_WITH_FAILURES` sits under Failed, where someone will look for it. Campaigns have no separate name yet, so the brief serves as the title.
+
+The Activity tab is written from `audit_events`, not from spans. There are no user accounts in this case, so entries say what happened but cannot say who did it.

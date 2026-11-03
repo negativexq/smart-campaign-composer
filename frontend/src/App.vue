@@ -8,11 +8,24 @@ import AppShell from "./components/AppShell.vue";
 import CampaignStepper from "./components/CampaignStepper.vue";
 import { currentPath } from "./lib/navigation";
 import AudienceView from "./views/AudienceView.vue";
+import CampaignDetailView from "./views/CampaignDetailView.vue";
+import CampaignsView from "./views/CampaignsView.vue";
 import ComposeView from "./views/ComposeView.vue";
 import DesignView from "./views/DesignView.vue";
+import OverviewView from "./views/OverviewView.vue";
 
-const isDesign = computed(() => currentPath.value === "/design");
-const campaignId = computed(() => currentPath.value.match(/^\/campaigns\/([^/]+)$/)?.[1] ?? "");
+const route = computed(() => {
+  const path = currentPath.value;
+  if (path === "/") return { name: "overview", id: "" };
+  if (path === "/design") return { name: "design", id: "" };
+  if (path === "/campaigns") return { name: "campaigns", id: "" };
+  if (path === "/campaigns/new") return { name: "new", id: "" };
+  const edit = path.match(/^\/campaigns\/([^/]+)\/edit$/);
+  if (edit) return { name: "edit", id: edit[1] };
+  const detail = path.match(/^\/campaigns\/([^/]+)$/);
+  if (detail) return { name: "detail", id: detail[1] };
+  return { name: "not-found", id: "" };
+});
 const status = ref<SystemStatus | "checking">("checking");
 const aiConfig = ref<AiConfig | null>(null);
 
@@ -29,23 +42,44 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppShell v-if="isDesign" active-path="/design" title="Design system" :system-status="status">
+  <AppShell v-if="route.name === 'design'" active-path="/design" title="Design system" :system-status="status">
     <DesignView />
   </AppShell>
 
-  <AppShell v-else active-path="/" title="New campaign" campaign-status="Draft" :system-status="status">
+  <AppShell v-else-if="route.name === 'overview'" active-path="/" title="Overview" :system-status="status">
+    <template #topbar><AiModeBadge v-if="aiConfig" :config="aiConfig" /></template>
+    <OverviewView />
+  </AppShell>
+
+  <AppShell v-else-if="route.name === 'campaigns'" active-path="/campaigns" title="Campaigns" :system-status="status">
+    <template #topbar><AiModeBadge v-if="aiConfig" :config="aiConfig" /></template>
+    <CampaignsView />
+  </AppShell>
+
+  <AppShell v-else-if="route.name === 'detail'" active-path="/campaigns" title="Campaign" :system-status="status">
+    <template #topbar><AiModeBadge v-if="aiConfig" :config="aiConfig" /></template>
+    <CampaignDetailView :key="route.id" :campaign-id="route.id" />
+  </AppShell>
+
+  <AppShell
+    v-else-if="route.name === 'new' || route.name === 'edit'"
+    active-path="/campaigns"
+    title="New campaign"
+    campaign-status="Draft"
+    :system-status="status"
+  >
     <template #topbar>
       <div class="topbar-actions">
-        <CampaignStepper :steps="steps" :current-id="campaignId ? 'audience' : 'brief'" />
+        <CampaignStepper :steps="steps" :current-id="route.name === 'edit' ? 'audience' : 'brief'" />
         <AiModeBadge v-if="aiConfig" :config="aiConfig" />
       </div>
     </template>
 
-    <AudienceView v-if="campaignId" :key="campaignId" :campaign-id="campaignId" />
+    <AudienceView v-if="route.name === 'edit'" :key="route.id" :campaign-id="route.id" />
     <ComposeView v-else />
 
     <template #panel>
-      <section v-if="campaignId" class="next card">
+      <section v-if="route.name === 'edit'" class="next card">
         <h3>How this audience was built</h3>
         <ul class="next-list">
           <li>AI turned your brief into the conditions shown here.</li>
@@ -64,6 +98,11 @@ onMounted(async () => {
         <p class="muted small">Nothing is sent until you approve it.</p>
       </section>
     </template>
+  </AppShell>
+
+  <AppShell v-else active-path="" title="Page not found" :system-status="status">
+    <h1>This page does not exist.</h1>
+    <p class="muted"><a href="/">Back to overview</a></p>
   </AppShell>
 </template>
 

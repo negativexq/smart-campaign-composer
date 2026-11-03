@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-import { ApiError, createCampaign, proposeSegment } from "../api/campaigns";
+import { createCampaign, errorMessage, proposeSegment } from "../api/campaigns";
 import BriefComposer from "../components/BriefComposer.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { navigate } from "../lib/navigation";
@@ -29,9 +29,9 @@ async function findAudience() {
       campaignId = await createCampaign(brief.value);
       await proposeSegment(campaignId);
     }
-    navigate(`/campaigns/${campaignId}`);
+    navigate(`/campaigns/${campaignId}/edit`);
   } catch (failure) {
-    error.value = failure instanceof ApiError ? failure.message : "Something went wrong. Try again.";
+    error.value = errorMessage(failure);
   } finally {
     busy.value = false;
   }

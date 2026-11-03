@@ -19,8 +19,9 @@ afterEach(() => {
 });
 
 describe("App", () => {
-  it("opens on the brief, not an empty dashboard", async () => {
+  it("keeps the brief at its own address", async () => {
     stubReadiness({ ok: true });
+    navigate("/campaigns/new");
     const wrapper = mount(App);
     await flushPromises();
 
@@ -28,8 +29,9 @@ describe("App", () => {
     expect(wrapper.find("textarea").exists()).toBe(true);
   });
 
-  it("always shows the campaign status and current step", async () => {
+  it("shows the campaign status and current step while creating", async () => {
     stubReadiness({ ok: true });
+    navigate("/campaigns/new");
     const wrapper = mount(App);
     await flushPromises();
 
@@ -44,9 +46,20 @@ describe("App", () => {
 
     const groups = wrapper.findAll("[data-testid=nav-group]");
     expect(groups.map((group) => group.find("[data-testid=nav-group-title]").text())).toEqual(["Workspace", "Reference"]);
-    expect(groups[0].text()).toContain("New campaign");
+    expect(groups[0].text()).toContain("Overview");
+    expect(groups[0].text()).toContain("Campaigns");
     expect(groups[0].text()).not.toContain("Design system");
+    expect(wrapper.find("[data-testid=new-campaign]").attributes("href")).toBe("/campaigns/new");
     expect(groups[1].text()).toContain("Design system");
+  });
+
+  it("says when a page does not exist", async () => {
+    stubReadiness({ ok: true });
+    navigate("/nope");
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(wrapper.find("h1").text()).toBe("This page does not exist.");
   });
 
   it("shows the system as operational when the API is ready", async () => {

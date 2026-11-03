@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
-import { ApiError, getCampaign, proposeSegment, type Campaign } from "../api/campaigns";
+import { errorMessage, getCampaign, proposeSegment, type Campaign } from "../api/campaigns";
 import AudienceRule from "../components/AudienceRule.vue";
 import MetricCard from "../components/MetricCard.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
@@ -27,10 +27,6 @@ const asOf = computed(() =>
     : "",
 );
 
-function messageOf(failure: unknown) {
-  return failure instanceof ApiError ? failure.message : "Something went wrong. Try again.";
-}
-
 function isAssumed(field: string) {
   return assumptions.value.some((assumption) => assumption.field === field);
 }
@@ -42,7 +38,7 @@ async function propose(input: { brief?: string; refinement?: string }, message: 
     campaign.value = await proposeSegment(props.campaignId, input);
     return true;
   } catch (failure) {
-    actionError.value = messageOf(failure);
+    actionError.value = errorMessage(failure);
     return false;
   } finally {
     busyMessage.value = "";
@@ -66,7 +62,7 @@ onMounted(async () => {
   try {
     campaign.value = await getCampaign(props.campaignId);
   } catch (failure) {
-    loadError.value = messageOf(failure);
+    loadError.value = errorMessage(failure);
   }
 });
 </script>
@@ -150,6 +146,7 @@ onMounted(async () => {
       <div class="row">
         <button class="button button--primary" type="button" disabled>Continue to content</button>
         <span class="muted small" data-testid="continue-hint">{{ continueHint }}</span>
+        <a class="exit small" :href="`/campaigns/${campaignId}`">Save and exit</a>
       </div>
     </template>
 
@@ -165,6 +162,10 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.exit {
+  margin-left: auto;
+}
+
 .audience {
   display: grid;
   gap: var(--space-6);
