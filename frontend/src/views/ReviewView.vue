@@ -37,12 +37,20 @@ const checks = computed<Check[]>(() => {
   const list: Check[] = [
     { label: "Audience", detail: `${current.audience.total.toLocaleString("en-US")} people match, and ${count} messages go to those who consented.`, ok: messageCount.value > 0 },
     { label: "Limits", detail: current.content ? "Every message fits its limit for the longest name in this audience." : "The messages are not written yet.", ok: Boolean(current.content) },
-    {
-      label: "Offer",
-      detail: current.content_warnings.length ? current.content_warnings.map((warning) => warning.message).join(" ") : current.offer_percent ? `Every message carries the ${current.offer_percent}% discount you entered.` : "Any discount matches the brief.",
-      ok: !current.content_warnings.length,
-    },
   ];
+  // A campaign without a discount has nothing to check here.
+  const hasDiscount = Boolean(current.offer_percent) || /%\s*\d|\d\s*%/.test(current.brief);
+  if (current.content_warnings.length || hasDiscount) {
+    list.push({
+      label: "Discount",
+      detail: current.content_warnings.length
+        ? current.content_warnings.map((warning) => warning.message).join(" ")
+        : current.offer_percent
+          ? `Every message carries the ${current.offer_percent}% discount you entered.`
+          : "Every message carries the discount from the brief.",
+      ok: !current.content_warnings.length,
+    });
+  }
   if (current.channels.includes("email") && current.content) {
     list.push({
       label: "Email link",

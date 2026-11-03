@@ -239,6 +239,7 @@ describe("campaign options", () => {
     const wrapper = mount(ComposeView);
     await wrapper.find("#brief").setValue("Spring sale");
     await wrapper.find("#campaign-tone").setValue("formal");
+    await wrapper.find("#campaign-has-offer").setValue(true);
     await wrapper.find("#campaign-offer").setValue(30);
     await wrapper.find("#campaign-quiet").setValue("7");
     await wrapper.find("form").trigger("submit");
@@ -247,10 +248,34 @@ describe("campaign options", () => {
     expect(sentBody(fetchMock)).toMatchObject({ tone: "formal", offer_percent: 30, not_messaged_within_days: 7 });
   });
 
+  it("keeps options closed and asks for no discount unless one is added", async () => {
+    const fetchMock = composeStub();
+    const wrapper = mount(ComposeView);
+    expect(wrapper.find("[data-testid=campaign-options]").attributes("open")).toBeUndefined();
+    expect(wrapper.find("#campaign-offer").exists()).toBe(false);
+    await wrapper.find("#brief").setValue("Spring sale");
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+
+    expect(sentBody(fetchMock)).not.toHaveProperty("offer_percent");
+  });
+
+  it("says which options are set while they are closed", async () => {
+    composeStub();
+    const wrapper = mount(ComposeView);
+    expect(wrapper.find("[data-testid=options-summary]").text()).toBe("Optional");
+    await wrapper.find("#campaign-tone").setValue("formal");
+    await wrapper.find("#campaign-has-offer").setValue(true);
+    await wrapper.find("#campaign-offer").setValue(30);
+
+    expect(wrapper.find("[data-testid=options-summary]").text()).toBe("Formal · 30% discount");
+  });
+
   it("says why a discount cannot be used", async () => {
     composeStub();
     const wrapper = mount(ComposeView);
     await wrapper.find("#brief").setValue("Spring sale");
+    await wrapper.find("#campaign-has-offer").setValue(true);
     await wrapper.find("#campaign-offer").setValue(150);
 
     expect(wrapper.find("button[type=submit]").attributes("disabled")).toBeDefined();

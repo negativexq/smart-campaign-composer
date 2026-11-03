@@ -151,6 +151,14 @@ describe("review", () => {
     expect(called(fetchMock, "POST", "/api/campaigns/c1/approve")).toHaveLength(2);
   });
 
+  it("lists a discount check only when the campaign has a discount", async () => {
+    const without = await open({ ...ready, brief: "Remind them about their cart", offer_percent: undefined });
+    expect(without.wrapper.text()).not.toContain("Discount");
+
+    const entered = await open({ ...ready, brief: "Remind them about their cart", offer_percent: 25 });
+    expect(entered.wrapper.text()).toContain("Every message carries the 25% discount you entered.");
+  });
+
   it("will not approve with blockers", async () => {
     const { wrapper } = await open({ ...ready, blockers: ["No users match."] });
     expect((wrapper.find("[data-testid=approve]").element as HTMLButtonElement).disabled).toBe(true);
