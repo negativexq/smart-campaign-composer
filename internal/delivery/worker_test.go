@@ -761,3 +761,32 @@ func TestARunningWorkerRecoversAndFinishesByItself(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAnEmailGoesOutDesignedWithAWayToUnsubscribe(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.drain(t)
+
+	emails := 0
+	for _, message := range r.sender.calls {
+		if message.Channel != "email" {
+			if message.HTML != "" || message.UnsubscribeURL != "" {
+				t.Fatalf("an SMS has no design: %+v", message)
+			}
+			continue
+		}
+		emails++
+		if !strings.HasPrefix(message.UnsubscribeURL, "https://app.example.com/api/unsubscribe/") {
+			t.Fatalf("unsubscribe: %q", message.UnsubscribeURL)
+		}
+		if !strings.Contains(message.HTML, "<table") || !strings.Contains(message.HTML, message.UnsubscribeURL) {
+			t.Fatalf("html: %s", message.HTML)
+		}
+		if !strings.Contains(message.Body, "Unsubscribe: "+message.UnsubscribeURL) || strings.Contains(message.Body, "<table") {
+			t.Fatalf("plain text: %s", message.Body)
+		}
+	}
+	if emails == 0 {
+		t.Fatal("no email was sent")
+	}
+}

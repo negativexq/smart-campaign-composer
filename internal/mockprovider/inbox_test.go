@@ -268,3 +268,18 @@ func TestWebhookDoesNotRetryAnswerThatWillNotChange(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+func TestInboxKeepsTheEmailAsItWasDesigned(t *testing.T) {
+	t.Parallel()
+	provider, sender := start(t, rolling(0.9))
+	designed := mail
+	designed.HTML = "<table><tr><td>Hello</td></tr></table>"
+	designed.UnsubscribeURL = "https://app.example.com/api/unsubscribe/token"
+	if _, err := sender.Send(context.Background(), designed); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	got := provider.Inbox("", "", 10).Messages[0]
+	if got.HTML != designed.HTML || got.UnsubscribeURL != designed.UnsubscribeURL || got.Body != designed.Body {
+		t.Fatalf("message: %+v", got)
+	}
+}

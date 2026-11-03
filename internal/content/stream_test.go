@@ -72,3 +72,13 @@ func TestFieldStreamNeverPanicsOnGarbage(t *testing.T) {
 		collect(raw)
 	}
 }
+
+func TestStreamEmitsTheEmailParts(t *testing.T) {
+	t.Parallel()
+	got := map[string]string{}
+	stream := content.NewFieldStream(func(field, text string) { got[field] += text })
+	stream.Write(`{"email_headline":"Back","email_preheader":"Soon","email_cta_label":"Go","email_cta_url":"https://a.example"}`)
+	if got[content.FieldEmailHeadline] != "Back" || got[content.FieldEmailPreheader] != "Soon" || got[content.FieldEmailCTALabel] != "Go" || got[content.FieldEmailCTAURL] != "https://a.example" {
+		t.Fatalf("got: %v", got)
+	}
+}
