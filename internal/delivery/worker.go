@@ -40,7 +40,12 @@ const (
 	// provider may have the message, so it can never be called a plain failure.
 	outcomeTimeout = "timeout"
 
+	reasonLeaseExpired = "lease_expired"
+	reasonNotSent      = "provider_unreachable"
+
+	recoverBatch   = 500
 	limiterPause   = time.Second
+	notSentPause   = 5 * time.Second
 	recordTimeout  = 5 * time.Second
 	finishInterval = time.Second
 	idlePause      = 200 * time.Millisecond
@@ -72,7 +77,11 @@ type Sender interface {
 // Limiter grants permission to send on a channel.
 type Limiter interface {
 	Wait(ctx context.Context, channel string) (time.Duration, error)
+	Pause(ctx context.Context, channel string, length time.Duration) error
 }
+
+// ErrNotSent means the call never reached the provider.
+var ErrNotSent = errors.New("message was not sent")
 
 // Config tunes a worker.
 type Config struct {
@@ -275,6 +284,14 @@ func (w *Worker) handle(ctx context.Context, item claim) (err error) {
 	}
 
 	result, sendErr := w.send(ctx, item)
+	if errors.Is(sendErr, ErrNotSent) {
+		// Certain that nothing went out, so this costs no attempt and the campaign
+		// can wait out a provider outage instead of using up its retries.
+		span.SetAttributes(attribute.String("delivery.outcome", reasonNotSent))
+		w.metrics.DeliveryAttempts.WithLabelValues(item.channel, reasonNotSent).Inc()
+		w.pause(ctx, item.channel, notSentPause)
+		return w.record(ctx, item, update{status: statusRetrying, attempts: item.attempts, retryIn: notSentPause, reason: reasonNotSent}, nil)
+	}
 	outcome, code := classify(result, sendErr)
 	span.SetAttributes(attribute.String("delivery.outcome", outcome))
 	w.metrics.DeliveryAttempts.WithLabelValues(item.channel, outcome).Inc()
@@ -292,12 +309,25 @@ func (w *Worker) handle(ctx context.Context, item claim) (err error) {
 	if next.status == statusRetrying {
 		w.metrics.DeliveryRetries.WithLabelValues(item.channel, outcome).Inc()
 	}
+	if outcome == outcomeRateLimited {
+		w.pause(ctx, item.channel, result.RetryAfter)
+	}
 	attemptError := ""
 	if sendErr != nil {
 		attemptError = "no response from the provider"
 	}
 	number := item.attempts + 1
 	return w.record(ctx, item, next, &attemptRow{number, code, outcome, attemptError})
+}
+
+// pause tells every worker to hold a channel. Failing to do so only means more
+// calls get a 429, so it must not stop the outcome from being recorded.
+func (w *Worker) pause(ctx context.Context, channel string, length time.Duration) {
+	pauseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+	defer cancel()
+	if err := w.limiter.Pause(pauseCtx, channel, length); err != nil {
+		slog.WarnContext(ctx, "pause channel", "channel", channel, "error", err)
+	}
 }
 
 func (w *Worker) startSpan(ctx context.Context, item claim) (context.Context, trace.Span) {
@@ -426,6 +456,59 @@ func (w *Worker) record(ctx context.Context, item claim, next update, attempt *a
 		return fmt.Errorf("commit record: %w", err)
 	}
 	return nil
+}
+
+// RecoverExpired takes back deliveries whose worker stopped without recording an
+// outcome. That worker may or may not have reached the provider, so the unfinished
+// call counts as an attempt without an answer. Retrying is safe because the
+// idempotency key stays the same, and counting it stops a message that keeps
+// crashing workers from doing so forever.
+func (w *Worker) RecoverExpired(ctx context.Context) (int, error) {
+	rows, err := w.db.Query(ctx, `
+		WITH expired AS (
+			SELECT id FROM campaign_deliveries
+			WHERE status = 'SENDING' AND lease_expires_at < now()
+			ORDER BY lease_expires_at
+			LIMIT $1
+			FOR UPDATE SKIP LOCKED
+		), recovered AS (
+			UPDATE campaign_deliveries d
+			SET status = CASE WHEN d.attempts + 1 >= $2 THEN 'UNKNOWN' ELSE 'RETRYING' END,
+			    attempts = d.attempts + 1, next_attempt_at = now(), last_error = $3,
+			    claim_token = NULL, lease_expires_at = NULL, updated_at = now()
+			FROM expired
+			WHERE d.id = expired.id
+			RETURNING d.id, d.attempts, d.channel
+		), recorded AS (
+			INSERT INTO delivery_attempts (delivery_id, attempt, outcome, error)
+			SELECT id, attempts, $4, 'worker stopped before recording an outcome' FROM recovered
+		)
+		SELECT channel, count(*) FROM recovered GROUP BY channel`,
+		recoverBatch, w.config.MaxAttempts, reasonLeaseExpired, outcomeTimeout)
+	if err != nil {
+		return 0, fmt.Errorf("recover deliveries: %w", err)
+	}
+	total := 0
+	for rows.Next() {
+		var (
+			channel string
+			count   int
+		)
+		if err := rows.Scan(&channel, &count); err != nil {
+			rows.Close()
+			return total, fmt.Errorf("recover deliveries: %w", err)
+		}
+		w.metrics.DeliveryRecovered.WithLabelValues(channel).Add(float64(count))
+		total += count
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return total, fmt.Errorf("recover deliveries: %w", err)
+	}
+	if total > 0 {
+		slog.WarnContext(ctx, "recovered deliveries from a stopped worker", "count", total)
+	}
+	return total, nil
 }
 
 // FinishCampaigns closes campaigns with nothing left to do. It runs after outcomes

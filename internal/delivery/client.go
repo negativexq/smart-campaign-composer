@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -42,6 +44,9 @@ func (s *HTTPSender) Send(ctx context.Context, message Message) (Result, error) 
 
 	response, err := s.client.Do(request)
 	if err != nil {
+		if neverConnected(err) {
+			return Result{}, fmt.Errorf("call provider: %w: %w", ErrNotSent, err)
+		}
 		return Result{}, fmt.Errorf("call provider: %w", err)
 	}
 	defer response.Body.Close()
@@ -61,6 +66,13 @@ func (s *HTTPSender) Send(ctx context.Context, message Message) (Result, error) 
 		result.MessageID, result.Duplicate = body.ID, body.Duplicate
 	}
 	return result, nil
+}
+
+// neverConnected is true only when the connection itself failed, before any of the
+// message could leave. Anything later may have reached the provider.
+func neverConnected(err error) bool {
+	var failure *net.OpError
+	return errors.As(err, &failure) && failure.Op == "dial"
 }
 
 func retryAfter(header string) time.Duration {

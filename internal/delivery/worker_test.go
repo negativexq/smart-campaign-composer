@@ -658,6 +658,10 @@ func TestParallelRecoveryCountsEachMessageOnce(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, always(accepted, nil))
 	r.crash(t, 20, 0, "-1 second")
+	crashed := r.statuses(t)["SENDING"]
+	if crashed < 2 {
+		t.Fatalf("only %d deliveries to recover", crashed)
+	}
 	var (
 		wg    sync.WaitGroup
 		mu    sync.Mutex
@@ -679,8 +683,8 @@ func TestParallelRecoveryCountsEachMessageOnce(t *testing.T) {
 	if err := r.pool.QueryRow(context.Background(), `SELECT count(*) FROM delivery_attempts`).Scan(&rows); err != nil {
 		t.Fatal(err)
 	}
-	if total != 20 || rows != 20 {
-		t.Fatalf("recovered %d, attempts %d", total, rows)
+	if total != crashed || rows != crashed {
+		t.Fatalf("crashed %d, recovered %d, attempts %d", crashed, total, rows)
 	}
 }
 

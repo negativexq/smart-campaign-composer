@@ -42,6 +42,7 @@ type Metrics struct {
 	DeliveryDuplicates    *prometheus.CounterVec
 	DeliveryQueueDepth    *prometheus.GaugeVec
 	DeliveryRetries       *prometheus.CounterVec
+	DeliveryRecovered     *prometheus.CounterVec
 	DeliveryRateLimitWait *prometheus.HistogramVec
 }
 
@@ -96,6 +97,10 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 		DeliveryQueueDepth: factory.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "campaign_delivery_queue_depth",
 			Help: "Deliveries waiting to be sent or retried.",
+		}, []string{"channel"}),
+		DeliveryRecovered: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "campaign_delivery_recovered_total",
+			Help: "Deliveries taken back after their worker stopped without recording an outcome.",
 		}, []string{"channel"}),
 		DeliveryRetries: factory.NewCounterVec(prometheus.CounterOpts{
 			Name: "campaign_delivery_retry_total",

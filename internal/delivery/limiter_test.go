@@ -153,4 +153,3 @@ func TestPauseFailsWhenRedisIsDown(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
-
