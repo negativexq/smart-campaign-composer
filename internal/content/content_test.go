@@ -230,3 +230,60 @@ func TestRenderFillsTheNameOrTheFallback(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestOnlyTheChosenChannelsAreChecked(t *testing.T) {
+	t.Parallel()
+	smsOnly := content.Limits{SkipEmail: true}
+	if issues := content.CheckMessages(content.Content{SMS: "Hi"}, smsOnly); len(issues) != 0 {
+		t.Fatalf("an unused email must not be required: %v", issues)
+	}
+	if issues := content.CheckMessages(content.Content{EmailSubject: "S", EmailBody: "B"}, smsOnly); len(issues) != 1 || issues[0].Field != content.FieldSMS {
+		t.Fatalf("the chosen channel still is: %v", issues)
+	}
+	emailOnly := content.Limits{SkipSMS: true}
+	if issues := content.CheckMessages(content.Content{EmailSubject: "S", EmailBody: "B"}, emailOnly); len(issues) != 0 {
+		t.Fatalf("an unused SMS must not be required: %v", issues)
+	}
+}
+
+func TestGeneratedTextForAnUnusedChannelIsDropped(t *testing.T) {
+	t.Parallel()
+	raw := `{"sms":"Hi","email_subject":"Sneaky","email_body":"Sneaky"}`
+	got, err := content.ParseGenerated([]byte(raw), content.Limits{SkipEmail: true}, "")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got != (content.Content{SMS: "Hi"}) {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestADiscountIsOnlyRequiredInTheChosenChannels(t *testing.T) {
+	t.Parallel()
+	got, err := content.ParseGenerated([]byte(`{"sms":"Hi, 20% off"}`), content.Limits{SkipEmail: true}, "20% off")
+	if err != nil || got.SMS == "" {
+		t.Fatalf("parse: %+v %v", got, err)
+	}
+	_, err = content.ParseGenerated([]byte(`{"sms":"Hi"}`), content.Limits{SkipEmail: true}, "20% off")
+	if err == nil {
+		t.Fatal("the chosen channel must still carry the offer")
+	}
+}
+
+func TestSchemaAsksOnlyForTheChosenChannels(t *testing.T) {
+	t.Parallel()
+	fields := func(schema map[string]any) []string { return schema["required"].([]string) }
+	if got := fields(content.JSONSchema()); len(got) != 3 {
+		t.Fatalf("default: %v", got)
+	}
+	if got := fields(content.JSONSchema("sms")); len(got) != 1 || got[0] != content.FieldSMS {
+		t.Fatalf("sms: %v", got)
+	}
+	email := content.JSONSchema("email")
+	if got := fields(email); len(got) != 2 {
+		t.Fatalf("email: %v", got)
+	}
+	if _, found := email["properties"].(map[string]any)[content.FieldSMS]; found {
+		t.Fatal("sms must not be offered")
+	}
+}
