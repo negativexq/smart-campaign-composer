@@ -220,3 +220,13 @@ func TestSchemaForbidsExtraFields(t *testing.T) {
 		t.Fatalf("required: %v", schema["required"])
 	}
 }
+
+func TestRenderFillsTheNameOrTheFallback(t *testing.T) {
+	t.Parallel()
+	if got := content.Render("Hi {{first_name}}, {{ first_name }}!", "Ayşe"); got != "Hi Ayşe, Ayşe!" {
+		t.Fatalf("got %q", got)
+	}
+	if got := content.Render("Hi {{first_name}}", " "); got != "Hi "+content.FirstNameFallback {
+		t.Fatalf("got %q", got)
+	}
+}

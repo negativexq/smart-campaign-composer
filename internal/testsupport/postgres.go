@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/negativexq/smart-campaign-composer/internal/db"
 )
@@ -61,6 +62,32 @@ func NewDatabaseURL(t *testing.T) string {
 		t.Fatalf("migrate %s: %v", name, err)
 	}
 	return databaseURL
+}
+
+// NewRedis connects to the test Redis. It is shared between tests, so give keys
+// a prefix from Unique.
+func NewRedis(t *testing.T) *redis.Client {
+	t.Helper()
+	address := os.Getenv("TEST_REDIS_URL")
+	if address == "" {
+		address = "redis://localhost:56379/0"
+	}
+	options, err := redis.ParseURL(address)
+	if err != nil {
+		t.Fatalf("parse test redis url: %v", err)
+	}
+	client := redis.NewClient(options)
+	t.Cleanup(func() { client.Close() })
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		t.Fatalf("connect to test redis (run `make test-env-up`): %v", err)
+	}
+	return client
+}
+
+// Unique returns a value no other test run shares.
+func Unique(t *testing.T) string {
+	t.Helper()
+	return randomSuffix(t)
 }
 
 func connect(t *testing.T, databaseURL string) *pgxpool.Pool {

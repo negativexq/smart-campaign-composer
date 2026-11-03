@@ -151,6 +151,20 @@ func RenderedLength(template string, nameLength int) int {
 	return length
 }
 
+// Render fills in the variables for one person. A missing name gets the fallback,
+// so nobody receives a message with a gap in it.
+func Render(template, firstName string) string {
+	if strings.TrimSpace(firstName) == "" {
+		firstName = FirstNameFallback
+	}
+	return variablePattern.ReplaceAllStringFunc(template, func(variable string) string {
+		if variablePattern.FindStringSubmatch(variable)[1] == firstNameVariable {
+			return firstName
+		}
+		return variable
+	})
+}
+
 // CheckDiscounts compares percentages in the messages with those in source.
 // Each message must carry the offer and none may mention another one.
 func CheckDiscounts(c Content, source string) []Issue {

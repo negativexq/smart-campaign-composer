@@ -83,6 +83,7 @@ type View struct {
 	ContentLimits content.Limits `json:"content_limits"`
 	// ContentWarnings are differences from the brief for a person to judge.
 	ContentWarnings []content.Issue `json:"content_warnings"`
+	ApprovedAt      time.Time       `json:"approved_at,omitzero"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 }
@@ -474,14 +475,15 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 		encoded      []byte
 		storedText   []byte
 		audienceAsOf *time.Time
+		approvedAt   *time.Time
 	)
 	err := s.db.QueryRow(ctx, `
-		SELECT c.name, c.name_source, c.brief, c.status, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of
+		SELECT c.name, c.name_source, c.brief, c.status, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf)
+		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}
@@ -500,6 +502,9 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 	}
 	if audienceAsOf != nil {
 		view.AudienceAsOf = *audienceAsOf
+	}
+	if approvedAt != nil {
+		view.ApprovedAt = *approvedAt
 	}
 	view.Proposal = &segment.Proposal{}
 	if err := json.Unmarshal(encoded, view.Proposal); err != nil {

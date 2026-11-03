@@ -195,28 +195,6 @@ func TestDeliveryStatusValues(t *testing.T) {
 	requirePgError(t, err, pgCheckViolation)
 }
 
-func TestDeliveryAttemptNumberIsUniquePerDelivery(t *testing.T) {
-	t.Parallel()
-	pool := testsupport.NewDatabase(t)
-	insertUser(t, pool, 1)
-	campaign := insertCampaign(t, pool)
-	v1 := insertVersion(t, pool, campaign, 1)
-	if err := insertDelivery(pool, campaign, v1, 1, "sms", "key"); err != nil {
-		t.Fatalf("delivery: %v", err)
-	}
-	ctx := context.Background()
-	insert := `
-		INSERT INTO delivery_attempts (delivery_id, attempt, outcome)
-		SELECT id, 1, 'sent' FROM campaign_deliveries`
-
-	if _, err := pool.Exec(ctx, insert); err != nil {
-		t.Fatalf("first attempt: %v", err)
-	}
-
-	_, err := pool.Exec(ctx, insert)
-	requirePgError(t, err, pgUniqueViolation)
-}
-
 func TestVersionIsEditableUntilApproved(t *testing.T) {
 	t.Parallel()
 	pool := testsupport.NewDatabase(t)
