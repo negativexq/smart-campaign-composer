@@ -216,6 +216,7 @@ const statusLabels = { checking: "Checking", operational: "Operational", unavail
 
 @media (max-width: 760px) {
   .shell {
+    grid-template-rows: auto 1fr;
     grid-template-columns: minmax(0, 1fr);
   }
 
