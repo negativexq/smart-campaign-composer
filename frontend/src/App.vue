@@ -15,6 +15,7 @@ import ComposeView from "./views/ComposeView.vue";
 import ContentView from "./views/ContentView.vue";
 import DesignView from "./views/DesignView.vue";
 import OverviewView from "./views/OverviewView.vue";
+import ReviewView from "./views/ReviewView.vue";
 
 const route = computed(() => {
   const path = currentPath.value;
@@ -26,6 +27,8 @@ const route = computed(() => {
   if (edit) return { name: "edit", id: edit[1] };
   const content = path.match(/^\/campaigns\/([^/]+)\/content$/);
   if (content) return { name: "content", id: content[1] };
+  const review = path.match(/^\/campaigns\/([^/]+)\/review$/);
+  if (review) return { name: "review", id: review[1] };
   const detail = path.match(/^\/campaigns\/([^/]+)$/);
   if (detail) return { name: "detail", id: detail[1] };
   return { name: "not-found", id: "" };
@@ -69,7 +72,7 @@ onMounted(async () => {
   </AppShell>
 
   <AppShell
-    v-else-if="route.name === 'content'"
+    v-else-if="route.name === 'content' || route.name === 'review'"
     active-path="/campaigns"
     title="New campaign"
     :campaign-status="campaignStatusMeta(wizardStatus).label"
@@ -77,11 +80,12 @@ onMounted(async () => {
   >
     <template #topbar>
       <div class="topbar-actions">
-        <CampaignStepper :steps="steps" current-id="content" />
+        <CampaignStepper :steps="steps" :current-id="route.name" />
         <AiModeBadge v-if="aiConfig" :config="aiConfig" />
       </div>
     </template>
-    <ContentView :key="route.id" :campaign-id="route.id" @status="wizardStatus = $event" />
+    <ContentView v-if="route.name === 'content'" :key="route.id" :campaign-id="route.id" @status="wizardStatus = $event" />
+    <ReviewView v-else :key="route.id" :campaign-id="route.id" @status="wizardStatus = $event" />
   </AppShell>
 
   <AppShell

@@ -9,6 +9,57 @@ export type Messages = Record<MessageField, string>;
 export type ContentIssue = { field: string; reason: string; message: string };
 export type SampleRecipient = { id: number; label: string; first_name: string };
 
+export type ScheduleSpec = {
+  kind: "once" | "interval" | "weekly";
+  at?: string;
+  every_hours?: number;
+  starts_at?: string;
+  days?: string[];
+  time?: string;
+  timezone?: string;
+  ends_at?: string;
+};
+
+export type CampaignSchedule = {
+  spec: ScheduleSpec;
+  description: string;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  runs: number;
+};
+
+export type Progress = {
+  total: number;
+  processed: number;
+  attempts: number;
+  by_status: Record<string, number>;
+  by_channel: Record<string, Record<string, number>>;
+  responses: Record<string, number>;
+};
+
+export type Delivery = {
+  id: string;
+  user_id: number;
+  first_name: string;
+  channel: string;
+  status: string;
+  attempts: number;
+  response_code: number | null;
+  reason: string;
+  provider_message_id: string;
+  next_attempt_at: string;
+  sent_at: string | null;
+  updated_at: string;
+};
+
+export type DeliveryAttempt = {
+  attempt: number;
+  response_code: number | null;
+  outcome: string;
+  error: string;
+  occurred_at: string;
+};
+
 export type Campaign = {
   id: string;
   name: string;
@@ -24,6 +75,8 @@ export type Campaign = {
   content?: Messages & { edited: MessageField[] };
   content_limits: { sms_name_length: number; email_name_length: number };
   content_warnings: ContentIssue[];
+  approved_at?: string;
+  schedule?: CampaignSchedule;
   created_at: string;
   updated_at: string;
 };
@@ -139,6 +192,38 @@ export function saveContent(id: string, messages: Messages): Promise<Campaign> {
 
 export async function getSampleRecipients(id: string): Promise<SampleRecipient[]> {
   return (await request<{ recipients: SampleRecipient[] }>(`/api/campaigns/${encodeURIComponent(id)}/sample-recipients`)).recipients;
+}
+
+export function approveCampaign(id: string): Promise<Campaign> {
+  return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/approve`, {});
+}
+
+export function dispatchCampaign(id: string): Promise<Campaign> {
+  return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/dispatch`, {});
+}
+
+export function scheduleCampaign(id: string, spec: ScheduleSpec): Promise<Campaign> {
+  return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/schedule`, spec);
+}
+
+export function cancelSchedule(id: string): Promise<Campaign> {
+  return request<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/schedule`, { method: "DELETE" });
+}
+
+export function getProgress(id: string): Promise<Progress> {
+  return request<Progress>(`/api/campaigns/${encodeURIComponent(id)}/progress`);
+}
+
+export async function getDeliveries(id: string, filter: { status: string; channel: string; limit: number }): Promise<Delivery[]> {
+  const params = new URLSearchParams({ limit: String(filter.limit) });
+  if (filter.status) params.set("status", filter.status);
+  if (filter.channel) params.set("channel", filter.channel);
+  return (await request<{ deliveries: Delivery[] }>(`/api/campaigns/${encodeURIComponent(id)}/deliveries?${params}`)).deliveries;
+}
+
+export async function getDeliveryAttempts(id: string, delivery: string): Promise<DeliveryAttempt[]> {
+  const path = `/api/campaigns/${encodeURIComponent(id)}/deliveries/${encodeURIComponent(delivery)}/attempts`;
+  return (await request<{ attempts: DeliveryAttempt[] }>(path)).attempts;
 }
 
 export type GenerationHandlers = {

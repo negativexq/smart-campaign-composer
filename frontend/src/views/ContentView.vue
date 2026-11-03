@@ -17,6 +17,7 @@ import EmailPreview from "../components/EmailPreview.vue";
 import MessageEditor from "../components/MessageEditor.vue";
 import PhonePreview from "../components/PhonePreview.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
+import { isDraftStatus } from "../lib/campaignStatus";
 
 const props = defineProps<{ campaignId: string }>();
 const emit = defineEmits<{ status: [status: string] }>();
@@ -133,7 +134,7 @@ onMounted(async () => {
     return;
   }
   const current = campaign.value;
-  if (!current?.proposal || current.blockers.length) return;
+  if (!current?.proposal || current.blockers.length || !(isDraftStatus(current.status) || current.status === "GENERATING")) return;
   if (current.content) fill(current.content);
   // A person who left after a failure decides for themselves when to try again.
   else if (current.status === "GENERATION_FAILED") generationError.value = "The last attempt to write these messages failed.";
@@ -148,6 +149,10 @@ onBeforeUnmount(() => controller?.abort());
     {{ loadError }} <a href="/campaigns">Back to campaigns</a>
   </ValidationNotice>
   <p v-else-if="!campaign" class="muted" role="status">Loading campaign...</p>
+
+  <ValidationNotice v-else-if="!isDraftStatus(campaign.status) && campaign.status !== 'GENERATING'" tone="info" title="These messages are approved">
+    Approved messages can no longer change. <a :href="`/campaigns/${campaignId}`">Open the campaign</a>
+  </ValidationNotice>
 
   <ValidationNotice v-else-if="!campaign.proposal || campaign.blockers.length" tone="warning" title="The audience comes first">
     Messages are written for a checked audience. <a :href="`/campaigns/${campaignId}/edit`">Go to the audience</a>
@@ -233,8 +238,13 @@ onBeforeUnmount(() => controller?.abort());
 
         <div class="row actions">
           <a class="small" :href="`/campaigns/${campaignId}/edit`">Back to audience</a>
-          <button class="button button--primary" type="button" disabled>Continue to review</button>
-          <span class="muted small" data-testid="continue-hint">Approval is not available yet.</span>
+          <a v-if="stored && !dirty && !generating" class="button button--primary link-button" :href="`/campaigns/${campaignId}/review`" data-testid="continue-review">
+            Continue to review
+          </a>
+          <template v-else>
+            <button class="button button--primary" type="button" disabled>Continue to review</button>
+            <span v-if="dirty" class="muted small" data-testid="continue-hint">Save your changes to continue.</span>
+          </template>
           <a class="exit small" :href="`/campaigns/${campaignId}`">Save and exit</a>
         </div>
       </div>
@@ -250,6 +260,11 @@ onBeforeUnmount(() => controller?.abort());
 </template>
 
 <style scoped>
+.link-button {
+  display: inline-flex;
+  text-decoration: none;
+}
+
 .content {
   display: grid;
   gap: var(--space-6);

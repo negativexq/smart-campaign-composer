@@ -1,11 +1,24 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
-import { errorMessage, getActivity, getCampaign, type ActivityEntry, type Campaign, type MessageField } from "../api/campaigns";
+import {
+  cancelSchedule,
+  dispatchCampaign,
+  errorMessage,
+  getActivity,
+  getCampaign,
+  getProgress,
+  type ActivityEntry,
+  type Campaign,
+  type MessageField,
+  type Progress,
+} from "../api/campaigns";
 import ActivityTimeline from "../components/ActivityTimeline.vue";
 import AudienceRule from "../components/AudienceRule.vue";
 import CampaignName from "../components/CampaignName.vue";
 import CampaignStatusBadge from "../components/CampaignStatusBadge.vue";
+import DeliveriesPanel from "../components/DeliveriesPanel.vue";
+import DeliveryProgress from "../components/DeliveryProgress.vue";
 import MetricCard from "../components/MetricCard.vue";
 import OriginTag from "../components/OriginTag.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
@@ -14,25 +27,33 @@ import { formatDateTime } from "../lib/format";
 
 const props = defineProps<{ campaignId: string }>();
 
-type Tab = "overview" | "audience" | "content" | "activity";
+type Tab = "overview" | "audience" | "content" | "deliveries" | "activity";
+
+const POLL_INTERVAL = 2000;
 
 const campaign = ref<Campaign | null>(null);
 const activity = ref<ActivityEntry[] | null>(null);
 const error = ref("");
 const activityError = ref("");
 const tab = ref<Tab>("overview");
+const progress = ref<Progress | null>(null);
+const refreshKey = ref(0);
+const acting = ref(false);
+const actionError = ref("");
+let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
-// Deliveries joins these tabs when that stage has real data.
 const tabs = computed(() => {
   const list: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "audience", label: "Audience" },
   ];
   if (campaign.value?.content) list.push({ id: "content", label: "Content" });
+  if (progress.value?.total) list.push({ id: "deliveries", label: "Deliveries" });
   list.push({ id: "activity", label: "Activity" });
   return list;
 });
 
+const isLive = computed(() => campaign.value?.status === "DISPATCHING");
 const isDraft = computed(() => (campaign.value ? isDraftStatus(campaign.value.status) : false));
 const editHref = computed(() => `/campaigns/${props.campaignId}/${campaign.value?.content ? "content" : "edit"}`);
 const assumptions = computed(() => campaign.value?.proposal?.assumptions ?? []);
@@ -43,6 +64,43 @@ function isAssumed(field: string) {
 
 function originOf(field: MessageField) {
   return campaign.value?.content?.edited.includes(field) ? "user" : "ai";
+}
+
+async function refresh() {
+  const [updated, counts, entries] = await Promise.all([getCampaign(props.campaignId), getProgress(props.campaignId), getActivity(props.campaignId)]);
+  campaign.value = updated;
+  progress.value = counts;
+  activity.value = entries;
+  refreshKey.value++;
+}
+
+// Reads aggregates from the database, so it costs the same however many messages
+// are moving. It keeps going through a failed read and stops when sending ends.
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  if (!isLive.value) return;
+  pollTimer = setTimeout(async () => {
+    try {
+      await refresh();
+    } catch {
+      // The next read tries again.
+    }
+    schedulePoll();
+  }, POLL_INTERVAL);
+}
+
+async function act(action: () => Promise<unknown>) {
+  acting.value = true;
+  actionError.value = "";
+  try {
+    await action();
+    await refresh();
+    schedulePoll();
+  } catch (failure) {
+    actionError.value = errorMessage(failure);
+  } finally {
+    acting.value = false;
+  }
 }
 
 function onRenamed(updated: Campaign) {
@@ -62,7 +120,15 @@ onMounted(async () => {
   } catch (failure) {
     activityError.value = errorMessage(failure);
   }
+  try {
+    progress.value = await getProgress(props.campaignId);
+  } catch {
+    // The rest of the page is still useful without the counts.
+  }
+  schedulePoll();
 });
+
+onBeforeUnmount(() => clearTimeout(pollTimer));
 </script>
 
 <template>
@@ -87,6 +153,10 @@ onMounted(async () => {
       >
         Continue editing
       </a>
+      <div v-else-if="campaign.status === 'APPROVED'" class="actions">
+        <a class="button button--secondary link-button" :href="`/campaigns/${campaignId}/review`" data-testid="choose-time">Choose a time</a>
+        <button class="button button--primary" type="button" data-testid="send-now" :disabled="acting" @click="act(() => dispatchCampaign(campaignId))">Send now</button>
+      </div>
     </header>
 
     <div class="tabs" role="tablist" aria-label="Campaign sections">
@@ -106,7 +176,22 @@ onMounted(async () => {
       </button>
     </div>
 
+    <ValidationNotice v-if="actionError" tone="error" title="This did not go through">{{ actionError }}</ValidationNotice>
+
     <section v-if="tab === 'overview'" id="panel-overview" class="panel" role="tabpanel" aria-labelledby="tab-overview">
+      <section v-if="campaign.schedule" class="schedule card" data-testid="schedule-card">
+        <div class="schedule-body">
+          <span class="muted small">Schedule</span>
+          <p data-testid="schedule-description">{{ campaign.schedule.description }}</p>
+          <p v-if="campaign.schedule.next_run_at" class="muted small" data-testid="next-run">Next send {{ formatDateTime(campaign.schedule.next_run_at) }}</p>
+          <p v-else class="muted small">No more sends are planned.</p>
+          <p v-if="campaign.schedule.runs" class="muted small">Sent {{ campaign.schedule.runs }} {{ campaign.schedule.runs === 1 ? "time" : "times" }} so far. Nobody receives this message twice.</p>
+        </div>
+        <button v-if="campaign.schedule.next_run_at" class="button button--secondary" type="button" data-testid="cancel-schedule" :disabled="acting" @click="act(() => cancelSchedule(campaignId))">
+          Cancel schedule
+        </button>
+      </section>
+      <DeliveryProgress v-if="progress?.total" :progress="progress" :live="isLive" />
       <section class="brief card" aria-label="Campaign brief">
         <span class="muted small">Brief</span>
         <p data-testid="brief-text">{{ campaign.brief }}</p>
@@ -159,6 +244,10 @@ onMounted(async () => {
       </article>
     </section>
 
+    <section v-else-if="tab === 'deliveries'" id="panel-deliveries" class="panel" role="tabpanel" aria-labelledby="tab-deliveries">
+      <DeliveriesPanel :campaign-id="campaignId" :refresh-key="refreshKey" />
+    </section>
+
     <section v-else id="panel-activity" class="panel" role="tabpanel" aria-labelledby="tab-activity">
       <ValidationNotice v-if="activityError" tone="error" title="We could not load the activity">{{ activityError }}</ValidationNotice>
       <p v-else-if="!activity" class="muted" role="status">Loading activity...</p>
@@ -188,6 +277,26 @@ onMounted(async () => {
   gap: var(--space-2);
   justify-items: start;
   min-width: 240px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.schedule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.schedule-body {
+  display: grid;
+  gap: var(--space-1);
 }
 
 .brief {

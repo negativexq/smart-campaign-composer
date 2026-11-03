@@ -6,6 +6,7 @@ const META: Record<string, { label: string; tone: StatusTone }> = {
   READY_FOR_REVIEW: { label: "Ready for review", tone: "primary" },
   GENERATION_FAILED: { label: "Generation failed", tone: "error" },
   APPROVED: { label: "Approved", tone: "primary" },
+  SCHEDULED: { label: "Scheduled", tone: "primary" },
   DISPATCHING: { label: "Sending", tone: "primary" },
   COMPLETED: { label: "Completed", tone: "success" },
   COMPLETED_WITH_FAILURES: { label: "Completed with failures", tone: "warning" },
@@ -17,3 +18,5 @@ export function campaignStatusMeta(status: string) {
 }
 
 export const isDraftStatus = (status: string) => ["DRAFT", "READY_FOR_REVIEW", "GENERATION_FAILED"].includes(status);
+
+export const isFinishedStatus = (status: string) => ["COMPLETED", "COMPLETED_WITH_FAILURES"].includes(status);
