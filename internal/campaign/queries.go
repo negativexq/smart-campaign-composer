@@ -72,17 +72,25 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 		SELECT c.id::text, c.name, c.brief, c.status,
 		       COALESCE(d.channels, '{}'), COALESCE(d.total, 0), COALESCE(d.processed, 0),
 		       c.created_at, c.updated_at
-		FROM campaigns c
+		-- Choosing the page first means only its campaigns get counted.
+		FROM (
+			SELECT * FROM campaigns c
+			WHERE ($1::text[] IS NULL OR c.status = ANY($1))
+			  AND ($2 = '' OR c.name ILIKE '%' || $2 || '%' ESCAPE '\' OR c.brief ILIKE '%' || $2 || '%' ESCAPE '\')
+			ORDER BY c.created_at DESC, c.id
+			LIMIT $3
+		) c
 		LEFT JOIN LATERAL (
 			SELECT array_agg(DISTINCT channel ORDER BY channel) AS channels,
-			       count(*) AS total,
-			       count(*) FILTER (WHERE status IN ('SENT', 'FAILED', 'SKIPPED', 'UNKNOWN')) AS processed
-			FROM campaign_deliveries WHERE campaign_id = c.id
+			       sum(n)::bigint AS total,
+			       (sum(n) FILTER (WHERE status IN ('SENT', 'FAILED', 'SKIPPED', 'UNKNOWN')))::bigint AS processed
+			FROM (
+				SELECT channel, status, count(*) AS n
+				FROM campaign_deliveries WHERE campaign_id = c.id
+				GROUP BY channel, status
+			) counts
 		) d ON true
-		WHERE ($1::text[] IS NULL OR c.status = ANY($1))
-		  AND ($2 = '' OR c.name ILIKE '%' || $2 || '%' ESCAPE '\' OR c.brief ILIKE '%' || $2 || '%' ESCAPE '\')
-		ORDER BY c.created_at DESC, c.id
-		LIMIT $3`, statuses, escapeLike(strings.TrimSpace(filter.Query)), limit)
+		ORDER BY c.created_at DESC, c.id`, statuses, escapeLike(strings.TrimSpace(filter.Query)), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list campaigns: %w", err)
 	}

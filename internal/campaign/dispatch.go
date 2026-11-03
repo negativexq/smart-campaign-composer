@@ -274,8 +274,8 @@ func (s *Service) Progress(ctx context.Context, id string) (Progress, error) {
 
 	responses, err := s.db.Query(ctx, `
 		SELECT a.response_code::text, count(*)
-		FROM delivery_attempts a JOIN campaign_deliveries d ON d.id = a.delivery_id
-		WHERE d.campaign_id = $1 AND a.response_code IS NOT NULL
+		FROM delivery_attempts a
+		WHERE a.campaign_id = $1 AND a.response_code IS NOT NULL
 		GROUP BY a.response_code`, id)
 	if err != nil {
 		return Progress{}, fmt.Errorf("read responses: %w", err)

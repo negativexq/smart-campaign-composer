@@ -210,8 +210,11 @@ func (w *Worker) claim(ctx context.Context) ([]claim, error) {
 		WITH next AS (
 			SELECT d.id
 			FROM campaign_deliveries d
-			JOIN campaigns c ON c.id = d.campaign_id
-			WHERE d.status IN ('QUEUED', 'RETRYING') AND d.next_attempt_at <= now() AND c.status = 'DISPATCHING'
+			-- A subquery rather than a join: with one campaign sending, a join makes the
+			-- planner fetch and sort its whole queue to take a few rows, which took 700 ms
+			-- with a million waiting. This way it reads the claimable index in order.
+			WHERE d.status IN ('QUEUED', 'RETRYING') AND d.next_attempt_at <= now()
+			  AND (SELECT c.status FROM campaigns c WHERE c.id = d.campaign_id) = 'DISPATCHING'
 			ORDER BY d.next_attempt_at
 			LIMIT $1
 			FOR UPDATE OF d SKIP LOCKED
@@ -450,8 +453,8 @@ func (w *Worker) record(ctx context.Context, item claim, next update, attempt *a
 		return nil
 	}
 	if attempt != nil {
-		if _, err := tx.Exec(ctx, `INSERT INTO delivery_attempts (delivery_id, attempt, response_code, outcome, error) VALUES ($1, $2, $3, $4, NULLIF($5, ''))`,
-			item.id, attempt.number, attempt.code, attempt.outcome, attempt.err); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO delivery_attempts (delivery_id, campaign_id, attempt, response_code, outcome, error) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))`,
+			item.id, item.campaignID, attempt.number, attempt.code, attempt.outcome, attempt.err); err != nil {
 			return fmt.Errorf("record attempt: %w", err)
 		}
 	}
@@ -481,10 +484,10 @@ func (w *Worker) RecoverExpired(ctx context.Context) (int, error) {
 			    claim_token = NULL, lease_expires_at = NULL, updated_at = now()
 			FROM expired
 			WHERE d.id = expired.id
-			RETURNING d.id, d.attempts, d.channel
+			RETURNING d.id, d.campaign_id, d.attempts, d.channel
 		), recorded AS (
-			INSERT INTO delivery_attempts (delivery_id, attempt, outcome, error)
-			SELECT id, attempts, $4, 'worker stopped before recording an outcome' FROM recovered
+			INSERT INTO delivery_attempts (delivery_id, campaign_id, attempt, outcome, error)
+			SELECT id, campaign_id, attempts, $4, 'worker stopped before recording an outcome' FROM recovered
 		)
 		SELECT channel, count(*) FROM recovered GROUP BY channel`,
 		recoverBatch, w.config.MaxAttempts, reasonLeaseExpired, outcomeTimeout)

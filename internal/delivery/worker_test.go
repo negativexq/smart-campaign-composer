@@ -761,4 +761,3 @@ func TestARunningWorkerRecoversAndFinishesByItself(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-

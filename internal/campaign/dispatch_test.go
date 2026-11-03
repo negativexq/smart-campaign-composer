@@ -7,12 +7,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/negativexq/smart-campaign-composer/internal/ai"
 	"github.com/negativexq/smart-campaign-composer/internal/campaign"
 	"github.com/negativexq/smart-campaign-composer/internal/content"
 	"github.com/negativexq/smart-campaign-composer/internal/schedule"
 	"github.com/negativexq/smart-campaign-composer/internal/seed"
+	"github.com/negativexq/smart-campaign-composer/internal/telemetry"
 )
 
 func readyCampaign(t *testing.T) (*harness, string) {
@@ -516,5 +519,56 @@ func TestScheduledCampaignsCountAsActive(t *testing.T) {
 	active, err := h.service.List(ctx, campaign.ListFilter{Group: "active"})
 	if err != nil || len(active) != 1 {
 		t.Fatalf("active: %d %v", len(active), err)
+	}
+}
+
+// Nothing about a schedule lives in the process: a new service and scheduler on the
+// same database, as after a restart, must carry on from what is stored.
+func TestSchedulesOutliveTheProcessThatMadeThem(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: nextHour()}); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+
+	restarted := campaign.NewService(h.pool, ai.NewMock(), telemetry.NewMetrics(prometheus.NewRegistry()),
+		noop.NewTracerProvider().Tracer("test"), func() time.Time { return referenceTime })
+	view, err := restarted.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Status != "SCHEDULED" || view.Schedule == nil || view.Schedule.NextRunAt == nil || !view.Schedule.NextRunAt.Equal(*nextHour()) {
+		t.Fatalf("after a restart: %s %+v", view.Status, view.Schedule)
+	}
+
+	// The time passed while nothing was running: it still goes out, and only once.
+	late := scheduler(h, nextHour().Add(6*time.Hour))
+	if ran, err := late.RunDue(ctx); err != nil || ran != 1 {
+		t.Fatalf("missed run: %d %v", ran, err)
+	}
+	if ran, err := late.RunDue(ctx); err != nil || ran != 0 {
+		t.Fatalf("second pass: %d %v", ran, err)
+	}
+}
+
+func TestMissedIntervalsBecomeOneRunAndThenStayOnTime(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindInterval, EveryHours: 1}); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+
+	later := referenceTime.Add(10*time.Hour + 30*time.Minute)
+	if ran, err := scheduler(h, later).RunDue(ctx); err != nil || ran != 1 {
+		t.Fatalf("after downtime: %d %v", ran, err)
+	}
+	view, err := h.service.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Schedule.Runs != 1 || view.Schedule.NextRunAt == nil || !view.Schedule.NextRunAt.After(later) {
+		t.Fatalf("schedule: %+v", view.Schedule)
 	}
 }
