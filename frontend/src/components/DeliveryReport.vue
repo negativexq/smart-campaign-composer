@@ -13,9 +13,11 @@ import {
   matches,
   niceMax,
   notAccepted,
+  openedWord,
   type ChannelSegment,
   type DeliveryQuery,
 } from "../lib/report";
+import { formatChannel } from "../lib/format";
 import ValidationNotice from "./ValidationNotice.vue";
 
 // Live updates arrive every second, and this read is heavier than the counters.
@@ -211,6 +213,43 @@ const isPicked = (selection: Partial<DeliveryQuery> | null) => Boolean(selection
       </details>
     </article>
 
+    <article v-if="report?.engagement.length" class="card chart" data-testid="engagement-chart">
+      <header>
+        <h3 class="title">Opened in the test inbox</h3>
+        <p class="small muted">Counts messages someone opened in the test inbox, out of those accepted. Real providers report email opens unreliably, and SMS has no read signal.</p>
+      </header>
+      <div v-for="item in report.engagement" :key="item.channel" class="channel-row engagement-row">
+        <span class="channel-name">{{ formatChannel(item.channel) }}</span>
+        <div class="stack">
+          <button
+            v-if="item.opened"
+            class="segment segment--opened"
+            :class="{ 'is-picked': isPicked({ channel: item.channel, opened: 'yes' }) }"
+            :style="{ flexGrow: item.opened }"
+            type="button"
+            :aria-label="`${formatChannel(item.channel)}: ${item.opened} ${openedWord(item.channel)}. Show these deliveries.`"
+            :aria-pressed="isPicked({ channel: item.channel, opened: 'yes' })"
+            :data-testid="`opened-${item.channel}`"
+            @click="pick({ channel: item.channel, opened: 'yes' })"
+          ></button>
+          <button
+            v-if="item.accepted > item.opened"
+            class="segment mark--WAITING"
+            :class="{ 'is-picked': isPicked({ channel: item.channel, status: 'SENT', opened: 'no' }) }"
+            :style="{ flexGrow: item.accepted - item.opened }"
+            type="button"
+            :aria-label="`${formatChannel(item.channel)}: ${item.accepted - item.opened} not ${openedWord(item.channel)}. Show these deliveries.`"
+            :aria-pressed="isPicked({ channel: item.channel, status: 'SENT', opened: 'no' })"
+            :data-testid="`unopened-${item.channel}`"
+            @click="pick({ channel: item.channel, status: 'SENT', opened: 'no' })"
+          ></button>
+        </div>
+        <span class="small engagement-value" :data-testid="`engagement-${item.channel}`">
+          <span class="mono">{{ item.opened.toLocaleString("en-US") }}</span> of <span class="mono">{{ item.accepted.toLocaleString("en-US") }}</span> {{ openedWord(item.channel) }}
+        </span>
+      </div>
+    </article>
+
     <div v-if="report" class="pair">
       <article class="card chart" data-testid="reason-chart">
         <header>
@@ -334,6 +373,20 @@ const isPicked = (selection: Partial<DeliveryQuery> | null) => Boolean(selection
 
 .channel-name {
   font-weight: 500;
+}
+
+.engagement-row {
+  grid-template-columns: 48px minmax(0, 1fr) 128px;
+}
+
+.engagement-value {
+  color: var(--color-text-muted);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.segment--opened {
+  background: var(--color-primary);
 }
 
 .total {

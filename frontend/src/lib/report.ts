@@ -31,9 +31,10 @@ export type DeliveryQuery = {
   from: string;
   to: string;
   retried: boolean;
+  opened: "" | "yes" | "no";
 };
 
-export const noFilter = (): DeliveryQuery => ({ status: "", channel: "", reason: "", outcome: "", from: "", to: "", retried: false });
+export const noFilter = (): DeliveryQuery => ({ status: "", channel: "", reason: "", outcome: "", from: "", to: "", retried: false, opened: "" });
 
 export function isFiltered(query: DeliveryQuery): boolean {
   return Object.values(query).some(Boolean);
@@ -64,6 +65,9 @@ export function channelBars(progress: Progress): ChannelBar[] {
     return total ? [{ id, label: formatChannel(id), total, segments: segments.filter((segment) => segment.count) }] : [];
   });
 }
+
+/** SMS has reads and email has opens, so the word follows the channel. */
+export const openedWord = (channel: string) => (channel === "sms" ? "read" : "opened");
 
 export const notAccepted = (bucket: TimelineBucket) => bucket.rate_limited + bucket.server_error + bucket.rejected + bucket.timeout;
 export const callsIn = (bucket: TimelineBucket) => bucket.accepted + notAccepted(bucket);
@@ -106,6 +110,7 @@ export function describeQuery(query: DeliveryQuery): string {
   if (query.reason) parts.push(`Ended as: ${REASONS[query.reason] ?? query.reason}`);
   if (query.outcome) parts.push(`Had a call: ${OUTCOMES[query.outcome] ?? query.outcome}`);
   if (query.retried) parts.push("Called more than once");
+  if (query.opened) parts.push(query.opened === "yes" ? "Opened or read" : "Not opened yet");
   if (query.from && query.to) parts.push(`Called between ${formatBucket(query.from, 1)} and ${formatBucket(query.to, 1)}`);
   return parts.join(" · ");
 }

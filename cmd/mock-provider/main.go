@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/negativexq/smart-campaign-composer/internal/health"
 	"github.com/negativexq/smart-campaign-composer/internal/mockprovider"
@@ -23,7 +24,11 @@ func main() {
 
 	mux := http.NewServeMux()
 	health.Register(mux, nil)
-	mockprovider.New(behaviorFromEnv()).Register(mux)
+	behavior := behaviorFromEnv()
+	if url := os.Getenv("PROVIDER_EVENTS_URL"); url != "" {
+		behavior.OnEvent = mockprovider.NewWebhook(url, os.Getenv("PROVIDER_WEBHOOK_SECRET"), time.Second)
+	}
+	mockprovider.New(behavior).Register(mux)
 
 	if err := server.Run(ctx, ":"+server.Env("PORT", "8080"), mux); err != nil {
 		slog.Error("mock provider failed", "error", err)

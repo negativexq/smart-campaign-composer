@@ -115,6 +115,14 @@ onMounted(() => load(PAGE));
           <option v-for="item in PROBLEM_OPTIONS" :key="item" :value="item">{{ OUTCOMES[item] }}</option>
         </select>
       </label>
+      <label class="filter">
+        <span class="small muted">Opened or read</span>
+        <select v-model="query.opened" class="field select" data-testid="filter-opened" @change="changeFilter">
+          <option value="">Any</option>
+          <option value="yes">Yes</option>
+          <option value="no">Not yet</option>
+        </select>
+      </label>
       <label class="check small">
         <input v-model="query.retried" type="checkbox" data-testid="filter-retried" @change="changeFilter" />
         Called more than once
@@ -139,6 +147,7 @@ onMounted(() => load(PAGE));
             <th scope="col">Status</th>
             <th scope="col" class="num">Attempts</th>
             <th scope="col" class="num">Response</th>
+            <th scope="col">Opened</th>
             <th scope="col">Note</th>
             <th scope="col"><span class="visually-hidden">History</span></th>
           </tr>
@@ -151,6 +160,7 @@ onMounted(() => load(PAGE));
               <td><StatusBadge :status="row.status as DeliveryStatus" /></td>
               <td class="num mono">{{ row.attempts }}</td>
               <td class="num mono">{{ row.response_code ?? "—" }}</td>
+              <td class="small" data-testid="delivery-opened">{{ row.opened_at ? formatDateTime(row.opened_at) : "—" }}</td>
               <td class="small muted note">{{ REASONS[row.reason] ?? "" }}</td>
               <td>
                 <button class="link small" type="button" :disabled="row.status === 'SKIPPED'" :aria-expanded="openId === row.id" data-testid="toggle-attempts" @click="toggle(row)">
@@ -159,7 +169,7 @@ onMounted(() => load(PAGE));
               </td>
             </tr>
             <tr v-if="openId === row.id" class="history">
-              <td colspan="7">
+              <td colspan="8">
                 <p v-if="!attempts[row.id]" class="muted small">Loading...</p>
                 <p v-else-if="!attempts[row.id].length" class="muted small">No calls to the provider yet.</p>
                 <ol v-else class="attempts" data-testid="attempt-list">

@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test Inbox</title>
+<style>
+:root {
+  --canvas: #F7F8FA; --surface: #FFFFFF; --subtle: #F0F3F8; --border: #E4E8EF; --input: #858FA1;
+  --text: #172033; --muted: #5B6A80; --primary: #315BE8; --soft: #EAF0FF; --warning: #B45309;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--canvas); color: var(--text); font: 14px/1.5 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+button, input { font: inherit; color: inherit; }
+.page { display: grid; grid-template-rows: auto 1fr; height: 100%; max-width: 1440px; margin: 0 auto; }
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 16px 24px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.top h1 { margin: 0; font-size: 20px; font-weight: 600; }
+.top p { margin: 0; color: var(--muted); font-size: 13px; }
+.spacer { flex: 1; }
+.button { min-height: 40px; padding: 0 16px; background: var(--surface); border: 1px solid var(--input); border-radius: 8px; cursor: pointer; }
+.button:hover { background: var(--subtle); }
+.body { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); min-height: 0; }
+.list-pane { display: grid; grid-template-rows: auto auto 1fr; min-height: 0; background: var(--surface); border-right: 1px solid var(--border); }
+.filters { display: grid; gap: 12px; padding: 16px; border-bottom: 1px solid var(--border); }
+.tabs { display: flex; gap: 4px; }
+.tab { flex: 1; min-height: 40px; background: transparent; border: 0; border-radius: 8px; color: var(--muted); cursor: pointer; }
+.tab:hover { background: var(--subtle); }
+.tab[aria-pressed="true"] { background: var(--soft); color: var(--primary); font-weight: 600; }
+.search { width: 100%; min-height: 40px; padding: 0 12px; border: 1px solid var(--input); border-radius: 8px; }
+.note { margin: 0; padding: 8px 16px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--border); }
+.note:empty { display: none; }
+.list { position: relative; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.item { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; width: 100%; padding: 12px 16px; background: transparent; border: 0; border-bottom: 1px solid var(--border); text-align: left; cursor: pointer; }
+.item:hover { background: var(--subtle); }
+.item[aria-current="true"] { background: var(--soft); }
+.row { display: flex; justify-content: space-between; gap: 12px; }
+.to { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dot { flex: none; width: 8px; height: 8px; background: var(--primary); border-radius: 50%; }
+.is-unread .to { font-weight: 600; }
+.time { flex: none; color: var(--muted); font: 12px var(--mono); }
+.subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preview { min-width: 0; overflow: hidden; color: var(--muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.hidden-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.chip { flex: none; padding: 0 6px; background: var(--subtle); border-radius: 4px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.detail { min-width: 0; overflow: auto; padding: 24px; }
+.empty { margin: 48px auto; max-width: 420px; color: var(--muted); text-align: center; }
+.empty strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 16px; font-weight: 600; }
+.card { max-width: 720px; margin: 0 auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.mail-head { display: grid; gap: 8px; padding: 16px 24px; border-bottom: 1px solid var(--border); }
+.mail-head h2 { margin: 0; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+.meta { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 2px 8px; margin: 0; font-size: 13px; }
+.meta dt { color: var(--muted); }
+.meta dd { margin: 0; overflow-wrap: anywhere; }
+.mail-body { margin: 0; padding: 24px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.phone { max-width: 360px; padding: 16px; }
+.phone-head { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); text-align: center; }
+.phone-head strong { display: block; overflow-wrap: anywhere; }
+.bubble { width: fit-content; max-width: 85%; margin: 0; padding: 8px 12px; background: var(--subtle); border-radius: 12px 12px 12px 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.facts { max-width: 720px; margin: 16px auto 0; color: var(--muted); font-size: 13px; }
+.facts p { margin: 0 0 4px; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.repeat { color: var(--warning); }
+@media (max-width: 760px) {
+  html, body { height: auto; }
+  .page { height: auto; }
+  .top { padding: 16px; }
+  .body { grid-template-columns: minmax(0, 1fr); }
+  .list-pane { border-right: 0; }
+  .list { max-height: 45vh; }
+  .detail { padding: 16px; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <div>
+      <h1>Test inbox</h1>
+      <p>What the mock provider accepted. Nothing leaves this machine. Opening a message here counts as opened in the campaign's report.</p>
+    </div>
+    <span class="spacer"></span>
+    <button id="clear" class="button" type="button">Clear inbox</button>
+  </header>
+  <div class="body">
+    <section class="list-pane" aria-label="Messages">
+      <div class="filters">
+        <div class="tabs" role="group" aria-label="Channel">
+          <button class="tab" type="button" data-channel="" aria-pressed="true">All <span data-count="all"></span></button>
+          <button class="tab" type="button" data-channel="sms" aria-pressed="false">SMS <span data-count="sms"></span></button>
+          <button class="tab" type="button" data-channel="email" aria-pressed="false">Email <span data-count="email"></span></button>
+        </div>
+        <input id="search" class="search" type="search" placeholder="Search recipient or text" aria-label="Search recipient or text">
+      </div>
+      <p id="note" class="note" role="status"></p>
+      <ul id="list" class="list"></ul>
+    </section>
+    <main id="detail" class="detail"></main>
+  </div>
+</div>
+<script>
+// Message text comes from a model and from people: it only ever goes in as text.
+const REFRESH_MS = 2000;
+const PAGE = 200;
+const state = { channel: "", search: "", selected: "", messages: [], failed: false };
+const $ = (id) => document.getElementById(id);
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+const formatTime = (value) => new Date(value).toLocaleTimeString("en-GB");
+const channelName = (channel) => (channel === "sms" ? "SMS" : "Email");
+const unreadWord = (channel) => (channel === "sms" ? "unread" : "unopened");
+
+function renderList() {
+  const items = state.messages.map((message) => {
+    const button = el("button", "item");
+    button.type = "button";
+    button.setAttribute("aria-current", String(message.id === state.selected));
+    button.dataset.testid = "inbox-item";
+    if (!message.opened_at) button.classList.add("is-unread");
+    const first = el("span", "row");
+    const to = el("span", "to");
+    if (!message.opened_at) {
+      const dot = el("span", "dot");
+      dot.setAttribute("aria-hidden", "true");
+      to.append(dot);
+    }
+    to.append(document.createTextNode(message.to));
+    if (!message.opened_at) to.append(el("span", "hidden-text", ` (${unreadWord(message.channel)})`));
+    first.append(to, el("span", "time", formatTime(message.received_at)));
+    const second = el("span", "row");
+    const summary = message.channel === "email" ? el("span", "subject", message.subject) : el("span", "preview", message.body);
+    second.append(summary, el("span", "chip", channelName(message.channel)));
+    button.append(first, second);
+    if (message.channel === "email") button.append(el("span", "preview", message.body));
+    button.addEventListener("click", () => open(message));
+    const row = el("li");
+    row.append(button);
+    return row;
+  });
+  $("list").replaceChildren(...items);
+}
+
+async function open(message) {
+  state.selected = message.id;
+  render();
+  if (message.opened_at) return;
+  // Opening it here is what the campaign's report counts.
+  await fetch(`/v1/inbox/${encodeURIComponent(message.id)}/open`, { method: "POST" });
+  load();
+}
+
+function renderFacts(message) {
+  const facts = el("div", "facts");
+  facts.append(el("p", "", `Received ${new Date(message.received_at).toLocaleString("en-GB")}`));
+  if (message.opened_at) {
+    const word = message.channel === "sms" ? "Read" : "Opened";
+    facts.append(el("p", "", `${word} ${new Date(message.opened_at).toLocaleString("en-GB")}. Reported to the campaign.`));
+  }
+  const id = el("p", "mono", message.id);
+  facts.append(id);
+  if (message.repeats) {
+    const times = message.repeats === 1 ? "once more" : `${message.repeats} more times`;
+    facts.append(el("p", "repeat", `The worker sent this ${times} with the same idempotency key, and it was not delivered again.`));
+  }
+  return facts;
+}
+
+function renderDetail() {
+  const message = state.messages.find((item) => item.id === state.selected);
+  const detail = $("detail");
+  if (!message) {
+    const empty = el("div", "empty");
+    const nothingYet = !state.messages.length && !state.search;
+    empty.append(
+      el("strong", "", nothingYet ? "No messages yet" : "Select a message"),
+      el("span", "", nothingYet ? "Send a campaign and its messages appear here as the provider accepts them." : "Its full text appears here."),
+    );
+    detail.replaceChildren(empty);
+    return;
+  }
+  const card = el("article", message.channel === "sms" ? "card phone" : "card");
+  if (message.channel === "sms") {
+    const head = el("div", "phone-head");
+    head.append(el("strong", "", message.to), el("span", "mono", `${[...message.body].length} characters`));
+    card.append(head, el("p", "bubble", message.body));
+  } else {
+    const head = el("header", "mail-head");
+    const meta = el("dl", "meta");
+    meta.append(el("dt", "", "To"), el("dd", "", message.to), el("dt", "", "From"), el("dd", "", "Mock Email Provider"));
+    head.append(el("h2", "", message.subject), meta);
+    card.append(head, el("p", "mail-body", message.body));
+  }
+  detail.replaceChildren(card, renderFacts(message));
+}
+
+function render() {
+  renderList();
+  renderDetail();
+}
+
+async function load() {
+  const params = new URLSearchParams({ limit: String(PAGE) });
+  if (state.channel) params.set("channel", state.channel);
+  if (state.search) params.set("q", state.search);
+  try {
+    const response = await fetch(`/v1/inbox?${params}`);
+    if (!response.ok) throw new Error(String(response.status));
+    const page = await response.json();
+    const changed = JSON.stringify(page.messages) !== JSON.stringify(state.messages);
+    state.messages = page.messages;
+    state.failed = false;
+    document.querySelector('[data-count="all"]').textContent = String(page.sms + page.email);
+    document.querySelector('[data-count="sms"]').textContent = String(page.sms);
+    document.querySelector('[data-count="email"]').textContent = String(page.email);
+    const notes = [];
+    if (page.matching > page.messages.length) notes.push(`Showing the latest ${page.messages.length} of ${page.matching}.`);
+    if (page.dropped) notes.push(`${page.dropped} older messages were dropped to make room.`);
+    $("note").textContent = notes.join(" ");
+    if (changed) render();
+  } catch {
+    state.failed = true;
+    $("note").textContent = "The mock provider is not answering. Trying again.";
+  }
+}
+
+for (const tab of document.querySelectorAll(".tab")) {
+  tab.addEventListener("click", () => {
+    state.channel = tab.dataset.channel;
+    for (const other of document.querySelectorAll(".tab")) other.setAttribute("aria-pressed", String(other === tab));
+    load();
+  });
+}
+
+let searchTimer;
+$("search").addEventListener("input", (event) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    state.search = event.target.value;
+    load();
+  }, 250);
+});
+
+$("clear").addEventListener("click", async () => {
+  await fetch("/v1/inbox", { method: "DELETE" });
+  state.selected = "";
+  state.messages = [];
+  render();
+  load();
+});
+
+render();
+load();
+setInterval(load, REFRESH_MS);
+</script>
+</body>
+</html>

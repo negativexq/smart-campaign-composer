@@ -293,7 +293,7 @@ describe("campaign page after approval", () => {
     const { wrapper } = await open({
       ...routes({ ...ready, status: "COMPLETED" }, progress),
       "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [row] } },
-      "GET /api/campaigns/c1/report": { body: { reasons: [], problems: [], timeline: { bucket_seconds: 0, buckets: [] } } },
+      "GET /api/campaigns/c1/report": { body: { reasons: [], problems: [], timeline: { bucket_seconds: 0, buckets: [] }, engagement: [] } },
       "GET /api/campaigns/c1/deliveries?limit=100&status=FAILED": { body: { deliveries: [] } },
       "GET /api/campaigns/c1/deliveries/d1/attempts": {
         body: { attempts: [{ attempt: 1, response_code: 500, outcome: "server_error", error: "", occurred_at: "2026-11-03T12:00:00Z" }, { attempt: 2, response_code: 202, outcome: "accepted", error: "", occurred_at: "2026-11-03T12:00:05Z" }] },
@@ -316,6 +316,7 @@ describe("campaign page after approval", () => {
   describe("report", () => {
     const row = { id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 2, response_code: 202, reason: "", provider_message_id: "m", next_attempt_at: "2026-11-03T12:00:00Z", sent_at: null, updated_at: "2026-11-03T12:00:00Z" };
     const report = {
+      engagement: [{ channel: "sms", accepted: 10, opened: 4 }, { channel: "email", accepted: 12, opened: 0 }],
       reasons: [{ reason: "no_consent", deliveries: 5 }, { reason: "server_error", deliveries: 1 }],
       problems: [{ outcome: "rate_limited", deliveries: 3, attempts: 4 }],
       timeline: {
@@ -336,6 +337,8 @@ describe("campaign page after approval", () => {
         "GET /api/campaigns/c1/deliveries?limit=100&status=SENT&channel=sms": { body: { deliveries: [row] } },
         "GET /api/campaigns/c1/deliveries?limit=100&outcome=rate_limited": { body: { deliveries: [] } },
         "GET /api/campaigns/c1/deliveries?limit=100&reason=server_error": { body: { deliveries: [] } },
+        "GET /api/campaigns/c1/deliveries?limit=100&channel=sms&opened=yes": { body: { deliveries: [{ ...row, opened_at: "2026-11-03T12:05:00Z" }] } },
+        "GET /api/campaigns/c1/deliveries?limit=100&status=SENT&channel=email&opened=no": { body: { deliveries: [row] } },
         "GET /api/campaigns/c1/deliveries?limit=100&from=2026-11-03T12%3A00%3A00Z&to=2026-11-03T12%3A00%3A10.000Z": { body: { deliveries: [] } },
       });
       const wrapper = mount(CampaignDetailView, { props: { campaignId: "c1" } });
@@ -394,13 +397,32 @@ describe("campaign page after approval", () => {
       expect(wrapper.find("[data-testid=active-filter]").exists()).toBe(false);
     });
 
+    it("shows opens per channel in that channel's words and lists who opened", async () => {
+      const { wrapper, fetchMock } = await openReport();
+      expect(wrapper.find("[data-testid=engagement-sms]").text()).toBe("4 of 10 read");
+      expect(wrapper.find("[data-testid=engagement-email]").text()).toBe("0 of 12 opened");
+      expect(wrapper.find("[data-testid=opened-email]").exists()).toBe(false);
+
+      await wrapper.find("[data-testid=opened-sms]").trigger("click");
+      await flushPromises();
+      expect(asked(fetchMock, "channel=sms&opened=yes")).toBe(1);
+      expect(wrapper.find("[data-testid=delivery-opened]").text()).not.toBe("—");
+      expect(wrapper.find("[data-testid=active-filter]").text()).toContain("Opened or read");
+
+      await wrapper.find("[data-testid=unopened-email]").trigger("click");
+      await flushPromises();
+      expect(asked(fetchMock, "status=SENT&channel=email&opened=no")).toBe(1);
+      expect(wrapper.find("[data-testid=delivery-opened]").text()).toBe("—");
+    });
+
     it("offers the time chart as a table of the periods with calls", async () => {
       const { wrapper } = await openReport();
       expect(wrapper.findAll("[data-testid=timeline-table] tbody tr")).toHaveLength(2);
     });
 
     it("says so when nothing went wrong and draws no timeline before any call", async () => {
-      const { wrapper } = await openReport({ reasons: [], problems: [], timeline: { bucket_seconds: 0, buckets: [] } });
+      const { wrapper } = await openReport({ reasons: [], problems: [], timeline: { bucket_seconds: 0, buckets: [] }, engagement: [] });
+      expect(wrapper.find("[data-testid=engagement-chart]").exists()).toBe(false);
       expect(wrapper.find("[data-testid=no-reasons]").exists()).toBe(true);
       expect(wrapper.find("[data-testid=no-problems]").exists()).toBe(true);
       expect(wrapper.find("[data-testid=timeline-chart]").exists()).toBe(false);

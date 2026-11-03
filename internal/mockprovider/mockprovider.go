@@ -31,6 +31,10 @@ type Behavior struct {
 	RetryAfterSecs   int
 	MinDelay         time.Duration
 	MaxDelay         time.Duration
+	// InboxSize is how many messages the test inbox keeps; the default is 5,000.
+	InboxSize int
+	// OnEvent receives what the provider reports after accepting a message.
+	OnEvent func(Event)
 	// Roll overrides the random source in tests.
 	Roll func() float64
 }
@@ -64,6 +68,7 @@ type Server struct {
 	accepted map[string]string
 	stats    map[string]*ChannelStats
 	recent   map[string][]time.Time
+	inbox    inbox
 }
 
 // New builds a provider.
@@ -71,11 +76,15 @@ func New(behavior Behavior) *Server {
 	if behavior.Roll == nil {
 		behavior.Roll = rand.Float64
 	}
+	if behavior.InboxSize <= 0 {
+		behavior.InboxSize = defaultInboxSize
+	}
 	return &Server{
 		behavior: behavior,
 		accepted: map[string]string{},
 		stats:    map[string]*ChannelStats{"sms": {}, "email": {}},
 		recent:   map[string][]time.Time{},
+		inbox:    inbox{size: behavior.InboxSize, byKey: map[string]*InboxMessage{}},
 	}
 }
 
@@ -83,6 +92,7 @@ func New(behavior Behavior) *Server {
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/messages", s.send)
 	mux.HandleFunc("GET /v1/stats", s.getStats)
+	s.registerInbox(mux)
 }
 
 type request struct {
@@ -144,7 +154,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, duplicate := s.accept(message.Channel, key)
+	id, duplicate := s.accept(message, key)
 	if roll < s.behavior.RateLimitRate+s.behavior.ServerErrorRate+s.behavior.LostResponseRate {
 		// The message got through, but the caller never hears about it.
 		<-r.Context().Done()
@@ -174,17 +184,20 @@ func (s *Server) pause(ctx context.Context) bool {
 }
 
 // accept stores the message once, whatever happens to the response.
-func (s *Server) accept(channel, key string) (string, bool) {
+func (s *Server) accept(message request, key string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	channel := message.Channel
 	stats := s.stats[channel]
 	if id, known := s.accepted[key]; known {
 		stats.Duplicates++
+		s.inbox.repeat(key)
 		return id, true
 	}
 	id := "mock_" + cryptorand.Text()
 	s.accepted[key] = id
 	stats.Accepted++
+	s.inbox.add(key, id, message)
 
 	now := time.Now()
 	recent := append(s.recent[channel], now)

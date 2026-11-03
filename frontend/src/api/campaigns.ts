@@ -53,6 +53,7 @@ export type Delivery = {
   next_attempt_at: string;
   sent_at: string | null;
   updated_at: string;
+  opened_at?: string | null;
 };
 
 export type DeliveryAttempt = {
@@ -242,6 +243,7 @@ export type Report = {
   reasons: { reason: string; deliveries: number }[];
   problems: { outcome: string; deliveries: number; attempts: number }[];
   timeline: { bucket_seconds: number; buckets: TimelineBucket[] };
+  engagement: { channel: string; accepted: number; opened: number }[];
 };
 
 export async function getReport(id: string): Promise<Report> {

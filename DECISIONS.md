@@ -128,13 +128,21 @@ Each open campaign page has a stream that reads aggregates once a second and sen
 
 ## The report explains the deliveries instead of decorating them
 
-Every chart on the Deliveries tab is a way into the table below it. Selecting a channel segment, a time bar, a reason or a problem filters the table to those people and says in words what is showing; selecting it again clears it. The report only uses what we measured: results come from `campaign_deliveries`, calls from `delivery_attempts`. There is no delivered, opened or clicked, because the mock provider only says it accepted a message, and simulated engagement would suggest a proof we do not have.
+Every chart on the Deliveries tab is a way into the table below it. Selecting a channel segment, a time bar, a reason or a problem filters the table to those people and says in words what is showing; selecting it again clears it. The report only uses what we measured: results come from `campaign_deliveries`, calls from `delivery_attempts`. There is no delivered status, because the mock provider only says it accepted a message. Opens are counted only when someone really opens a message in the test inbox, and we generate none: invented engagement would suggest a proof we do not have.
 
 A problem filter looks at every call, not the last one, so a message accepted after a 429 is still found under rate limited. A time bar lists who was called in that period, which also makes the pauses after a 429 visible as gaps. Bars stop at 60 per chart, and the width grows with the send so a schedule running for weeks stays readable.
 
 Status colors failed the palette check for color-blind readers: red and amber differ by a Delta E of 2.8. So the time chart uses blue and amber instead, and Unknown is textured in the channel bar.
 
 On 1M deliveries and 900K calls the report's four queries took about 600 ms together on a table holding one campaign, with no new index. While sending, the page rereads the report at most every 5 seconds. We added no index for it, since each one slows sending.
+
+## The test inbox reports opens through a real webhook
+
+Someone testing the product needs to see what was sent, so the mock provider keeps recent accepted messages and serves a page at port 8083. Opening a message there marks it opened and posts an event to `POST /api/provider/events`, as a real provider's event webhook would. That keeps the path real and leaves the demo honest, because a count in the report is always a person's action.
+
+The event is signed with HMAC-SHA256, since this route has no session. It finds the delivery by idempotency key rather than message ID, because a message whose response was lost has no recorded ID, and it can be repeated safely because only the first report of an event is kept. `delivery_events` is separate from `delivery_attempts`: an attempt is our call to the provider, an event is the provider telling us something later. An opened message whose outcome is UNKNOWN stays UNKNOWN, because that status records what our call returned.
+
+The inbox and its webhook retries live in memory. Restarting the provider empties the inbox and loses events it had not yet delivered. The labels say opened for email and read for SMS and name the test inbox, because real providers report email opens unreliably and SMS has no read signal.
 
 ## One delivery table, not a table per campaign
 

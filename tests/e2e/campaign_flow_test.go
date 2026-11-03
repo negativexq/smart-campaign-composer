@@ -91,9 +91,74 @@ func TestBriefToDeliveredCampaign(t *testing.T) {
 			Status string `json:"status"`
 		}](t, call(t, http.MethodGet, campaign, nil, http.StatusOK))
 		if state.Status == "COMPLETED" || state.Status == "COMPLETED_WITH_FAILURES" {
+			checkOpeningAMessageReachesTheReport(t, campaign)
 			return
 		}
 		time.Sleep(time.Second)
 	}
 	t.Fatal("campaign did not finish in time")
+}
+
+// checkOpeningAMessageReachesTheReport follows a message through the test inbox,
+// the signed webhook and the database to the campaign's report.
+func checkOpeningAMessageReachesTheReport(t *testing.T, campaign string) {
+	t.Helper()
+	opened := func() int {
+		report := decode[struct {
+			Engagement []struct {
+				Opened int `json:"opened"`
+			} `json:"engagement"`
+		}](t, call(t, http.MethodGet, campaign+"/report", nil, http.StatusOK))
+		total := 0
+		for _, channel := range report.Engagement {
+			total += channel.Opened
+		}
+		return total
+	}
+	before := opened()
+
+	response, err := http.Get(providerURL() + "/v1/inbox?limit=1000")
+	if err != nil {
+		t.Fatalf("read inbox: %v", err)
+	}
+	defer response.Body.Close()
+	var inbox struct {
+		Messages []struct {
+			ID       string  `json:"id"`
+			OpenedAt *string `json:"opened_at"`
+		} `json:"messages"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&inbox); err != nil {
+		t.Fatalf("decode inbox: %v", err)
+	}
+	// This campaign finished last, so the newest messages are its own.
+	for _, message := range inbox.Messages {
+		if message.OpenedAt != nil {
+			continue
+		}
+		opening, err := http.Post(providerURL()+"/v1/inbox/"+message.ID+"/open", "application/json", nil)
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		opening.Body.Close()
+		if opening.StatusCode != http.StatusNoContent {
+			t.Fatalf("open: %d", opening.StatusCode)
+		}
+		break
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if opened() == before+1 {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatalf("an opened message did not reach the report: still %d", before)
+}
+
+func providerURL() string {
+	if url := os.Getenv("E2E_PROVIDER_URL"); url != "" {
+		return url
+	}
+	return "http://localhost:8083"
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Gauge, LayoutGrid, ListChecks, Plus } from "lucide-vue-next";
+import { Gauge, Inbox, LayoutGrid, ListChecks, Plus } from "lucide-vue-next";
 
 import { endSession } from "../api/session";
 import type { SystemStatus } from "../api/system";
@@ -20,7 +20,14 @@ const groups = [
       { href: "/campaigns", label: "Campaigns", icon: ListChecks },
     ],
   },
-  { title: "Reference", links: [{ href: "/design", label: "Design system", icon: LayoutGrid }] },
+  {
+    title: "Reference",
+    links: [
+      { href: "/design", label: "Design system", icon: LayoutGrid },
+      // The mock provider serves it, so it is outside this app.
+      { href: `${location.protocol}//${location.hostname}:8083/`, label: "Test inbox", icon: Inbox, external: true },
+    ],
+  },
 ];
 
 async function signOut() {
@@ -58,6 +65,8 @@ const statusLabels = { checking: "Checking", operational: "Operational", degrade
             class="nav-item"
             :class="{ 'nav-item--active': link.href === activePath }"
             :href="link.href"
+            :target="'external' in link ? '_blank' : undefined"
+            :rel="'external' in link ? 'noopener' : undefined"
             :aria-current="link.href === activePath ? 'page' : undefined"
           >
             <component :is="link.icon" :size="16" aria-hidden="true" />

@@ -17,9 +17,12 @@ docker compose up --build
 | App | http://localhost:8080 |
 | API health and metrics | http://localhost:8081/readyz, http://localhost:8081/metrics |
 | Worker health and metrics | http://localhost:8082/readyz, http://localhost:8082/metrics |
+| Test inbox | http://localhost:8083 |
 | Mock provider health | http://localhost:8083/healthz |
 
 Setup applies migrations and loads 5,000 fake users on first start. Event times are relative to that moment. To reseed, remove the volume with `docker compose down -v`.
+
+The test inbox shows each SMS and email the mock provider accepted, with names filled in. Opening one there sends a signed event back to the app, and the campaign's Deliveries report counts it as opened or read. The inbox is in memory, so restarting the provider empties it, while the opens already reported stay in the database.
 
 The app asks for a username or email, prefilled with `marketer@example.com`. There is no password: the name only records who did what in each campaign's activity.
 

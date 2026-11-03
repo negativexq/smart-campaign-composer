@@ -34,6 +34,10 @@ describe("axis and buckets", () => {
 });
 
 describe("filters", () => {
+  it("describes opened in words", () => {
+    expect(describeQuery({ ...noFilter(), opened: "no" })).toBe("Not opened yet");
+  });
+
   it("recognises only the exact selection as already active", () => {
     const query = { ...noFilter(), channel: "sms", status: "FAILED" };
     expect(matches(query, { status: "FAILED", channel: "sms" })).toBe(true);

@@ -2,6 +2,7 @@ package campaign
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -45,11 +46,44 @@ type Timeline struct {
 	Buckets       []TimelineBucket `json:"buckets"`
 }
 
+// ReportEngagement counts accepted messages on one channel and how many of them
+// the provider later reported opened.
+type ReportEngagement struct {
+	Channel  string `json:"channel"`
+	Accepted int    `json:"accepted"`
+	Opened   int    `json:"opened"`
+}
+
 // Report is what the delivery records say about a campaign, beyond its counts.
 type Report struct {
-	Reasons  []ReportReason  `json:"reasons"`
-	Problems []ReportProblem `json:"problems"`
-	Timeline Timeline        `json:"timeline"`
+	Reasons    []ReportReason     `json:"reasons"`
+	Problems   []ReportProblem    `json:"problems"`
+	Timeline   Timeline           `json:"timeline"`
+	Engagement []ReportEngagement `json:"engagement"`
+}
+
+// RecordDeliveryEvent stores what a provider reported about a delivery, found by
+// its idempotency key because a delivery with a lost response has no message ID.
+// Only the first report counts, since webhooks repeat.
+func (s *Service) RecordDeliveryEvent(ctx context.Context, key, event string, occurredAt time.Time) error {
+	if event != "opened" {
+		return ErrUnknownEvent
+	}
+	var deliveryID, campaignID string
+	err := s.db.QueryRow(ctx, `SELECT id::text, campaign_id::text FROM campaign_deliveries WHERE idempotency_key = $1`, key).Scan(&deliveryID, &campaignID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("find delivery for event: %w", err)
+	}
+	if _, err := s.db.Exec(ctx, `
+		INSERT INTO delivery_events (delivery_id, campaign_id, event_type, occurred_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (delivery_id, event_type) DO NOTHING`, deliveryID, campaignID, event, occurredAt); err != nil {
+		return fmt.Errorf("record delivery event: %w", err)
+	}
+	return nil
 }
 
 // Report reads a campaign's delivery history.
@@ -69,7 +103,29 @@ func (s *Service) Report(ctx context.Context, id string) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	return Report{Reasons: reasons, Problems: problems, Timeline: timeline}, nil
+	engagement, err := s.reportEngagement(ctx, id)
+	if err != nil {
+		return Report{}, err
+	}
+	return Report{Reasons: reasons, Problems: problems, Timeline: timeline, Engagement: engagement}, nil
+}
+
+func (s *Service) reportEngagement(ctx context.Context, id string) ([]ReportEngagement, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT d.channel, count(*), count(e.delivery_id)
+		FROM campaign_deliveries d
+		LEFT JOIN delivery_events e ON e.delivery_id = d.id AND e.event_type = 'opened'
+		WHERE d.campaign_id = $1 AND d.status = 'SENT'
+		GROUP BY d.channel
+		ORDER BY d.channel DESC`, id)
+	if err != nil {
+		return nil, fmt.Errorf("read report engagement: %w", err)
+	}
+	engagement, err := pgx.CollectRows(rows, pgx.RowToStructByPos[ReportEngagement])
+	if err != nil {
+		return nil, fmt.Errorf("read report engagement: %w", err)
+	}
+	return engagement, nil
 }
 
 func (s *Service) reportReasons(ctx context.Context, id string) ([]ReportReason, error) {
