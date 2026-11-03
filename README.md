@@ -2,7 +2,7 @@
 
 Turns a marketer's plain-language brief into a validated audience and SMS and email messages, waits for human approval, sends through a mock provider, and shows delivery status live. No real messages are ever sent.
 
-> **Status: in development.** The workspace (overview, campaign list, campaign detail) and the path from brief to a validated audience and validated, editable SMS and email messages work. Approval and sending are not built yet, so `make test-e2e` fails on purpose at `/approve`. The UI components are visible with sample data at http://localhost:8080/design.
+> **Status: in development.** The full path works with the mock AI: brief, validated audience, validated messages, approval, immediate or scheduled sending through the queue to the mock provider, live progress and a per-recipient report. `make test-e2e` covers it end to end. Recovery of messages left in flight by a crashed worker and the OpenAI adapter are still to come. The UI components are visible with sample data at http://localhost:8080/design.
 
 ## Run
 

@@ -95,3 +95,36 @@ Messages are written for a specific audience, and its longest name sets the limi
 ## Known limits of content generation
 
 Regeneration replaces all three messages rather than one, which keeps the validation of the offer across channels simple. The `there` fallback for a missing name is English and reads awkwardly in a Turkish message; per-language fallbacks belong with per-language content.
+
+## Scheduling repeats a campaign without repeating a message
+
+A campaign can be sent now, once at a chosen time, at regular intervals, or on chosen weekdays. Marketers pick from these forms instead of writing a cron expression, which is easy to get wrong and hard to read back. A loop in the worker plays the part of the cron job, and its state lives in `campaign_schedules`, so it survives restarts.
+
+"The same person never gets the same message twice" is a hard rule, so a repeat cannot mean sending again to everyone. Each run counts the audience again and queues only people without a delivery, and the unique key on campaign, user and channel enforces this. People who were only skipped can be queued later if they consent. A repeating campaign is therefore a way to reach people who match later, and a run can correctly queue nothing. To send new content to the same people, a marketer creates a new campaign.
+
+Missed runs are not replayed one by one. After downtime one run covers them, because each run already reaches everyone who is still owed the message.
+
+An immediate send counts the audience at the proposal time, so it matches the number that was approved. A scheduled send counts at run time, because its point is to reach the people who match then. The UI says the number can differ.
+
+Known limit: a person who starts matching later can have a longer first name than anyone checked at approval. If their SMS then exceeds the limit, it ends as FAILED after a provider 400 rather than being cut.
+
+## The rate limiter is a sliding window in Redis
+
+A fixed one-second bucket allows up to 200 messages across a bucket boundary. A Lua script keeps a sliding window for each channel, so no one-second span goes over 100, however many workers run. If Redis is unavailable, messages wait and no attempt is used: sending without the limiter would risk breaking a hard limit.
+
+## An earlier timeout makes the result UNKNOWN
+
+A timeout means the provider may have accepted the message. Retrying with the same idempotency key is safe, but if the retries end in failure, that failure does not prove the first call failed. So a delivery with any earlier timeout ends as UNKNOWN unless a later call is accepted.
+
+## A 429 does not use up an attempt
+
+Rate limiting says nothing about the message, so counting it would turn a busy provider into failed deliveries. The worker waits for Retry-After and tries again. This is why the report can show more responses than attempts, and the UI explains it.
+
+## Progress is polled in this version
+
+The campaign page reads aggregates from the database every two seconds while sending. The cost does not grow with message volume, and a dropped connection needs no recovery logic. Pushing the same data over SSE is planned next.
+
+## Deferred: recovering messages left in flight
+
+A worker that crashes after claiming a message leaves that row in SENDING, and the campaign would not finish. Lease recovery is next on the list, and it is a known gap until then. A pause shared between workers after Retry-After is also still to come; today each call waits on its own.
+
