@@ -47,7 +47,7 @@ type scriptedProvider struct {
 func (*scriptedProvider) Name() string  { return "scripted" }
 func (*scriptedProvider) Model() string { return "script-1" }
 
-func (p *scriptedProvider) ProposeSegment(_ context.Context, request ai.SegmentRequest) (ai.SegmentResponse, error) {
+func (p *scriptedProvider) ProposeSegment(_ context.Context, request ai.SegmentRequest) (ai.Response, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.requests = append(p.requests, request)
@@ -55,7 +55,12 @@ func (p *scriptedProvider) ProposeSegment(_ context.Context, request ai.SegmentR
 	if len(p.steps) > 1 {
 		p.steps = p.steps[1:]
 	}
-	return ai.SegmentResponse{Output: []byte(current.output), Usage: ai.Usage{InputTokens: 10, OutputTokens: 5}}, current.err
+	return ai.Response{Output: []byte(current.output), Usage: ai.Usage{InputTokens: 10, OutputTokens: 5}}, current.err
+}
+
+// StreamContent is unused by segment tests; generate_test.go scripts it.
+func (*scriptedProvider) StreamContent(context.Context, ai.ContentRequest, ai.StreamHandler) (ai.Response, error) {
+	return ai.Response{}, errors.New("not scripted")
 }
 
 type harness struct {
@@ -75,9 +80,14 @@ func newHarness(t *testing.T, steps ...step) *harness {
 	provider := &scriptedProvider{steps: steps}
 	metrics := telemetry.NewMetrics(prometheus.NewRegistry())
 	spans := tracetest.NewInMemoryExporter()
-	tracer := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spans)).Tracer("test")
-	service := campaign.NewService(pool, provider, metrics, tracer, func() time.Time { return referenceTime })
-	return &harness{service, provider, pool, metrics, spans}
+	h := &harness{provider: provider, pool: pool, metrics: metrics, spans: spans}
+	h.service = h.serviceWith(provider)
+	return h
+}
+
+func (h *harness) serviceWith(provider ai.Provider) *campaign.Service {
+	tracer := sdktrace.NewTracerProvider(sdktrace.WithSyncer(h.spans)).Tracer("test")
+	return campaign.NewService(h.pool, provider, h.metrics, tracer, func() time.Time { return referenceTime })
 }
 
 func (h *harness) create(t *testing.T) string {

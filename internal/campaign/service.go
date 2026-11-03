@@ -277,7 +277,7 @@ func (s *Service) generateProposal(ctx context.Context, request ai.SegmentReques
 	return segment.Proposal{}, MaxProposalAttempts, fmt.Errorf("%w: %w", ErrProposalRejected, lastInvalid)
 }
 
-func (s *Service) callProvider(ctx context.Context, request ai.SegmentRequest, attempt int) (ai.SegmentResponse, error) {
+func (s *Service) callProvider(ctx context.Context, request ai.SegmentRequest, attempt int) (ai.Response, error) {
 	ctx, cancel := context.WithTimeout(ctx, llmCallTimeout)
 	defer cancel()
 	ctx, span := s.tracer.Start(ctx, "llm.segment.generate", trace.WithAttributes(
@@ -296,7 +296,7 @@ func (s *Service) callProvider(ctx context.Context, request ai.SegmentRequest, a
 		s.metrics.LLMRequests.WithLabelValues(operationSegment, name, outcome).Inc()
 		span.SetStatus(codes.Error, outcome)
 		slog.WarnContext(ctx, "llm call failed", "provider", name, "outcome", outcome, "error", err)
-		return ai.SegmentResponse{}, err
+		return ai.Response{}, err
 	}
 	s.metrics.LLMTokens.WithLabelValues(operationSegment, name, "input").Add(float64(response.Usage.InputTokens))
 	s.metrics.LLMTokens.WithLabelValues(operationSegment, name, "output").Add(float64(response.Usage.OutputTokens))
