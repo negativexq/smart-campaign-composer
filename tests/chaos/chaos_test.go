@@ -71,6 +71,14 @@ func compose(t *testing.T, args ...string) {
 	}
 }
 
+// bringBack starts only the container the test stopped. A plain `up` could also
+// recreate its dependencies, which would wipe the mock provider's counters
+// and the duplicate check that relies on them.
+func bringBack(t *testing.T, service string) {
+	t.Helper()
+	compose(t, "up", "-d", "--wait", "--no-deps", "--no-recreate", service)
+}
+
 // startSending creates a campaign and sends it. Each campaign has its own
 // idempotency keys, so tests can share the same seeded people.
 func startSending(t *testing.T) string {
@@ -189,7 +197,7 @@ func TestAKilledWorkerLosesNothing(t *testing.T) {
 	id := startSending(t)
 	waitForProcessed(t, id, 300)
 	compose(t, "kill", "-s", "SIGKILL", "worker")
-	t.Cleanup(func() { compose(t, "up", "-d", "--wait", "worker") })
+	t.Cleanup(func() { bringBack(t, "worker") })
 
 	stranded, _, err := read(id)
 	if err != nil {
@@ -197,7 +205,7 @@ func TestAKilledWorkerLosesNothing(t *testing.T) {
 	}
 	t.Logf("after the kill: %v", stranded.ByStatus)
 
-	compose(t, "up", "-d", "--wait", "worker")
+	bringBack(t, "worker")
 	checkEveryMessageEnded(t, waitForEnd(t, id, 3*time.Minute), before)
 }
 
@@ -206,7 +214,7 @@ func TestAStoppedWorkerLeavesNothingInFlight(t *testing.T) {
 	id := startSending(t)
 	waitForProcessed(t, id, 300)
 	compose(t, "stop", "worker")
-	t.Cleanup(func() { compose(t, "up", "-d", "--wait", "worker") })
+	t.Cleanup(func() { bringBack(t, "worker") })
 
 	stopped, _, err := read(id)
 	if err != nil {
@@ -216,7 +224,7 @@ func TestAStoppedWorkerLeavesNothingInFlight(t *testing.T) {
 		t.Fatalf("a graceful stop left %d in flight", stopped.ByStatus["SENDING"])
 	}
 
-	compose(t, "up", "-d", "--wait", "worker")
+	bringBack(t, "worker")
 	checkEveryMessageEnded(t, waitForEnd(t, id, time.Minute), before)
 }
 
@@ -225,7 +233,7 @@ func TestNothingIsSentWithoutTheRateLimiter(t *testing.T) {
 	id := startSending(t)
 	waitForProcessed(t, id, 300)
 	compose(t, "stop", "redis")
-	t.Cleanup(func() { compose(t, "up", "-d", "--wait", "redis") })
+	t.Cleanup(func() { bringBack(t, "redis") })
 
 	time.Sleep(2 * time.Second) // calls that already had permission finish
 	during := accepted(t)
@@ -234,7 +242,7 @@ func TestNothingIsSentWithoutTheRateLimiter(t *testing.T) {
 		t.Fatalf("%d messages went out without the rate limiter", later-during)
 	}
 
-	compose(t, "up", "-d", "--wait", "redis")
+	bringBack(t, "redis")
 	checkEveryMessageEnded(t, waitForEnd(t, id, 2*time.Minute), before)
 }
 
@@ -244,11 +252,11 @@ func TestAProviderOutageIsWaitedOut(t *testing.T) {
 	id := startSending(t)
 	waitForProcessed(t, id, 300)
 	compose(t, "stop", "mock-provider")
-	t.Cleanup(func() { compose(t, "up", "-d", "--wait", "mock-provider") })
+	t.Cleanup(func() { bringBack(t, "mock-provider") })
 
 	// Long enough to use up every retry if a refused connection counted as an attempt.
 	time.Sleep(30 * time.Second)
-	compose(t, "up", "-d", "--wait", "mock-provider")
+	bringBack(t, "mock-provider")
 
 	result := waitForEnd(t, id, 2*time.Minute)
 	if result.ByStatus["FAILED"] != 0 {
@@ -265,13 +273,13 @@ func TestSendingResumesAfterADatabaseOutage(t *testing.T) {
 	id := startSending(t)
 	waitForProcessed(t, id, 300)
 	compose(t, "stop", "postgres")
-	t.Cleanup(func() { compose(t, "up", "-d", "--wait", "postgres") })
+	t.Cleanup(func() { bringBack(t, "postgres") })
 
 	time.Sleep(5 * time.Second)
 	if status, _, err := request(http.MethodGet, apiURL+"/readyz", nil); err == nil && status == http.StatusOK {
 		t.Error("the API must not report ready without its database")
 	}
 
-	compose(t, "up", "-d", "--wait", "postgres")
+	bringBack(t, "postgres")
 	checkEveryMessageEnded(t, waitForEnd(t, id, 3*time.Minute), before)
 }
