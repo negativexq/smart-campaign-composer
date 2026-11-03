@@ -2,6 +2,7 @@ package segment_test
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -158,5 +159,48 @@ func TestNotMessagedWindowIsValidatedAndDescribed(t *testing.T) {
 	schema := segment.JSONSchema()["properties"].(map[string]any)["segment"].(map[string]any)["properties"].(map[string]any)
 	if _, ok := schema["not_messaged_within_days"]; !ok {
 		t.Fatal("the model is not told about it")
+	}
+}
+
+func TestEvidenceIsOptionalAndNamesARealFilter(t *testing.T) {
+	t.Parallel()
+	cities := []string{"İstanbul"}
+	proposal, err := segment.ParseProposal([]byte(`{"segment":{"city":"İstanbul"}}`), cities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proposal.Evidence == nil || len(proposal.Evidence) != 0 {
+		t.Fatalf("evidence should be empty, not missing: %#v", proposal.Evidence)
+	}
+	_, err = segment.ParseProposal([]byte(`{"segment":{"city":"İstanbul"},"evidence":[{"field":"age","quote":"young"}]}`), cities)
+	var invalid *segment.ValidationError
+	if !errors.As(err, &invalid) || !slices.Contains(invalid.Reasons, "unknown_evidence_field") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestKeepQuotedEvidenceKeepsOnlyWhatWasWritten(t *testing.T) {
+	t.Parallel()
+	city, days := "İstanbul", 30
+	proposal := segment.Proposal{
+		Segment: segment.Spec{City: &city, CartAddedWithinDays: &days},
+		Evidence: []segment.Evidence{
+			{Field: "city", Quote: "ISTANBUL'daki   kullanıcılar"},
+			{Field: "cart_added_within_days", Quote: "the last two weeks"},
+			{Field: "cart_added_within_days", Quote: "son 30 gün"},
+			{Field: "language", Quote: "kullanıcılar"},
+			{Field: "city", Quote: "ka"},
+			{Field: "city", Quote: strings.Repeat("kullanıcılar ", 30)},
+		},
+	}
+
+	dropped := proposal.KeepQuotedEvidence("İstanbul'daki kullanıcılar sepete ekledi", "make it son 30 gün")
+
+	want := []segment.Evidence{
+		{Field: "city", Quote: "ISTANBUL'daki   kullanıcılar"},
+		{Field: "cart_added_within_days", Quote: "son 30 gün"},
+	}
+	if !slices.Equal(proposal.Evidence, want) || dropped != 4 {
+		t.Fatalf("kept %+v, dropped %d", proposal.Evidence, dropped)
 	}
 }
