@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
 	"github.com/negativexq/smart-campaign-composer/internal/campaign"
@@ -295,7 +296,7 @@ func TestBlockers(t *testing.T) {
 		},
 		{
 			"nobody matches",
-			`{"segment":{"city":"Bursa"},"assumptions":[],"unsupported_conditions":[]}`,
+			`{"segment":{"city":"Ankara","language":"en"},"assumptions":[],"unsupported_conditions":[]}`,
 			"No users match", "empty_audience",
 		},
 	}
@@ -327,17 +328,16 @@ func TestAudienceStaysStableBetweenReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("propose: %v", err)
 	}
-	// A purchase after the snapshot must not move the number under review.
-	if _, err := h.pool.Exec(ctx, `INSERT INTO purchase_events (user_id, product_id, occurred_at) VALUES ($1, 1, $2)`,
-		seed.FixtureCartNoPurchase, referenceTime.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	second, err := h.service.Get(ctx, id)
+	// Every fixture's cart would be outside a 30-day window counted from here.
+	later := campaign.NewService(h.pool, h.provider, h.metrics, noop.NewTracerProvider().Tracer("test"), func() time.Time {
+		return referenceTime.AddDate(0, 0, 60)
+	})
+	second, err := later.Get(ctx, id)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
 	if second.Audience != first.Audience {
-		t.Logf("audience moved from %+v to %+v", first.Audience, second.Audience)
+		t.Fatalf("audience moved from %+v to %+v", first.Audience, second.Audience)
 	}
 	if !second.AudienceAsOf.Equal(referenceTime) {
 		t.Fatalf("as of: %v", second.AudienceAsOf)
