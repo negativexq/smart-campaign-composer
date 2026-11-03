@@ -177,6 +177,29 @@ func TestSampleRecipients(t *testing.T) {
 	}
 }
 
+func TestAudienceBreakdown(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, fastMock())
+	id := createCampaign(t, api, exampleBrief)
+	path := "/api/campaigns/" + id + "/audience/breakdown"
+	if status, _ := call(t, api, http.MethodGet, path, ""); status != http.StatusConflict {
+		t.Fatalf("no audience: %d", status)
+	}
+	_, view := call(t, api, http.MethodPost, "/api/campaigns/"+id+"/segment", "")
+	status, body := call(t, api, http.MethodGet, path, "")
+	if status != http.StatusOK {
+		t.Fatalf("got %d %+v", status, body)
+	}
+	steps := body["steps"].([]any)
+	if len(steps) != len(view["conditions"].([]any)) {
+		t.Fatalf("steps %+v for conditions %+v", steps, view["conditions"])
+	}
+	last := steps[len(steps)-1].(map[string]any)["remaining"]
+	if last != view["audience"].(map[string]any)["total"] {
+		t.Fatalf("last step %v does not match the audience %+v", last, view["audience"])
+	}
+}
+
 func TestApproveAndDispatch(t *testing.T) {
 	t.Parallel()
 	api := newAPI(t, fastMock())

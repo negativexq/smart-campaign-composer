@@ -3,6 +3,7 @@ import type { DeliveryQuery } from "../lib/report";
 import { currentUser } from "../lib/session";
 
 export type Condition = { field: string; label: string; value: string };
+export type AudienceBreakdown = { everyone: number; steps: { field: string; remaining: number }[] };
 export type Assumption = { field: string; note: string };
 export type Audience = { total: number; sms: number; email: number };
 
@@ -79,6 +80,8 @@ export type Campaign = {
   conditions: Condition[];
   audience: Audience;
   audience_as_of?: string;
+  provider?: string;
+  model?: string;
   blockers: string[];
   content?: Messages & { edited: MessageField[] };
   content_limits: { sms_name_length: number; email_name_length: number };
@@ -216,6 +219,10 @@ export function saveContent(id: string, messages: Messages): Promise<Campaign> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(messages),
   });
+}
+
+export function getAudienceBreakdown(id: string): Promise<AudienceBreakdown> {
+  return request<AudienceBreakdown>(`/api/campaigns/${encodeURIComponent(id)}/audience/breakdown`);
 }
 
 export async function getSampleRecipients(id: string): Promise<SampleRecipient[]> {

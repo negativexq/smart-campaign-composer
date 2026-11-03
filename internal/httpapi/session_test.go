@@ -16,7 +16,7 @@ func TestEveryCampaignRouteNeedsSignIn(t *testing.T) {
 		"GET /api/campaigns/" + id, "PATCH /api/campaigns/" + id,
 		"POST /api/campaigns/" + id + "/segment", "GET /api/campaigns/" + id + "/audience",
 		"POST /api/campaigns/" + id + "/generate", "PUT /api/campaigns/" + id + "/content",
-		"GET /api/campaigns/" + id + "/sample-recipients", "POST /api/campaigns/" + id + "/approve",
+		"GET /api/campaigns/" + id + "/sample-recipients", "GET /api/campaigns/" + id + "/audience/breakdown", "POST /api/campaigns/" + id + "/approve",
 		"POST /api/campaigns/" + id + "/dispatch", "POST /api/campaigns/" + id + "/schedule",
 		"DELETE /api/campaigns/" + id + "/schedule", "GET /api/campaigns/" + id + "/progress",
 		"GET /api/campaigns/" + id + "/events", "GET /api/campaigns/" + id + "/deliveries",

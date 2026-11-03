@@ -91,6 +91,52 @@ func Count(ctx context.Context, db Querier, spec Spec, now time.Time) (Counts, e
 	return counts, nil
 }
 
+// BreakdownStep says how many people are left once a condition and every one
+// before it are applied.
+type BreakdownStep struct {
+	Field     string `json:"field"`
+	Remaining int    `json:"remaining"`
+}
+
+// Breakdown shows how each condition narrows the customer base, in Describe's order.
+type Breakdown struct {
+	Everyone int             `json:"everyone"`
+	Steps    []BreakdownStep `json:"steps"`
+}
+
+// Narrow counts the audience after each condition in turn.
+func Narrow(ctx context.Context, db Querier, spec Spec, now time.Time) (Breakdown, error) {
+	breakdown := Breakdown{Steps: []BreakdownStep{}}
+	if err := db.QueryRow(ctx, "SELECT count(*) FROM users").Scan(&breakdown.Everyone); err != nil {
+		return Breakdown{}, fmt.Errorf("count customers: %w", err)
+	}
+	var applied Spec
+	for _, condition := range Describe(spec) {
+		switch condition.Field {
+		case "city":
+			applied.City = spec.City
+		case "language":
+			applied.Language = spec.Language
+		case "cart_added_within_days":
+			applied.CartAddedWithinDays = spec.CartAddedWithinDays
+		case "no_purchase_since_cart":
+			applied.NoPurchaseSinceCart = spec.NoPurchaseSinceCart
+		case "purchased_within_days":
+			applied.PurchasedWithinDays = spec.PurchasedWithinDays
+		case "not_purchased_within_days":
+			applied.NotPurchasedWithinDays = spec.NotPurchasedWithinDays
+		case "not_messaged_within_days":
+			applied.NotMessagedWithinDays = spec.NotMessagedWithinDays
+		}
+		counts, err := Count(ctx, db, applied, now)
+		if err != nil {
+			return Breakdown{}, err
+		}
+		breakdown.Steps = append(breakdown.Steps, BreakdownStep{condition.Field, counts.Total})
+	}
+	return breakdown, nil
+}
+
 // MatchingUserIDs lists the audience, regardless of consent.
 func MatchingUserIDs(ctx context.Context, db Querier, spec Spec, now time.Time) ([]int64, error) {
 	where, args := Compile(spec, now)

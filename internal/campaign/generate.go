@@ -471,6 +471,18 @@ func (s *Service) SampleRecipients(ctx context.Context, id string) ([]segment.Sa
 	return segment.SampleRecipients(ctx, s.db, view.Proposal.Segment, view.AudienceAsOf)
 }
 
+// AudienceBreakdown counts how each condition narrows the audience.
+func (s *Service) AudienceBreakdown(ctx context.Context, id string) (segment.Breakdown, error) {
+	view, err := s.load(ctx, id)
+	if err != nil {
+		return segment.Breakdown{}, err
+	}
+	if view.Proposal == nil {
+		return segment.Breakdown{}, ErrNoAudience
+	}
+	return segment.Narrow(ctx, s.db, view.Proposal.Segment, view.AudienceAsOf)
+}
+
 // generationAbandoned says whether a GENERATING status outlived its process.
 func generationAbandoned(view View) bool {
 	return view.Status == statusGenerating && time.Since(view.UpdatedAt) >= abandonedAfter

@@ -46,6 +46,7 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 		"PATCH /api/campaigns/{id}":                              a.rename,
 		"POST /api/campaigns/{id}/segment":                       a.proposeSegment,
 		"GET /api/campaigns/{id}/audience":                       a.audience,
+		"GET /api/campaigns/{id}/audience/breakdown":             a.audienceBreakdown,
 		"POST /api/campaigns/{id}/generate":                      a.generate,
 		"PUT /api/campaigns/{id}/content":                        a.saveContent,
 		"GET /api/campaigns/{id}/sample-recipients":              a.sampleRecipients,
@@ -186,6 +187,15 @@ func (a *api) audience(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, view.Audience)
+}
+
+func (a *api) audienceBreakdown(w http.ResponseWriter, r *http.Request) {
+	breakdown, err := a.campaigns.AudienceBreakdown(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, breakdown)
 }
 
 // generate streams one generation as server-sent events. Anything that stops it

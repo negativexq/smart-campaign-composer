@@ -16,7 +16,7 @@ import {
   type Progress,
 } from "../api/campaigns";
 import ActivityTimeline from "../components/ActivityTimeline.vue";
-import AudienceRule from "../components/AudienceRule.vue";
+import AudienceSteps from "../components/AudienceSteps.vue";
 import CampaignName from "../components/CampaignName.vue";
 import CampaignStatusBadge from "../components/CampaignStatusBadge.vue";
 import DeliveriesPanel from "../components/DeliveriesPanel.vue";
@@ -60,11 +60,6 @@ const tabs = computed(() => {
 const isLive = computed(() => campaign.value?.status === "DISPATCHING");
 const isDraft = computed(() => (campaign.value ? isDraftStatus(campaign.value.status) : false));
 const editHref = computed(() => `/campaigns/${props.campaignId}/${campaign.value?.content ? "content" : "edit"}`);
-const assumptions = computed(() => campaign.value?.proposal?.assumptions ?? []);
-
-function isAssumed(field: string) {
-  return assumptions.value.some((assumption) => assumption.field === field);
-}
 
 function originOf(field: MessageField) {
   return campaign.value?.content?.edited.includes(field) ? "user" : "ai";
@@ -240,18 +235,15 @@ onBeforeUnmount(() => stopWatching?.());
     </section>
 
     <section v-else-if="tab === 'audience'" id="panel-audience" class="panel" role="tabpanel" aria-labelledby="tab-audience">
-      <p v-if="!campaign.conditions.length" class="muted">No audience conditions yet.</p>
-      <AudienceRule
-        v-for="condition in campaign.conditions"
-        :key="condition.field"
-        :label="condition.label"
-        :value="condition.value"
-        origin="ai"
-        :assumed="isAssumed(condition.field)"
-      />
-      <ul v-if="assumptions.length" class="notes muted small">
-        <li v-for="assumption in assumptions" :key="assumption.field">{{ assumption.note }}</li>
-      </ul>
+      <template v-if="campaign.proposal">
+        <AudienceSteps :campaign="campaign" />
+        <div class="metrics">
+          <MetricCard label="Matching customers" :value="campaign.audience.total" />
+          <MetricCard v-if="campaign.channels.includes('sms')" label="Reachable by SMS" :value="campaign.audience.sms" :hint="reachHint(campaign.audience.total, campaign.audience.sms, 'SMS')" />
+          <MetricCard v-if="campaign.channels.includes('email')" label="Reachable by email" :value="campaign.audience.email" :hint="reachHint(campaign.audience.total, campaign.audience.email, 'email')" />
+        </div>
+      </template>
+      <p v-else class="muted">No audience conditions yet.</p>
       <p v-if="campaign.audience_as_of" class="muted small">Counted on {{ formatDateTime(campaign.audience_as_of) }}.</p>
     </section>
 

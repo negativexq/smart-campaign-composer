@@ -149,6 +149,42 @@ func TestCountHandlesEachFilterAlone(t *testing.T) {
 }
 
 // An empty segment must never mean "everyone".
+func TestNarrowCountsEachConditionInTurn(t *testing.T) {
+	t.Parallel()
+	pool, dataset := seededDatabase(t, 200)
+	ctx := context.Background()
+	spec := exampleSpec()
+
+	breakdown, err := segment.Narrow(ctx, pool, spec, referenceTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if breakdown.Everyone != len(dataset.Users) {
+		t.Fatalf("everyone: got %d, want %d", breakdown.Everyone, len(dataset.Users))
+	}
+	wantFields := []string{"city", "cart_added_within_days", "no_purchase_since_cart"}
+	partial := []segment.Spec{
+		{City: spec.City},
+		{City: spec.City, CartAddedWithinDays: spec.CartAddedWithinDays},
+		spec,
+	}
+	if len(breakdown.Steps) != len(wantFields) {
+		t.Fatalf("steps: %+v", breakdown.Steps)
+	}
+	for i, step := range breakdown.Steps {
+		counts, err := segment.Count(ctx, pool, partial[i], referenceTime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if step.Field != wantFields[i] || step.Remaining != counts.Total {
+			t.Fatalf("step %d: got %+v, want %s with %d", i, step, wantFields[i], counts.Total)
+		}
+	}
+	if !(breakdown.Steps[0].Remaining > breakdown.Steps[1].Remaining && breakdown.Steps[1].Remaining > breakdown.Steps[2].Remaining) {
+		t.Fatalf("each condition should narrow this audience: %+v", breakdown.Steps)
+	}
+}
+
 func TestEmptySpecMatchesNobody(t *testing.T) {
 	t.Parallel()
 	pool, _ := seededDatabase(t, 50)

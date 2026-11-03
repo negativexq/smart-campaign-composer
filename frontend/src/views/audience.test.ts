@@ -136,7 +136,39 @@ describe("audience page", () => {
 
     expect(text.indexOf("İstanbul")).toBeLessThan(text.indexOf("1,284"));
     expect(text).toContain("Assumption, please check");
-    expect(wrapper.find("[data-testid=assumption-notes]").text()).toContain("30 days is assumed");
+    expect(wrapper.find("[data-testid=assumption-note]").text()).toContain("30 days is assumed");
+  });
+
+  it("explains each condition in a sentence and how many people it leaves", async () => {
+    const { wrapper } = await open({
+      "GET /api/campaigns/c1": { body: campaign },
+      "GET /api/campaigns/c1/audience/breakdown": {
+        body: { everyone: 5000, steps: [{ field: "city", remaining: 2000 }, { field: "cart_added_within_days", remaining: 1284 }] },
+      },
+    });
+    await flushPromises();
+    const steps = wrapper.findAll("[data-testid=audience-step]");
+
+    expect(steps[0].text()).toContain("All customers");
+    expect(steps[0].text()).toContain("5,000");
+    expect(steps[1].text()).toContain("Lives in İstanbul");
+    expect(steps[1].text()).toContain("2,000 left");
+    expect(steps[1].text()).toContain("3,000 removed");
+    expect(steps[2].text()).toContain("Added something to their cart in the last 30 days");
+    expect(steps[2].text()).toContain("1,284 left");
+    expect(wrapper.text()).not.toContain("cart_added_within_days");
+  });
+
+  it("still lists the conditions when the counts cannot be loaded", async () => {
+    const { wrapper } = await open({
+      "GET /api/campaigns/c1": { body: campaign },
+      "GET /api/campaigns/c1/audience/breakdown": { status: 500, body: { error: "down" } },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Lives in İstanbul");
+    expect(wrapper.find("[data-testid=breakdown-unavailable]").exists()).toBe(true);
+    expect(wrapper.text()).not.toContain(" left");
   });
 
   it("explains blockers and why it cannot continue", async () => {

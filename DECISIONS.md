@@ -126,6 +126,10 @@ The example brief ran through the app with OpenAI's `gpt-6-luna`: the audience, 
 
 That run showed one limit. Every percentage in a brief must appear in every message, so a brief naming 10% and 90% cannot pass even when the model picks sensibly. Generation then stops with nothing stored, and an instruction naming the discount settles it, while the review page keeps pointing out the difference. A brief with two real offers has to be written as separate campaigns.
 
+## The audience rule is shown as sentences with counts
+
+The marketer reads each condition as a sentence and sees how many people it leaves, counted by applying the conditions one at a time at the audience's own timestamp. The raw rule stays out of the interface because it adds nothing a marketer can act on. A discount is not a condition, so it sits with the message settings and only exists once someone adds it.
+
 ## Known limits of content generation
 
 Regeneration replaces every message rather than one, which keeps the validation of the offer across channels simple. The `there` fallback for a missing name is English and reads awkwardly in a Turkish message; per-language fallbacks belong with per-language content.

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 
 import { errorMessage, getCampaign, proposeSegment, type Campaign } from "../api/campaigns";
-import AudienceRule from "../components/AudienceRule.vue";
+import AudienceSteps from "../components/AudienceSteps.vue";
 import CampaignName from "../components/CampaignName.vue";
 import MetricCard from "../components/MetricCard.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
@@ -19,7 +19,6 @@ const refinement = ref("");
 const editingBrief = ref(false);
 const editedBrief = ref("");
 
-const assumptions = computed(() => campaign.value?.proposal?.assumptions ?? []);
 const hasProposal = computed(() => Boolean(campaign.value?.proposal));
 const blocked = computed(() => Boolean(campaign.value?.blockers.length));
 const asOf = computed(() =>
@@ -27,10 +26,6 @@ const asOf = computed(() =>
     ? new Date(campaign.value.audience_as_of).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })
     : "",
 );
-
-function isAssumed(field: string) {
-  return assumptions.value.some((assumption) => assumption.field === field);
-}
 
 async function propose(input: { brief?: string; refinement?: string }, message: string) {
   busyMessage.value = message;
@@ -106,19 +101,8 @@ onMounted(async () => {
 
     <template v-if="hasProposal">
       <section class="section">
-        <h2>Conditions</h2>
-        <p v-if="!campaign.conditions.length" class="muted">No condition could be applied from this brief.</p>
-        <AudienceRule
-          v-for="condition in campaign.conditions"
-          :key="condition.field"
-          :label="condition.label"
-          :value="condition.value"
-          origin="ai"
-          :assumed="isAssumed(condition.field)"
-        />
-        <ul v-if="assumptions.length" class="notes muted small" data-testid="assumption-notes">
-          <li v-for="assumption in assumptions" :key="assumption.field">{{ assumption.note }}</li>
-        </ul>
+        <h2>Who gets this campaign</h2>
+        <AudienceSteps :campaign="campaign" />
       </section>
 
       <ValidationNotice v-for="blocker in campaign.blockers" :key="blocker" tone="warning" title="This blocks approval">
