@@ -36,6 +36,18 @@ describe("App", () => {
     expect(wrapper.find("[aria-current=step]").text()).toContain("Brief");
   });
 
+  it("separates daily work from reference material in the sidebar", async () => {
+    stubReadiness({ ok: true });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    const groups = wrapper.findAll("[data-testid=nav-group]");
+    expect(groups.map((group) => group.find("[data-testid=nav-group-title]").text())).toEqual(["Workspace", "Reference"]);
+    expect(groups[0].text()).toContain("New campaign");
+    expect(groups[0].text()).not.toContain("Design system");
+    expect(groups[1].text()).toContain("Design system");
+  });
+
   it("keeps generation disabled and says why", async () => {
     stubReadiness({ ok: true });
     const wrapper = mount(App);

@@ -10,9 +10,9 @@ defineProps<{
   systemStatus: SystemStatus | "checking";
 }>();
 
-const links = [
-  { href: "/", label: "New campaign", icon: PenLine },
-  { href: "/design", label: "Design system", icon: LayoutGrid },
+const groups = [
+  { title: "Workspace", links: [{ href: "/", label: "New campaign", icon: PenLine }] },
+  { title: "Reference", links: [{ href: "/design", label: "Design system", icon: LayoutGrid }] },
 ];
 
 const statusLabels = { checking: "Checking", operational: "Operational", unavailable: "Unavailable" };
@@ -23,17 +23,27 @@ const statusLabels = { checking: "Checking", operational: "Operational", unavail
     <aside class="sidebar">
       <a class="brand" href="/">Smart Campaign Composer</a>
       <nav class="nav" aria-label="Main">
-        <a
-          v-for="link in links"
-          :key="link.href"
-          class="nav-item"
-          :class="{ 'nav-item--active': link.href === activePath }"
-          :href="link.href"
-          :aria-current="link.href === activePath ? 'page' : undefined"
+        <div
+          v-for="group in groups"
+          :key="group.title"
+          class="nav-group"
+          role="group"
+          :aria-labelledby="`nav-${group.title}`"
+          data-testid="nav-group"
         >
-          <component :is="link.icon" :size="16" aria-hidden="true" />
-          {{ link.label }}
-        </a>
+          <div :id="`nav-${group.title}`" class="nav-title" data-testid="nav-group-title">{{ group.title }}</div>
+          <a
+            v-for="link in group.links"
+            :key="link.href"
+            class="nav-item"
+            :class="{ 'nav-item--active': link.href === activePath }"
+            :href="link.href"
+            :aria-current="link.href === activePath ? 'page' : undefined"
+          >
+            <component :is="link.icon" :size="16" aria-hidden="true" />
+            {{ link.label }}
+          </a>
+        </div>
       </nav>
       <div class="system small">
         <span class="dot" :class="`dot--${systemStatus}`" aria-hidden="true"></span>
@@ -88,8 +98,24 @@ const statusLabels = { checking: "Checking", operational: "Operational", unavail
 }
 
 .nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 0;
+  margin-top: var(--space-2);
+}
+
+.nav-group {
   display: grid;
   gap: var(--space-1);
+}
+
+.nav-title {
+  padding: 0 var(--space-2) var(--space-1);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .nav-item {
@@ -118,9 +144,9 @@ const statusLabels = { checking: "Checking", operational: "Operational", unavail
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-top: auto;
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-3) var(--space-2) var(--space-1);
   color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
 }
 
 .dot {
@@ -214,6 +240,7 @@ const statusLabels = { checking: "Checking", operational: "Operational", unavail
   .system {
     margin: 0 0 0 auto;
     padding: 0;
+    border-top: 0;
   }
 
   .topbar {
