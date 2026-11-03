@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
+
+	"github.com/negativexq/smart-campaign-composer/internal/content"
 )
 
 // Provider failures every adapter maps to, so callers never see vendor types.
@@ -36,27 +39,54 @@ type Usage struct {
 	OutputTokens int64
 }
 
-// SegmentResponse is raw, unvalidated model output.
-type SegmentResponse struct {
+// Response is raw, unvalidated model output.
+type Response struct {
 	Output []byte
 	Usage  Usage
+}
+
+// ContentRequest asks for messages. Current and Instruction are set when
+// regenerating; PreviousOutput and ValidationError when repairing.
+type ContentRequest struct {
+	Brief           string
+	Conditions      []string
+	Schema          map[string]any
+	Limits          content.Limits
+	Current         json.RawMessage
+	Instruction     string
+	PreviousOutput  string
+	ValidationError string
+}
+
+// StreamHandler receives output as it is produced. OnRestart means the text so
+// far is abandoned, because another model took over mid-response.
+type StreamHandler struct {
+	OnText    func(text string)
+	OnRestart func()
 }
 
 // Provider is an LLM vendor.
 type Provider interface {
 	Name() string
 	Model() string
-	ProposeSegment(ctx context.Context, request SegmentRequest) (SegmentResponse, error)
+	ProposeSegment(ctx context.Context, request SegmentRequest) (Response, error)
+	StreamContent(ctx context.Context, request ContentRequest, handler StreamHandler) (Response, error)
 }
 
-const defaultAnthropicModel = "claude-opus-5-5"
+const (
+	defaultAnthropicModel = "claude-opus-5-5"
+	// mockStreamDelay makes the mock's stream visible in a demo; tests skip it.
+	mockStreamDelay = 25 * time.Millisecond
+)
 
 // NewFromEnv picks the provider from LLM_PROVIDER, defaulting to the mock. A
 // chosen provider without its key is a startup error, never a silent mock.
 func NewFromEnv(getenv func(string) string) (Provider, error) {
 	switch name := getenv("LLM_PROVIDER"); name {
 	case "", "mock":
-		return NewMock(), nil
+		mock := NewMock()
+		mock.StreamDelay = mockStreamDelay
+		return mock, nil
 	case "anthropic":
 		key := getenv("ANTHROPIC_API_KEY")
 		if key == "" {
