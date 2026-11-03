@@ -209,7 +209,11 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 	return len(claims), nil
 }
 
+// claim outlives a shutdown: giving up on a claim the database has already
+// committed would strand those rows as SENDING until their lease expires.
 func (w *Worker) claim(ctx context.Context) ([]claim, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+	defer cancel()
 	rows, err := w.db.Query(ctx, `
 		WITH next AS (
 			SELECT d.id
