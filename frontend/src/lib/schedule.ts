@@ -44,10 +44,14 @@ export function emptyScheduleForm(): ScheduleForm {
 }
 
 // datetime-local gives a time without a zone, which means the browser's own.
+// The offset is kept so the backend can describe the time as it was chosen.
 function toInstant(local: string): string | undefined {
   if (!local) return undefined;
   const parsed = new Date(local);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  const offset = -parsed.getTimezoneOffset();
+  const pad = (value: number) => String(Math.floor(Math.abs(value))).padStart(2, "0");
+  return `${local.slice(0, 16)}:00${offset < 0 ? "-" : "+"}${pad(offset / 60)}:${pad(offset % 60)}`;
 }
 
 // What is still missing before the form can be sent. The backend has the final say.

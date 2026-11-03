@@ -202,6 +202,11 @@ describe("campaign page after approval", () => {
     expect(wrapper.find("[data-testid=channel-table]").text()).toContain("SMS");
   });
 
+  it("explains why rate limited calls are not counted as attempts", async () => {
+    const { wrapper } = await open(routes({ ...ready, status: "COMPLETED" }, { ...progress, responses: { "202": 12, "429": 4 } }));
+    expect(wrapper.text()).toContain("do not use up an attempt");
+  });
+
   it("lists deliveries by person with their history", async () => {
     const row = { id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 2, response_code: 202, reason: "", provider_message_id: "m", next_attempt_at: "", sent_at: null, updated_at: "" };
     const { wrapper } = await open({

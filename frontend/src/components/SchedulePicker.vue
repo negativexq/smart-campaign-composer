@@ -78,6 +78,7 @@ function inputValue(event: Event) {
       <label class="control">
         <span class="small muted">First send (optional)</span>
         <input class="field" type="datetime-local" :value="modelValue.startsAt" @input="change('startsAt', inputValue($event))" />
+        <span class="muted small">If left empty, the first send is one interval from now.</span>
       </label>
     </div>
 
@@ -143,7 +144,7 @@ function inputValue(event: Event) {
 
 .options {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: var(--space-2);
 }
 

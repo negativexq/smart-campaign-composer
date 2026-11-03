@@ -34,15 +34,19 @@ const error = ref("");
 const hasMore = ref(false);
 const openId = ref("");
 const attempts = ref<Record<string, DeliveryAttempt[]>>({});
+let latest = 0;
 
 async function load(limit: number) {
+  const request = ++latest;
   try {
     const page = await getDeliveries(props.campaignId, { status: status.value, channel: channel.value, limit });
+    // A slower answer for earlier filters must not replace a newer one.
+    if (request !== latest) return;
     rows.value = page;
     hasMore.value = page.length === limit;
     error.value = "";
   } catch (failure) {
-    error.value = errorMessage(failure);
+    if (request === latest) error.value = errorMessage(failure);
   }
 }
 
@@ -62,6 +66,7 @@ async function toggle(row: Delivery) {
 function changeFilter() {
   openId.value = "";
   rows.value = null;
+  hasMore.value = false;
   load(PAGE);
 }
 

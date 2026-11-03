@@ -74,7 +74,7 @@ onMounted(async () => {
   <AppShell
     v-else-if="route.name === 'content' || route.name === 'review'"
     active-path="/campaigns"
-    title="New campaign"
+    title="Campaign setup"
     :campaign-status="campaignStatusMeta(wizardStatus).label"
     :system-status="status"
   >
@@ -91,7 +91,7 @@ onMounted(async () => {
   <AppShell
     v-else-if="route.name === 'new' || route.name === 'edit'"
     active-path="/campaigns"
-    title="New campaign"
+    :title="route.name === 'new' ? 'New campaign' : 'Campaign setup'"
     :campaign-status="campaignStatusMeta(wizardStatus).label"
     :system-status="status"
   >

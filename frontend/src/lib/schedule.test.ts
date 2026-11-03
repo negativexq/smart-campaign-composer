@@ -13,7 +13,10 @@ describe("schedule form", () => {
     expect(scheduleProblem(form)).toContain("date");
     form.at = "2026-11-05T09:00";
     expect(scheduleProblem(form)).toBe("");
-    expect(buildSchedule(form)).toEqual({ kind: "once", at: new Date("2026-11-05T09:00").toISOString() });
+    const spec = buildSchedule(form);
+    expect(spec?.kind).toBe("once");
+    expect(spec?.at).toMatch(/^2026-11-05T09:00:00[+-]\d\d:\d\d$/);
+    expect(new Date(spec?.at ?? "").getTime()).toBe(new Date("2026-11-05T09:00").getTime());
   });
 
   it("expresses days as hours for the backend", () => {
@@ -37,6 +40,6 @@ describe("schedule form", () => {
 
   it("includes an end only when one is chosen", () => {
     const form = { ...emptyScheduleForm(), mode: "weekly" as const, days: ["mon"], endsAt: "2026-12-01T00:00" };
-    expect(buildSchedule(form)?.ends_at).toBe(new Date("2026-12-01T00:00").toISOString());
+    expect(new Date(buildSchedule(form)?.ends_at ?? "").getTime()).toBe(new Date("2026-12-01T00:00").getTime());
   });
 });

@@ -66,6 +66,7 @@ const count = (status: DeliveryStatus) => props.progress.by_status[status] ?? 0;
         <span v-for="([code, total], index) in responses" :key="code"><span class="mono">{{ code }}</span> × {{ total }}{{ index < responses.length - 1 ? ", " : "." }}</span>
       </template>
     </p>
+    <p v-if="progress.responses['429']" class="muted small">Calls answered with 429 are retried and do not use up an attempt.</p>
     <p class="muted small">{{ deliveryStatusMeta.SENT.description }}</p>
   </section>
 </template>
