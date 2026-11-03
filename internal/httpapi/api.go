@@ -79,9 +79,22 @@ func (a *api) overview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) list(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	days := 0
+	if value := query.Get("created_within_days"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			writeError(w, r, campaign.ErrUnknownFilter)
+			return
+		}
+		days = parsed
+	}
 	campaigns, err := a.campaigns.List(r.Context(), campaign.ListFilter{
-		Group: r.URL.Query().Get("group"),
-		Query: r.URL.Query().Get("q"),
+		Group:             query.Get("group"),
+		Query:             query.Get("q"),
+		Channel:           query.Get("channel"),
+		CreatedWithinDays: days,
+		Sort:              query.Get("sort"),
 	})
 	if err != nil {
 		writeError(w, r, err)
@@ -480,7 +493,7 @@ func describeError(r *http.Request, err error) (int, string) {
 	case errors.Is(err, campaign.ErrNoSchedule):
 		status, message = http.StatusConflict, "This campaign has no schedule to cancel."
 	case errors.Is(err, campaign.ErrUnknownFilter):
-		status, message = http.StatusBadRequest, "This delivery filter does not exist."
+		status, message = http.StatusBadRequest, "This filter does not exist."
 	case errors.Is(err, campaign.ErrInvalidInstruction):
 		status, message = http.StatusBadRequest, "Write an instruction of up to 500 characters."
 	case errors.Is(err, campaign.ErrNoAudience):

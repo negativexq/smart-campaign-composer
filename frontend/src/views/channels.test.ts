@@ -24,6 +24,7 @@ const smsOnly: Campaign = {
   blockers: [],
   content: { sms: "Hi {{first_name}}", email_subject: "", email_body: "", edited: [] },
   content_limits: { sms_name_length: 8, email_name_length: 8 },
+  content_warnings: [],
   proposal: { assumptions: [], unsupported_conditions: [] },
 } as unknown as Campaign;
 

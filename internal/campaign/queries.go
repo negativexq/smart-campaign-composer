@@ -34,13 +34,25 @@ var ErrUnknownGroup = errors.New("unknown campaign group")
 
 // ListFilter narrows the campaign list. An empty Group means all campaigns.
 type ListFilter struct {
-	Group string
-	Query string
-	Limit int
+	Group             string
+	Query             string
+	Channel           string
+	CreatedWithinDays int
+	Sort              string
+	Limit             int
 }
 
-// Summary is a campaign row. Channels and progress come from its deliveries, so
-// they stay empty until the campaign is dispatched.
+// listOrders holds the only orderings a list can ask for, so no request text
+// reaches the query.
+var listOrders = map[string]string{
+	"":       "c.created_at DESC, c.id",
+	"newest": "c.created_at DESC, c.id",
+	"oldest": "c.created_at, c.id",
+	"name":   "lower(c.name), c.id",
+}
+
+// Summary is a campaign row. Progress comes from its deliveries, so it stays empty
+// until the campaign is dispatched.
 type Summary struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
@@ -63,6 +75,10 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 		}
 		statuses = known
 	}
+	order, known := listOrders[filter.Sort]
+	if !known || filter.CreatedWithinDays < 0 || (filter.Channel != "" && filter.Channel != "sms" && filter.Channel != "email") {
+		return nil, ErrUnknownFilter
+	}
 	limit := filter.Limit
 	if limit <= 0 || limit > DefaultListLimit {
 		limit = DefaultListLimit
@@ -77,7 +93,9 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 			SELECT * FROM campaigns c
 			WHERE ($1::text[] IS NULL OR c.status = ANY($1))
 			  AND ($2 = '' OR c.name ILIKE '%' || $2 || '%' ESCAPE '\' OR c.brief ILIKE '%' || $2 || '%' ESCAPE '\')
-			ORDER BY c.created_at DESC, c.id
+			  AND ($4 = '' OR $4 = ANY(c.channels))
+			  AND ($5 = 0 OR c.created_at >= now() - make_interval(days => $5))
+			ORDER BY `+order+`
 			LIMIT $3
 		) c
 		LEFT JOIN LATERAL (
@@ -89,7 +107,7 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 				GROUP BY channel, status
 			) counts
 		) d ON true
-		ORDER BY c.created_at DESC, c.id`, statuses, escapeLike(strings.TrimSpace(filter.Query)), limit)
+		ORDER BY `+order, statuses, escapeLike(strings.TrimSpace(filter.Query)), limit, filter.Channel, filter.CreatedWithinDays)
 	if err != nil {
 		return nil, fmt.Errorf("list campaigns: %w", err)
 	}

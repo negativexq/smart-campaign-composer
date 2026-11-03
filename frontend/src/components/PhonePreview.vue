@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useId } from "vue";
 
-import { countCharacters, renderMessage } from "../lib/message";
+import { countCharacters, renderMessage, smsSegments } from "../lib/message";
 
 const props = defineProps<{
   message: string;
@@ -12,6 +12,7 @@ const id = useId();
 const selectedId = ref(String(props.recipients[0]?.id ?? ""));
 const selected = computed(() => props.recipients.find((recipient) => String(recipient.id) === selectedId.value));
 const rendered = computed(() => renderMessage(props.message, { first_name: selected.value?.first_name ?? "" }));
+const parts = computed(() => smsSegments(rendered.value));
 </script>
 
 <template>
@@ -31,6 +32,10 @@ const rendered = computed(() => renderMessage(props.message, { first_name: selec
 
     <p class="small muted" data-testid="phone-length">
       <span class="mono">{{ countCharacters(rendered) }}</span> characters for this recipient
+    </p>
+    <p class="small muted" data-testid="phone-segments">
+      <span class="mono">{{ parts.segments }}</span> {{ parts.segments === 1 ? "segment" : "segments" }}, {{ parts.encoding }}.
+      <template v-if="parts.segments > 1">Each segment is billed as one SMS.</template>
     </p>
   </section>
 </template>

@@ -137,6 +137,21 @@ describe("campaign list", () => {
     expect(rows[1].find("a").attributes("href")).toBe("/campaigns/c2");
   });
 
+  it("filters by channel and age and sorts on the server", async () => {
+    const { wrapper, fetchMock } = await open("/campaigns", { "/api/campaigns": { campaigns: [summary()] } });
+    await settle();
+
+    await wrapper.find("#campaign-channel").setValue("sms");
+    await settle();
+    expect(fetchMock).toHaveBeenCalledWith("/api/campaigns?channel=sms", undefined);
+    await wrapper.find("#campaign-age").setValue("30");
+    await settle();
+    expect(fetchMock).toHaveBeenCalledWith("/api/campaigns?channel=sms&created_within_days=30", undefined);
+    await wrapper.find("#campaign-sort").setValue("name");
+    await settle();
+    expect(fetchMock).toHaveBeenCalledWith("/api/campaigns?channel=sms&created_within_days=30&sort=name", undefined);
+  });
+
   it("filters by group and search on the server", async () => {
     const { wrapper, fetchMock } = await open("/campaigns", {
       "/api/campaigns": { campaigns: [summary()] },

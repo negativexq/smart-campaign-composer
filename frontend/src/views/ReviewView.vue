@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { CheckCircle2, CircleAlert } from "lucide-vue-next";
 import { computed, onMounted, ref, watch } from "vue";
 
 import {
@@ -28,6 +29,31 @@ const form = ref(emptyScheduleForm());
 const reviewable = computed(() => ["READY_FOR_REVIEW", "APPROVED"].includes(campaign.value?.status ?? ""));
 const messageCount = computed(() => (campaign.value ? campaign.value.audience.sms + campaign.value.audience.email : 0));
 const problem = computed(() => scheduleProblem(form.value));
+type Check = { label: string; detail: string; ok: boolean };
+const checks = computed<Check[]>(() => {
+  const current = campaign.value;
+  if (!current) return [];
+  const count = messageCount.value.toLocaleString("en-US");
+  const list: Check[] = [
+    { label: "Audience", detail: `${current.audience.total.toLocaleString("en-US")} people match, and ${count} messages go to those who consented.`, ok: messageCount.value > 0 },
+    { label: "Limits", detail: current.content ? "Every message fits its limit for the longest name in this audience." : "The messages are not written yet.", ok: Boolean(current.content) },
+    {
+      label: "Offer",
+      detail: current.content_warnings.length ? current.content_warnings.map((warning) => warning.message).join(" ") : "Any discount matches the brief.",
+      ok: !current.content_warnings.length,
+    },
+  ];
+  if (current.channels.includes("email") && current.content) {
+    list.push({
+      label: "Email link",
+      detail: current.content.email_cta_url ? `The button opens ${current.content.email_cta_url}` : "This email has no button.",
+      ok: true,
+    });
+    list.push({ label: "Unsubscribe", detail: "Each email carries its own unsubscribe link and a plain text version.", ok: true });
+  }
+  list.push({ label: "When", detail: problem.value || (form.value.mode === "now" ? "Sends as soon as you approve." : "Sends on the schedule below."), ok: !problem.value });
+  return list;
+});
 const blocked = computed(() => Boolean(campaign.value?.blockers.length) || messageCount.value === 0);
 const actionLabel = computed(() => {
   if (submitting.value) return "Working...";
@@ -110,6 +136,17 @@ onMounted(async () => {
 
     <SchedulePicker v-model="form" />
 
+    <section class="section" aria-labelledby="checks-title">
+      <h2 id="checks-title">Before it goes out</h2>
+      <ul class="checks card" data-testid="review-checks">
+        <li v-for="check in checks" :key="check.label" class="check" :data-state="check.ok ? 'ok' : 'attention'">
+          <component :is="check.ok ? CheckCircle2 : CircleAlert" :size="16" class="check-icon" :class="{ 'check-icon--attention': !check.ok }" aria-hidden="true" />
+          <span class="check-text"><strong>{{ check.label }}</strong> {{ check.detail }}</span>
+          <span class="visually-hidden">{{ check.ok ? "Passed" : "Needs attention" }}</span>
+        </li>
+      </ul>
+    </section>
+
     <ValidationNotice v-if="actionError" tone="error" title="This did not go through">{{ actionError }}</ValidationNotice>
 
     <div class="row">
@@ -147,6 +184,40 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: var(--space-3);
+}
+
+.checks {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-4);
+  list-style: none;
+}
+
+.check {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.check-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.check-text strong {
+  font-weight: 500;
+}
+
+.check-icon {
+  flex: none;
+  margin-top: 3px;
+  color: var(--color-success);
+}
+
+.check-icon--attention {
+  color: var(--color-warning);
 }
 
 .message {

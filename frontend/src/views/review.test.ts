@@ -436,3 +436,33 @@ describe("campaign page after approval", () => {
     expect(wrapper.find("#tab-deliveries").exists()).toBe(false);
   });
 });
+
+describe("the checks before sending", () => {
+  it("says what was checked, with the email's real link", async () => {
+    stub({ "GET /api/campaigns/c1": { body: { ...ready, content: { ...ready.content, email_cta_url: "https://shop.example.com/sale", email_cta_label: "Go" } } } });
+    const wrapper = mount(ReviewView, { props: { campaignId: "c1" } });
+    await flushPromises();
+
+    const checks = wrapper.find("[data-testid=review-checks]");
+    expect(checks.text()).toContain("The button opens https://shop.example.com/sale");
+    expect(checks.findAll("[data-state=attention]")).toHaveLength(0);
+  });
+
+  it("draws attention to an offer that differs from the brief", async () => {
+    stub({ "GET /api/campaigns/c1": { body: { ...ready, content_warnings: [{ field: "sms", reason: "invented_discount", message: "SMS mentions 50%." }] } } });
+    const wrapper = mount(ReviewView, { props: { campaignId: "c1" } });
+    await flushPromises();
+
+    const flagged = wrapper.findAll("[data-testid=review-checks] [data-state=attention]");
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0].text()).toContain("SMS mentions 50%.");
+  });
+
+  it("leaves out email checks for a campaign without email", async () => {
+    stub({ "GET /api/campaigns/c1": { body: { ...ready, channels: ["sms"] } } });
+    const wrapper = mount(ReviewView, { props: { campaignId: "c1" } });
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid=review-checks]").text()).not.toContain("Unsubscribe");
+  });
+});

@@ -6,6 +6,7 @@ import AudienceRule from "../components/AudienceRule.vue";
 import CampaignName from "../components/CampaignName.vue";
 import MetricCard from "../components/MetricCard.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
+import { reachHint } from "../lib/message";
 
 const props = defineProps<{ campaignId: string }>();
 const emit = defineEmits<{ status: [status: string] }>();
@@ -128,8 +129,8 @@ onMounted(async () => {
         <h2>Audience size</h2>
         <div class="metrics">
           <MetricCard class="metrics-total" label="Matching customers" :value="campaign.audience.total" prominent />
-          <MetricCard v-if="campaign.channels.includes('sms')" label="Reachable by SMS" :value="campaign.audience.sms" hint="Consented to SMS" />
-          <MetricCard v-if="campaign.channels.includes('email')" label="Reachable by email" :value="campaign.audience.email" hint="Consented to email" />
+          <MetricCard v-if="campaign.channels.includes('sms')" label="Reachable by SMS" :value="campaign.audience.sms" :hint="reachHint(campaign.audience.total, campaign.audience.sms, 'SMS')" />
+          <MetricCard v-if="campaign.channels.includes('email')" label="Reachable by email" :value="campaign.audience.email" :hint="reachHint(campaign.audience.total, campaign.audience.email, 'email')" />
         </div>
         <p v-if="asOf" class="muted small" data-testid="as-of">Counted on {{ asOf }}. Customers without consent are never messaged.</p>
       </section>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { countCharacters, findUnknownVariables, renderMessage } from "./message";
+import { countCharacters, findUnknownVariables, reachHint, renderMessage, smsSegments } from "./message";
 
 describe("countCharacters", () => {
   it("counts Turkish letters as one character each", () => {
@@ -41,5 +41,36 @@ describe("findUnknownVariables", () => {
 
   it("reports each unsupported variable once", () => {
     expect(findUnknownVariables("{{coupon}} {{ coupon }} {{city_name}}")).toEqual(["coupon", "city_name"]);
+  });
+});
+
+describe("smsSegments", () => {
+  it("fits 160 GSM-7 characters in one segment and splits at 153 after that", () => {
+    expect(smsSegments("a".repeat(160))).toEqual({ encoding: "GSM-7", segments: 1 });
+    expect(smsSegments("a".repeat(161))).toEqual({ encoding: "GSM-7", segments: 2 });
+    expect(smsSegments("a".repeat(306))).toEqual({ encoding: "GSM-7", segments: 2 });
+    expect(smsSegments("a".repeat(307))).toEqual({ encoding: "GSM-7", segments: 3 });
+  });
+
+  it("counts extended characters twice", () => {
+    expect(smsSegments("€".repeat(80)).segments).toBe(1);
+    expect(smsSegments("€".repeat(81)).segments).toBe(2);
+  });
+
+  it("moves the whole message to Unicode for one Turkish letter", () => {
+    expect(smsSegments("ş".repeat(70))).toEqual({ encoding: "Unicode", segments: 1 });
+    expect(smsSegments("ş".repeat(71))).toEqual({ encoding: "Unicode", segments: 2 });
+    expect(smsSegments("ı" + "a".repeat(159))).toEqual({ encoding: "Unicode", segments: 3 });
+  });
+
+  it("has nothing to send for an empty message", () => {
+    expect(smsSegments("").segments).toBe(0);
+  });
+});
+
+describe("reachHint", () => {
+  it("names who is missed and why", () => {
+    expect(reachHint(467, 330, "SMS")).toBe("137 not reachable: no SMS consent");
+    expect(reachHint(10, 10, "email")).toBe("Everyone matching consented to email");
   });
 });

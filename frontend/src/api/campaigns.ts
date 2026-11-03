@@ -179,10 +179,15 @@ export function getOverview(): Promise<Overview> {
   return request<Overview>("/api/overview");
 }
 
-export async function listCampaigns(filter: { group: CampaignGroup; query: string }): Promise<CampaignSummary[]> {
+export type CampaignListFilter = { group: CampaignGroup; query: string; channel?: string; createdWithinDays?: string; sort?: string };
+
+export async function listCampaigns(filter: CampaignListFilter): Promise<CampaignSummary[]> {
   const params = new URLSearchParams();
   if (filter.group) params.set("group", filter.group);
   if (filter.query.trim()) params.set("q", filter.query.trim());
+  if (filter.channel) params.set("channel", filter.channel);
+  if (filter.createdWithinDays) params.set("created_within_days", filter.createdWithinDays);
+  if (filter.sort) params.set("sort", filter.sort);
   const suffix = params.size ? `?${params}` : "";
   return (await request<{ campaigns: CampaignSummary[] }>(`/api/campaigns${suffix}`)).campaigns;
 }

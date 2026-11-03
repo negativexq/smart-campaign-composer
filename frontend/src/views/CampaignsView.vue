@@ -17,9 +17,12 @@ const filters: { group: CampaignGroup; label: string }[] = [
 
 const group = ref<CampaignGroup>("");
 const query = ref("");
+const channel = ref("");
+const createdWithinDays = ref("");
+const sort = ref("");
 const campaigns = ref<CampaignSummary[] | null>(null);
 const error = ref("");
-const isFiltered = computed(() => group.value !== "" || query.value.trim() !== "");
+const isFiltered = computed(() => group.value !== "" || query.value.trim() !== "" || channel.value !== "" || createdWithinDays.value !== "");
 
 let latestRequest = 0;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -28,7 +31,7 @@ async function load() {
   const request = ++latestRequest;
   error.value = "";
   try {
-    const result = await listCampaigns({ group: group.value, query: query.value });
+    const result = await listCampaigns({ group: group.value, query: query.value, channel: channel.value, createdWithinDays: createdWithinDays.value, sort: sort.value });
     // A slower earlier response must not replace the current filter's results.
     if (request === latestRequest) campaigns.value = result;
   } catch (failure) {
@@ -36,7 +39,7 @@ async function load() {
   }
 }
 
-watch(group, load);
+watch([group, channel, createdWithinDays, sort], load);
 watch(query, () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(load, SEARCH_DELAY_MS);
@@ -63,6 +66,27 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
       </div>
       <label class="visually-hidden" for="campaign-search">Search campaigns</label>
       <input id="campaign-search" v-model="query" class="field search" type="search" placeholder="Search names and briefs" />
+      <div class="selects">
+        <label class="visually-hidden" for="campaign-channel">Channel</label>
+        <select id="campaign-channel" v-model="channel" class="field select">
+          <option value="">All channels</option>
+          <option value="sms">Uses SMS</option>
+          <option value="email">Uses email</option>
+        </select>
+        <label class="visually-hidden" for="campaign-age">Created</label>
+        <select id="campaign-age" v-model="createdWithinDays" class="field select">
+          <option value="">Any time</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+        <label class="visually-hidden" for="campaign-sort">Sort by</label>
+        <select id="campaign-sort" v-model="sort" class="field select">
+          <option value="">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="name">Name</option>
+        </select>
+      </div>
     </div>
 
     <ValidationNotice v-if="error" tone="error" title="We could not load your campaigns">{{ error }}</ValidationNotice>
@@ -122,6 +146,20 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
 .search {
   width: 260px;
   max-width: 100%;
+}
+
+.selects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.select {
+  width: auto;
+  max-width: 100%;
+  height: 40px;
+  padding-block: 0;
 }
 
 .empty {

@@ -28,6 +28,7 @@ import ValidationNotice from "../components/ValidationNotice.vue";
 import { isDraftStatus } from "../lib/campaignStatus";
 import { formatDateTime } from "../lib/format";
 import { sendingBlockers } from "../lib/systemHealth";
+import { reachHint } from "../lib/message";
 
 const props = defineProps<{ campaignId: string }>();
 
@@ -220,8 +221,8 @@ onBeforeUnmount(() => stopWatching?.());
       <template v-if="campaign.proposal">
         <div class="metrics">
           <MetricCard label="Matching customers" :value="campaign.audience.total" />
-          <MetricCard v-if="campaign.channels.includes('sms')" label="Reachable by SMS" :value="campaign.audience.sms" hint="Consented to SMS" />
-          <MetricCard v-if="campaign.channels.includes('email')" label="Reachable by email" :value="campaign.audience.email" hint="Consented to email" />
+          <MetricCard v-if="campaign.channels.includes('sms')" label="Reachable by SMS" :value="campaign.audience.sms" :hint="reachHint(campaign.audience.total, campaign.audience.sms, 'SMS')" />
+          <MetricCard v-if="campaign.channels.includes('email')" label="Reachable by email" :value="campaign.audience.email" :hint="reachHint(campaign.audience.total, campaign.audience.email, 'email')" />
         </div>
       </template>
       <p v-else class="muted">This campaign has no audience yet.</p>
@@ -232,6 +233,7 @@ onBeforeUnmount(() => stopWatching?.());
         <div><dt class="muted small">Created by</dt><dd data-testid="created-by">{{ campaign.created_by ?? "Not recorded" }}</dd></div>
         <div><dt class="muted small">Created</dt><dd>{{ formatDateTime(campaign.created_at) }}</dd></div>
         <div><dt class="muted small">Last updated</dt><dd>{{ formatDateTime(campaign.updated_at) }}</dd></div>
+        <div v-if="campaign.approved_at" data-testid="approved-version"><dt class="muted small">Approved</dt><dd>Version {{ campaign.version }}, {{ formatDateTime(campaign.approved_at) }}</dd></div>
       </dl>
     </section>
 
@@ -252,6 +254,7 @@ onBeforeUnmount(() => stopWatching?.());
     </section>
 
     <section v-else-if="tab === 'content' && campaign.content" id="panel-content" class="panel" role="tabpanel" aria-labelledby="tab-content">
+      <p v-if="campaign.approved_at" class="muted small" data-testid="approved-note">Version {{ campaign.version }}, approved {{ formatDateTime(campaign.approved_at) }}. This is exactly what is sent, and it can no longer change.</p>
       <ValidationNotice v-for="warning in campaign.content_warnings" :key="warning.field + warning.reason" tone="warning" title="Differs from the brief">
         {{ warning.message }}
       </ValidationNotice>
