@@ -2,7 +2,7 @@
 
 Turns a marketer's plain-language brief into a validated audience and SMS and email messages, waits for human approval, sends through a mock provider, and shows delivery status live. No real messages are ever sent.
 
-> **Status: in development.** The full path works with the mock AI: brief, validated audience, validated messages, approval, immediate or scheduled sending through the queue to the mock provider, live progress and a per-recipient report. `make test-e2e` covers it end to end. Worker crashes and outages are recovered from, and `make test-chaos` exercises them against a running stack. The OpenAI adapter is still to come. The UI components are visible with sample data at http://localhost:8080/design.
+> **Status: in development.** The full path works with the mock AI: brief, validated audience, validated messages, approval, immediate or scheduled sending through the queue to the mock provider, live progress and a per-recipient report. `make test-e2e` covers it end to end. Worker crashes and outages are recovered from, and `make test-chaos` exercises them against a running stack. The UI components are visible with sample data at http://localhost:8080/design.
 
 ## Run
 
@@ -25,7 +25,7 @@ The app asks for a username or email, prefilled with `marketer@example.com`. The
 
 ## LLM provider
 
-The system runs on a deterministic mock by default, and the top bar says so with a `Mock AI` badge. To use Claude, copy `.env.example` to `.env`, then set `LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`. A chosen provider without its key stops the API at startup instead of quietly using the mock. OpenAI support is planned but not available yet.
+The system runs on a deterministic mock by default, and the top bar says so with a `Mock AI` badge. To use a real model, copy `.env.example` to `.env`, then set `LLM_PROVIDER=anthropic` with `ANTHROPIC_API_KEY`, or `LLM_PROVIDER=openai` with `OPENAI_API_KEY`. `ANTHROPIC_MODEL` and `OPENAI_MODEL` change the model. A chosen provider without its key stops the API at startup instead of quietly using the mock.
 
 ## Telemetry
 

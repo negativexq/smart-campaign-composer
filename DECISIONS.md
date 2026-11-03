@@ -42,7 +42,9 @@ The product follows the pattern shared by Klaviyo, Insider One and Braze: descri
 
 ## LLM providers behind one application-level interface
 
-Claude is the primary provider, as the case requires. OpenAI and a deterministic mock share one interface defined by what the application needs, not by a vendor's wire format. Validation stays in the backend, so it does not depend on the provider. A chosen provider without its key fails at startup; there is no silent fallback to the mock. The OpenAI adapter comes after the end-to-end flow works.
+Claude is the primary provider, as the case requires. OpenAI and a deterministic mock share one interface defined by what the application needs, not by a vendor's wire format. Validation stays in the backend, so it does not depend on the provider. A chosen provider without its key fails at startup; there is no silent fallback to the mock.
+
+The OpenAI adapter uses the Responses API with a strict JSON schema and `store: false`, because nothing continues an earlier response and a brief has no reason to stay on OpenAI's side. Strict mode requires every property, while our segment filters are optional, so the adapter rewrites its copy of the schema: an optional property becomes required but may be null. The shared schema stays as it is, and `segment.ParseProposal` reads null the same as a missing filter. This adapter has no fallback model like the Claude one, so a refusal ends the attempt.
 
 ## Claude output is shaped by a schema but judged by the backend
 

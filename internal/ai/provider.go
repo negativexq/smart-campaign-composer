@@ -75,6 +75,7 @@ type Provider interface {
 
 const (
 	defaultAnthropicModel = "claude-opus-5-5"
+	defaultOpenAIModel    = "gpt-6-astra"
 	// mockStreamDelay makes the mock's stream visible in a demo; tests skip it.
 	mockStreamDelay = 25 * time.Millisecond
 )
@@ -98,10 +99,15 @@ func NewFromEnv(getenv func(string) string) (Provider, error) {
 		}
 		return NewAnthropic(key, model), nil
 	case "openai":
-		if getenv("OPENAI_API_KEY") == "" {
+		key := getenv("OPENAI_API_KEY")
+		if key == "" {
 			return nil, errors.New("LLM_PROVIDER=openai requires OPENAI_API_KEY")
 		}
-		return nil, errors.New("LLM_PROVIDER=openai is not available yet")
+		model := getenv("OPENAI_MODEL")
+		if model == "" {
+			model = defaultOpenAIModel
+		}
+		return NewOpenAI(key, model), nil
 	default:
 		return nil, fmt.Errorf("unknown LLM_PROVIDER %q; use mock, anthropic or openai", name)
 	}
