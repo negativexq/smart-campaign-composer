@@ -339,7 +339,7 @@ func TestGenerationPreconditions(t *testing.T) {
 	t.Run("blocked audience", func(t *testing.T) {
 		t.Parallel()
 		h := newHarness(t, step{output: validProposal})
-		blocked := `{"segment":{"city":"Ankara"},"assumptions":[],"unsupported_conditions":["age"]}`
+		blocked := `{"segment":{"city":"İstanbul"},"assumptions":[],"unsupported_conditions":["age"]}`
 		h.service = h.serviceWith(&contentProvider{scriptedProvider: scriptedProvider{steps: []step{{output: blocked}}}, contentSteps: []step{{output: validContent}}})
 		id := h.create(t)
 		if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
@@ -681,8 +681,19 @@ func TestOneChannelCannotBeGivenADifferentDiscount(t *testing.T) {
 
 func TestAHandEditedDiscountMustMatchAcrossChannelsToApprove(t *testing.T) {
 	t.Parallel()
-	h, _, id := newContentHarness(t, step{output: `{"sms":"30% {{first_name}}","email_subject":"30% off","email_body":"Your 30% is waiting."}`})
+	h := newHarness(t, step{output: validProposal})
+	provider := &contentProvider{scriptedProvider: scriptedProvider{steps: []step{{output: validProposal}}}, contentSteps: []step{
+		{output: `{"sms":"30% {{first_name}}","email_subject":"30% off","email_body":"Your 30% is waiting."}`},
+	}}
+	h.service = h.serviceWith(provider)
 	ctx := context.Background()
+	id, err := h.service.Create(ctx, secretBrief+" with a 30% discount")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
+		t.Fatal(err)
+	}
 	first, _, err := run(t, h, id, campaign.GenerateInput{})
 	if err == nil {
 		edited := first.Content.Content

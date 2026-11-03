@@ -79,7 +79,7 @@ func (*Mock) ProposeSegment(_ context.Context, request SegmentRequest) (Response
 	proposal.CampaignName = mockName(proposal.Segment)
 	proposal.UpdatedBrief = ""
 	if request.Refinement != "" {
-		proposal.UpdatedBrief = mockUpdatedBrief(request.Brief, request.Refinement)
+		proposal.UpdatedBrief = mockUpdatedBrief(request.Brief, request.Refinement, before.City, proposal.Segment.City)
 	}
 
 	output, err := json.Marshal(proposal)
@@ -89,13 +89,19 @@ func (*Mock) ProposeSegment(_ context.Context, request SegmentRequest) (Response
 	return Response{Output: output}, nil
 }
 
-// mockUpdatedBrief swaps a day count the refinement gives and otherwise adds the
-// refinement to the end, which is as far as keywords can rewrite a sentence.
-func mockUpdatedBrief(brief, refinement string) string {
+// mockUpdatedBrief swaps a day count or city the refinement changes and otherwise
+// adds the refinement to the end, which is as far as keywords can rewrite a sentence.
+func mockUpdatedBrief(brief, refinement string, oldCity, newCity *string) string {
 	wanted := daysPattern.FindStringSubmatch(refinement)
 	current := daysPattern.FindStringSubmatchIndex(brief)
 	if wanted != nil && current != nil && !quietPattern.MatchString(mockFold(refinement)) {
 		return brief[:current[2]] + wanted[1] + brief[current[3]:]
+	}
+	if oldCity != nil && newCity != nil && *oldCity != *newCity && strings.Contains(brief, *oldCity) {
+		return strings.ReplaceAll(brief, *oldCity, *newCity)
+	}
+	if clearPattern.MatchString(mockFold(refinement)) {
+		return refinement
 	}
 	return brief + " " + refinement
 }

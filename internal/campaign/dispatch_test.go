@@ -1,9 +1,9 @@
 package campaign_test
 
 import (
-	"slices"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -604,7 +604,6 @@ func TestAScheduledRunIsTheSystemsOnBehalfOfWhoeverSetItUp(t *testing.T) {
 		t.Fatalf("run: %+v", run)
 	}
 }
-
 
 func TestAScheduledRunStaysOnTheCampaignsChannels(t *testing.T) {
 	t.Parallel()

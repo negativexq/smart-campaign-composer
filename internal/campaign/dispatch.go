@@ -96,6 +96,9 @@ func (s *Service) Approve(ctx context.Context, id string) (View, error) {
 	if issues := content.CheckMessages(view.Content.Content, view.ContentLimits); len(issues) > 0 {
 		return View{}, &content.ValidationError{Issues: issues}
 	}
+	if content.DiscountsDiffer(view.Content.Content) {
+		return View{}, ErrChannelDiscount
+	}
 
 	breakdown, err := segment.Narrow(ctx, tx, view.Proposal.Segment, view.AudienceAsOf)
 	if err != nil {

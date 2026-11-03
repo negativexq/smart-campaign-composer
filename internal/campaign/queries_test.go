@@ -169,7 +169,7 @@ func TestActivityTellsHowTheAudienceChanged(t *testing.T) {
 	h := newHarness(t, step{output: validProposal}, step{output: withUpdatedBrief(validProposal, secretBrief)})
 	ctx := context.Background()
 	id := h.create(t)
-	edited := "Istanbul users"
+	edited := "Istanbul users with a cart from the last 30 days who did not buy"
 	for _, input := range []campaign.ProposeInput{{}, {Refinement: "narrower"}, {Brief: &edited}} {
 		if _, err := h.service.ProposeSegment(ctx, id, input); err != nil {
 			t.Fatalf("propose: %v", err)

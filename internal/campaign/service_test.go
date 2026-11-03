@@ -30,7 +30,8 @@ var referenceTime = time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 const (
 	validProposal   = `{"segment":{"city":"İstanbul","cart_added_within_days":30,"no_purchase_since_cart":true},"assumptions":[],"unsupported_conditions":[]}`
 	invalidProposal = `{"segment":{"city":"Atlantis"},"assumptions":[],"unsupported_conditions":[]}`
-	secretBrief     = "Remind Ayşe, phone +905001234567, about her cart"
+	ankaraProposal  = `{"segment":{"city":"Ankara"},"assumptions":[],"unsupported_conditions":[]}`
+	secretBrief     = "Remind Ayşe, phone +905001234567, in İstanbul about her cart from the last 30 days that she did not buy"
 )
 
 type step struct {
@@ -248,7 +249,7 @@ func TestProviderFailuresAreNotRetriedAsRepairs(t *testing.T) {
 func TestRefinementEditsTheSameDraft(t *testing.T) {
 	t.Parallel()
 	narrower := strings.Replace(validProposal, `"cart_added_within_days":30`, `"cart_added_within_days":4`, 1)
-	h := newHarness(t, step{output: validProposal}, step{output: withUpdatedBrief(narrower, secretBrief)})
+	h := newHarness(t, step{output: validProposal}, step{output: withUpdatedBrief(narrower, strings.Replace(secretBrief, "30 days", "4 days", 1))})
 	id := h.create(t)
 	ctx := context.Background()
 
@@ -275,7 +276,7 @@ func TestRefinementEditsTheSameDraft(t *testing.T) {
 
 func TestEditingTheBriefStartsOver(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t, step{output: validProposal})
+	h := newHarness(t, step{output: validProposal}, step{output: ankaraProposal})
 	id := h.create(t)
 	ctx := context.Background()
 	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
@@ -298,15 +299,15 @@ func TestEditingTheBriefStartsOver(t *testing.T) {
 func TestBlockers(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name, output, want, reason string
+		name, brief, output, want, reason string
 	}{
 		{
-			"unsupported condition",
+			"unsupported condition", "Ankara users over 25",
 			`{"segment":{"city":"Ankara"},"assumptions":[],"unsupported_conditions":["users over 25"]}`,
 			"users over 25", "unsupported_condition",
 		},
 		{
-			"nobody matches",
+			"nobody matches", "English speaking Ankara users",
 			`{"segment":{"city":"Ankara","language":"en"},"assumptions":[],"unsupported_conditions":[]}`,
 			"No users match", "empty_audience",
 		},
@@ -315,7 +316,10 @@ func TestBlockers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			h := newHarness(t, step{output: tt.output})
-			id := h.create(t)
+			id, err := h.service.Create(context.Background(), tt.brief)
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
 			view, err := h.service.ProposeSegment(context.Background(), id, campaign.ProposeInput{})
 			if err != nil {
 				t.Fatalf("propose: %v", err)
@@ -397,7 +401,7 @@ func withUpdatedBrief(proposal, brief string) string {
 func TestARefinementUpdatesTheBrief(t *testing.T) {
 	t.Parallel()
 	const updated = "Ankara customers who bought in the last 14 days"
-	h := newHarness(t, step{output: validProposal}, step{output: withUpdatedBrief(validProposal, updated)})
+	h := newHarness(t, step{output: validProposal}, step{output: withUpdatedBrief(`{"segment":{"city":"Ankara","purchased_within_days":14},"assumptions":[],"unsupported_conditions":[]}`, updated)})
 	id := h.create(t)
 	ctx := context.Background()
 	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
@@ -496,7 +500,7 @@ func TestARewrittenBriefMustAgreeWithTheChosenDiscount(t *testing.T) {
 	t.Parallel()
 	const brief = "Ankara customers with 30% off"
 	offer := 30
-	h := newHarness(t, step{output: validProposal}, step{output: withUpdatedBrief(validProposal, "Ankara customers with 50% off")})
+	h := newHarness(t, step{output: ankaraProposal}, step{output: withUpdatedBrief(ankaraProposal, "Ankara customers with 50% off")})
 	ctx := context.Background()
 	id, err := h.service.CreateWith(ctx, campaign.NewCampaign{Brief: brief, OfferPercent: &offer})
 	if err != nil {

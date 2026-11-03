@@ -79,7 +79,7 @@ func TestAProposalWithoutANameKeepsTheCurrentOne(t *testing.T) {
 
 func TestEditingTheBriefUpdatesAProvisionalName(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t, step{output: validProposal})
+	h := newHarness(t, step{output: ankaraProposal})
 	id := h.create(t)
 	edited := "Ankara users"
 	view, err := h.service.ProposeSegment(context.Background(), id, campaign.ProposeInput{Brief: &edited})

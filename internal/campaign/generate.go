@@ -52,6 +52,7 @@ var (
 	ErrGenerationRunning  = errors.New("content is already being generated")
 	ErrContentRejected    = errors.New("content failed validation")
 	ErrInvalidInstruction = errors.New("instruction is too long")
+	ErrChannelDiscount    = errors.New("channels would promise different discounts")
 )
 
 // freeToDraft is the SQL condition for a campaign nothing else is generating
@@ -86,6 +87,7 @@ type Generation struct {
 	view        View
 	instruction string
 	channel     string
+	cities      []string
 }
 
 // StartGeneration checks the campaign can get content and claims it, so that
@@ -117,6 +119,14 @@ func (s *Service) StartGeneration(ctx context.Context, id string, input Generate
 	if view.Content == nil {
 		channel = ""
 	}
+	// The other channel keeps its text, so a new discount here would split the offer.
+	if channel != "" && len(view.Channels) > 1 && content.NewDiscount(instruction, view.writingBrief()) {
+		return nil, ErrChannelDiscount
+	}
+	cities, err := s.cities(ctx)
+	if err != nil {
+		return nil, err
+	}
 	result, err := s.db.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1 AND `+freeToDraft, id, statusGenerating)
 	if err != nil {
 		return nil, fmt.Errorf("claim generation: %w", err)
@@ -124,7 +134,7 @@ func (s *Service) StartGeneration(ctx context.Context, id string, input Generate
 	if result.RowsAffected() == 0 {
 		return nil, ErrGenerationRunning
 	}
-	return &Generation{service: s, view: view, instruction: instruction, channel: channel}, nil
+	return &Generation{service: s, view: view, instruction: instruction, channel: channel, cities: cities}, nil
 }
 
 // Run writes the messages, repairing invalid output a bounded number of times.
@@ -299,6 +309,8 @@ func (g *Generation) validate(ctx context.Context, output []byte, offerSource st
 	if err == nil {
 		if issues := content.CheckLinks(generated, g.linkSource()); len(issues) > 0 {
 			err = &content.ValidationError{Issues: issues}
+		} else if issues := content.CheckFacts(generated, g.factSource(), g.cities); len(issues) > 0 {
+			err = &content.ValidationError{Issues: issues}
 		}
 	}
 	var invalid *content.ValidationError
@@ -307,6 +319,16 @@ func (g *Generation) validate(ctx context.Context, output []byte, offerSource st
 		span.SetAttributes(attribute.StringSlice("validation.reasons", issueReasons(invalid)))
 	}
 	return generated, err
+}
+
+// factSource is everything a message may state a city or number from: what the
+// person wrote and the audience it goes to.
+func (g *Generation) factSource() string {
+	source := g.view.writingBrief() + "\n" + g.instruction
+	for _, condition := range g.view.Conditions {
+		source += "\n" + condition.Value
+	}
+	return source
 }
 
 // linkSource is everything a person wrote that a generated link may come from,

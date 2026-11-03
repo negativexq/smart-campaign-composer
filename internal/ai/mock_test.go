@@ -203,7 +203,7 @@ func TestMockRewritesTheBriefForARefinement(t *testing.T) {
 	for _, test := range []struct{ brief, refinement, want string }{
 		{"Ankara customers who bought in the last 60 days", "make it 14 days", "Ankara customers who bought in the last 14 days"},
 		{"Ankara'da son 60 günde alışveriş yapanlar", "14 gün yapalım", "Ankara'da son 14 günde alışveriş yapanlar"},
-		{"Ankara users who abandoned their cart", "only in Izmir", "Ankara users who abandoned their cart only in Izmir"},
+		{"Ankara users who abandoned their cart", "only in Izmir", "İzmir users who abandoned their cart"},
 	} {
 		first := proposeWithMock(t, ai.SegmentRequest{Brief: test.brief})
 		current, err := json.Marshal(first)

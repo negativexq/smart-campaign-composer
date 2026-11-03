@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/negativexq/smart-campaign-composer/internal/matching"
 )
 
 const (
@@ -317,6 +319,55 @@ func AddsOffersOrLinks(text string, sources ...string) bool {
 		}
 	}
 	return slices.ContainsFunc(linkPattern.FindAllString(text, -1), func(link string) bool { return !strings.Contains(source, link) })
+}
+
+// CheckFacts refuses generated text that states a city or number the source does
+// not. A model must not make up where an offer applies or how long it lasts.
+func CheckFacts(c Content, source string, cities []string) []Issue {
+	named := matching.Cities(source, cities)
+	numbers := matching.Numbers(source)
+	issues := []Issue{}
+	for _, field := range []struct{ name, text string }{
+		{FieldSMS, c.SMS},
+		{FieldEmailSubject, c.EmailSubject},
+		{FieldEmailPreheader, c.EmailPreheader},
+		{FieldEmailHeadline, c.EmailHeadline},
+		{FieldEmailBody, c.EmailBody},
+		{FieldEmailCTALabel, c.EmailCTALabel},
+	} {
+		for _, mention := range matching.Cities(field.text, cities) {
+			if !slices.ContainsFunc(named, func(other matching.CityMention) bool { return other.City == mention.City }) {
+				issues = append(issues, Issue{field.name, "invented_city", fmt.Sprintf("It mentions %s, which is not in the brief.", mention.City)})
+				break
+			}
+		}
+		for _, number := range matching.Numbers(field.text) {
+			if !slices.Contains(numbers, number) {
+				issues = append(issues, Issue{field.name, "invented_number", fmt.Sprintf("It mentions %s, which is not in the brief.", number)})
+				break
+			}
+		}
+	}
+	return issues
+}
+
+// DiscountsDiffer reports whether the SMS and the email promise different
+// discounts. One channel saying nothing is left to the check against the brief.
+func DiscountsDiffer(c Content) bool {
+	sms := discounts(c.SMS)
+	email := discounts(strings.Join([]string{c.EmailSubject, c.EmailPreheader, c.EmailHeadline, c.EmailBody, c.EmailCTALabel}, "\n"))
+	if len(sms) == 0 || len(email) == 0 {
+		return false
+	}
+	slices.Sort(sms)
+	slices.Sort(email)
+	return !slices.Equal(sms, email)
+}
+
+// NewDiscount reports whether an instruction names a discount the brief does not.
+func NewDiscount(instruction, brief string) bool {
+	known := discounts(brief)
+	return slices.ContainsFunc(discounts(instruction), func(found int) bool { return !slices.Contains(known, found) })
 }
 
 // OfferSource picks the text that defines the offer: an instruction that names a

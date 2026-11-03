@@ -492,6 +492,8 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusBadRequest, "Choose SMS, email or both."
 	case errors.Is(err, campaign.ErrInvalidOptions):
 		status, message = http.StatusBadRequest, "Check the tone, the discount of 1 to 100 percent and the days to skip of 1 to 365."
+	case errors.Is(err, campaign.ErrChannelDiscount):
+		status, message = http.StatusConflict, "The SMS and the email would promise different discounts. Change the discount in the brief, or make both messages say the same."
 	case errors.Is(err, campaign.ErrOfferConflict):
 		status, message = http.StatusBadRequest, "The brief mentions a different discount than the one you entered. Change one of them."
 	case errors.Is(err, campaign.ErrInvalidName):

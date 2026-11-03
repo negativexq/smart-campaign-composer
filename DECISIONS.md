@@ -252,3 +252,17 @@ Moving to another step saves what was typed, so there is no separate save button
 Campaign emails looked plain, and a marketer now picks one of three designs (Classic, Announcement, Offer) on the Email step and sees it in the preview, which the backend renders with the same code that sends. The choice is stored with the messages, so an approved email is frozen along with its design, and drafts from before this feature keep rendering as Classic.
 
 The templates are code, not data. People and models still only write text that `html/template` escapes, so a custom template or a markup editor would be a new attack surface and is left for later. A model cannot pick a template: its value is dropped when output is parsed, and regenerating keeps what the person chose. There is no logo or brand color yet, because the product has no brand settings to take them from.
+
+## The rule and the messages are compared with the brief
+
+Schema validation proves a rule is well formed, not that it is the right rule: a model answering İzmir to a brief about Ankara passed every check, and only a person reading the rule could notice. The backend now reads the brief without a model and compares what it can read: cities, lengths of time, cart and purchase words, and language.
+
+A rule that says something the brief does not is returned to the model with the reason, the same way as a schema failure, and after three attempts nothing is stored. What the rule leaves out is different, because those words may not be about the audience at all, so it is not a rejection. It becomes a blocker the marketer resolves by refining the rule or editing the brief. After a refinement the comparison uses the rewritten brief, so the rule and the brief saved together cannot disagree.
+
+The reader only knows closed lists: listed Turkish endings for a city, listed units and number words for a time, listed stems for behaviour. Reading less than a person does is the point. It cannot prove a rule right, only catch these specific disagreements, so showing the rule with its evidence and asking for approval stays. A list that guesses would block good campaigns, and a false block costs a marketer trust as quickly as a wrong rule does, so every case in the tests has a paired brief that must still pass ("hafta sonu" is not a time window, "%30" is not a number of days, "güncelleme" is not a city ending). Words the lists do not know, such as an English city name, pass this check.
+
+A city is recognised from the users table and from a list of Turkish provinces, because a brief naming a city with no users yet must not read as naming no city. Provinces that are also common words (Van, Ordu, Kars) are left out of the list.
+
+Generated messages get the same treatment: a city or number that is not in the brief, the instruction or the audience is refused, so a model cannot add "last 3 days" or a store in another city. This covers generated text only. A person editing a message may write what they like, except a discount that differs between channels, which cannot be approved. Asking one channel for a new discount is refused up front, because the other channel keeps its text and the offer would split.
+
+We tried this on `gpt-6-luna` with 23 ordinary briefs and refinements, and none was blocked by mistake. With briefs and refinements pushing the model to a wrong rule, four answers were rejected for a city or window not in the brief, and each repaired or stayed consistent before anything was stored.

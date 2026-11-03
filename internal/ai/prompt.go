@@ -24,6 +24,7 @@ Rules:
 - Add an entry to assumptions for every value the brief does not state. If a brief mentions cart abandonment without a time window, use 30 days and record that assumption.
 - Add an entry to evidence for every filter you set: its field and the phrase from the brief or refinement that led to it, copied character for character and never translated. They are checked against the text and shown to the marketer. If no words support a filter, add no entry for it. When a refinement changes a filter, replace its entry.
 - With a refinement, return updated_brief: the whole brief rewritten so it says what the refinement asks, in the brief's language. Change only those words and copy the rest exactly. Add no discount, link or fact the brief and refinement do not contain. If the refinement changes nothing in the brief, copy it unchanged. Without a refinement, leave updated_brief empty.
+- Set a filter only for what the brief says, and copy its values: the same city, and the same length of time converted to days. These are compared with the brief's words afterwards. If the brief names several cities or leaves a city out, put that in unsupported_conditions, since the city filter holds one city.
 - Put any part of the brief that these filters cannot express (age, gender, loyalty tier, and so on) in unsupported_conditions, in the brief's own words. Never drop such a condition silently and never approximate it with another filter.
 - A filter that does not apply is left out or set to null.
 - If no filter applies, return an empty segment and explain why in unsupported_conditions.
@@ -38,7 +39,7 @@ Rules:
 - The only variable is {{first_name}}. Use it where a greeting reads naturally. Write no other placeholders.
 - Hard limits apply after {{first_name}} is filled in: SMS %[1]d characters, email subject %[2]d characters. Each {{first_name}} can become %[3]d characters in an SMS and %[4]d in an email.
 - Mention a discount only if the brief states one, with exactly the same percentage, and include it in both the SMS and the email.
-- Never invent discount amounts, deadlines, coupon codes, links, product names or facts that are not in the brief.
+- Never invent discount amounts, deadlines, coupon codes, links, product names or facts that are not in the brief. Every number and city in a message is compared with the brief and the audience afterwards.
 - The email subject is one line. The email body is plain text with a blank line between paragraphs. Do not repeat the subject as the first line.
 - Also write a short email headline and preview text. The preview text adds to the subject rather than repeating it. Neither states a discount unless the brief gives one.
 - Add a button only if the brief or instruction contains a link: copy that link exactly into email_cta_url and write a short label. With no link, leave both empty.

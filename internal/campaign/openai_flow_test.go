@@ -64,19 +64,31 @@ func (f *openAIFlow) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintf(w, "event: response.output_text.delta\ndata: %s\n\nevent: response.completed\ndata: %s\n\n", delta, done)
 }
 
+// ankaraBrief is what strictProposal expresses.
+const ankaraBrief = "Ankara customers who bought in the last 30 days"
+
 func newOpenAIHarness(t *testing.T, outputs ...string) (*harness, *openAIFlow, string) {
+	t.Helper()
+	return newOpenAIHarnessFor(t, secretBrief, outputs...)
+}
+
+func newOpenAIHarnessFor(t *testing.T, brief string, outputs ...string) (*harness, *openAIFlow, string) {
 	t.Helper()
 	h := newHarness(t)
 	flow := &openAIFlow{outputs: outputs}
 	server := httptest.NewServer(flow)
 	t.Cleanup(server.Close)
 	h.service = h.serviceWith(ai.NewOpenAI("test-key", "gpt-test", option.WithBaseURL(server.URL), option.WithMaxRetries(0)))
-	return h, flow, h.create(t)
+	id, err := h.service.Create(context.Background(), brief)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	return h, flow, id
 }
 
 func TestOpenAINullsMeanNoFilter(t *testing.T) {
 	t.Parallel()
-	h, _, id := newOpenAIHarness(t, strictProposal)
+	h, _, id := newOpenAIHarnessFor(t, ankaraBrief, strictProposal)
 	view, err := h.service.ProposeSegment(context.Background(), id, campaign.ProposeInput{})
 	if err != nil {
 		t.Fatalf("propose: %v", err)
@@ -107,7 +119,7 @@ func TestOpenAIOutputIsCheckedLikeAnyOther(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			h, flow, id := newOpenAIHarness(t, rejected)
+			h, flow, id := newOpenAIHarnessFor(t, ankaraBrief, rejected)
 			_, err := h.service.ProposeSegment(context.Background(), id, campaign.ProposeInput{})
 			if !errors.Is(err, campaign.ErrProposalRejected) {
 				t.Fatalf("got %v", err)
@@ -128,7 +140,7 @@ func TestOpenAIOutputIsCheckedLikeAnyOther(t *testing.T) {
 
 func TestOpenAIRepairsAfterABadAnswer(t *testing.T) {
 	t.Parallel()
-	h, flow, id := newOpenAIHarness(t, "```json\n"+strictProposal+"\n```", strictProposal)
+	h, flow, id := newOpenAIHarnessFor(t, ankaraBrief, "```json\n"+strictProposal+"\n```", strictProposal)
 	view, err := h.service.ProposeSegment(context.Background(), id, campaign.ProposeInput{})
 	if err != nil {
 		t.Fatalf("propose: %v", err)
@@ -140,8 +152,8 @@ func TestOpenAIRepairsAfterABadAnswer(t *testing.T) {
 
 func TestOpenAIRefinementFlow(t *testing.T) {
 	t.Parallel()
-	refined := strings.Replace(strings.Replace(strictProposal, `"updated_brief":""`, `"updated_brief":"Ankara, 14 days"`, 1), `"purchased_within_days":30`, `"purchased_within_days":14`, 1)
-	h, _, id := newOpenAIHarness(t, strictProposal, refined)
+	refined := strings.Replace(strings.Replace(strictProposal, `"updated_brief":""`, `"updated_brief":"Ankara customers who bought in the last 14 days"`, 1), `"purchased_within_days":30`, `"purchased_within_days":14`, 1)
+	h, _, id := newOpenAIHarnessFor(t, ankaraBrief, strictProposal, refined)
 	ctx := context.Background()
 	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
 		t.Fatalf("propose: %v", err)
@@ -150,7 +162,7 @@ func TestOpenAIRefinementFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("refine: %v", err)
 	}
-	if view.Brief != "Ankara, 14 days" || *view.Proposal.Segment.PurchasedWithinDays != 14 {
+	if view.Brief != "Ankara customers who bought in the last 14 days" || *view.Proposal.Segment.PurchasedWithinDays != 14 {
 		t.Fatalf("view: %q %+v", view.Brief, view.Proposal.Segment)
 	}
 }

@@ -68,6 +68,9 @@ type Proposal struct {
 	Assumptions           []Assumption `json:"assumptions"`
 	Evidence              []Evidence   `json:"evidence"`
 	UnsupportedConditions []string     `json:"unsupported_conditions"`
+	// Unmatched is what the brief mentions and the rule leaves out. Only
+	// CheckAgainstBrief writes it, so a model cannot clear it.
+	Unmatched []string `json:"unmatched,omitempty"`
 }
 
 // ValidationError lists everything wrong with a proposal, in words that work

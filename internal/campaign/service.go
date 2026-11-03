@@ -40,6 +40,7 @@ const (
 	outcomeSuccess     = "success"
 	outcomeInvalid     = "invalid_output"
 	reasonUnsupported  = "unsupported_condition"
+	reasonUnmatched    = "brief_not_matched"
 	reasonEmpty        = "empty_audience"
 	reasonNoConsent    = "no_consented_recipients"
 	eventRenamed       = "campaign.renamed"
@@ -325,7 +326,9 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 		}
 		request.Refinement = ""
 	} else if input.Refinement != "" && stored.Proposal != nil {
-		if request.Current, err = json.Marshal(stored.Proposal); err != nil {
+		current := *stored.Proposal
+		current.Unmatched = nil
+		if request.Current, err = json.Marshal(current); err != nil {
 			return View{}, fmt.Errorf("encode current proposal: %w", err)
 		}
 	}
@@ -333,7 +336,7 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 		return View{}, err
 	}
 
-	proposal, attempts, err := s.generateProposal(ctx, request)
+	proposal, attempts, err := s.generateProposal(ctx, request, stored.NotMessagedWithinDays)
 	if err != nil {
 		return View{}, err
 	}
@@ -392,7 +395,7 @@ func proposalTrigger(input ProposeInput) string {
 	}
 }
 
-func (s *Service) generateProposal(ctx context.Context, request ai.SegmentRequest) (segment.Proposal, int, error) {
+func (s *Service) generateProposal(ctx context.Context, request ai.SegmentRequest, chosenQuietDays *int) (segment.Proposal, int, error) {
 	var lastInvalid *segment.ValidationError
 	for attempt := 1; attempt <= MaxProposalAttempts; attempt++ {
 		response, err := s.callProvider(ctx, request, attempt)
@@ -402,6 +405,9 @@ func (s *Service) generateProposal(ctx context.Context, request ai.SegmentReques
 		proposal, err := s.validateProposal(ctx, response.Output, request.Cities)
 		if err == nil {
 			err = checkUpdatedBrief(&proposal, request)
+		}
+		if err == nil {
+			err = checkAgainstBrief(&proposal, request, chosenQuietDays)
 		}
 		if err == nil {
 			s.metrics.LLMRequests.WithLabelValues(operationSegment, s.provider.Name(), outcomeSuccess).Inc()
@@ -441,6 +447,19 @@ func checkUpdatedBrief(proposal *segment.Proposal, request ai.SegmentRequest) er
 		}
 	}
 	proposal.UpdatedBrief = updated
+	return nil
+}
+
+// checkAgainstBrief compares the rule with the brief it will be saved with, which
+// after a refinement is the rewritten one, so the two cannot drift apart.
+func checkAgainstBrief(proposal *segment.Proposal, request ai.SegmentRequest, chosenQuietDays *int) error {
+	brief := request.Brief
+	if request.Refinement != "" {
+		brief = proposal.UpdatedBrief
+	}
+	if problems := segment.CheckAgainstBrief(proposal, brief, request.Cities, chosenQuietDays); problems != nil {
+		return problems
+	}
 	return nil
 }
 
@@ -719,6 +738,10 @@ func blockersFor(proposal segment.Proposal, counts segment.Counts) []blocker {
 	for _, condition := range proposal.UnsupportedConditions {
 		blockers = append(blockers, blocker{reasonUnsupported, fmt.Sprintf(
 			"The brief asks for %q, which no audience filter can express. Refine the audience to remove it.", condition)})
+	}
+	for _, note := range proposal.Unmatched {
+		blockers = append(blockers, blocker{reasonUnmatched, fmt.Sprintf(
+			"The brief mentions %s, but the rule does not use it. Refine the audience or edit the brief so they say the same thing.", note)})
 	}
 	switch {
 	case counts.Total == 0:
