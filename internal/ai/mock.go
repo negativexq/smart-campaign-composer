@@ -77,12 +77,27 @@ func (*Mock) ProposeSegment(_ context.Context, request SegmentRequest) (Response
 	applyFilters(&proposal, folded, request.Cities)
 	addMockEvidence(&proposal, before, text)
 	proposal.CampaignName = mockName(proposal.Segment)
+	proposal.UpdatedBrief = ""
+	if request.Refinement != "" {
+		proposal.UpdatedBrief = mockUpdatedBrief(request.Brief, request.Refinement)
+	}
 
 	output, err := json.Marshal(proposal)
 	if err != nil {
 		return Response{}, fmt.Errorf("%w: %w", ErrInvalidOutput, err)
 	}
 	return Response{Output: output}, nil
+}
+
+// mockUpdatedBrief swaps a day count the refinement gives and otherwise adds the
+// refinement to the end, which is as far as keywords can rewrite a sentence.
+func mockUpdatedBrief(brief, refinement string) string {
+	wanted := daysPattern.FindStringSubmatch(refinement)
+	current := daysPattern.FindStringSubmatchIndex(brief)
+	if wanted != nil && current != nil && !quietPattern.MatchString(mockFold(refinement)) {
+		return brief[:current[2]] + wanted[1] + brief[current[3]:]
+	}
+	return brief + " " + refinement
 }
 
 func addUnsupported(proposal *segment.Proposal, folded string) {

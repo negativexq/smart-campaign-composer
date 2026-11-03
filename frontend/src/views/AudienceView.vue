@@ -21,6 +21,7 @@ const loadError = ref("");
 const actionError = ref("");
 const busyMessage = ref("");
 const refinement = ref("");
+const briefUpdatedBy = ref("");
 const editingBrief = ref(false);
 const editedBrief = ref("");
 // The results build up in order only right after a search, not when a draft is reopened.
@@ -43,6 +44,7 @@ const asOf = computed(() =>
 async function propose(input: { brief?: string; refinement?: string }, message: string) {
   busyMessage.value = message;
   actionError.value = "";
+  briefUpdatedBy.value = "";
   try {
     campaign.value = await proposeSegment(props.campaignId, input);
     staged.value = true;
@@ -56,7 +58,11 @@ async function propose(input: { brief?: string; refinement?: string }, message: 
 }
 
 async function refine() {
-  if (await propose({ refinement: refinement.value }, "Updating the segment rule...")) refinement.value = "";
+  const asked = refinement.value;
+  const before = campaign.value?.brief;
+  if (!(await propose({ refinement: asked }, "Updating the segment rule..."))) return;
+  refinement.value = "";
+  if (campaign.value?.brief !== before) briefUpdatedBy.value = asked;
 }
 
 function startEditingBrief() {
@@ -108,6 +114,7 @@ onMounted(async () => {
       </template>
       <template v-else>
         <p data-testid="brief-text">{{ editingBrief ? editedBrief : campaign.brief }}</p>
+        <p v-if="briefUpdatedBy" class="small muted" data-testid="brief-updated">Updated from your request: "{{ briefUpdatedBy }}"</p>
         <button class="button button--secondary" type="button" :disabled="Boolean(busyMessage)" @click="startEditingBrief">Edit brief</button>
       </template>
     </section>

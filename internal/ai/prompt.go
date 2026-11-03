@@ -23,6 +23,7 @@ Also suggest campaign_name: a short title of 2 to 5 words saying who the campaig
 Rules:
 - Add an entry to assumptions for every value the brief does not state. If a brief mentions cart abandonment without a time window, use 30 days and record that assumption.
 - Add an entry to evidence for every filter you set: its field and the phrase from the brief or refinement that led to it, copied character for character and never translated. They are checked against the text and shown to the marketer. If no words support a filter, add no entry for it. When a refinement changes a filter, replace its entry.
+- With a refinement, return updated_brief: the whole brief rewritten so it says what the refinement asks, in the brief's language. Change only those words and copy the rest exactly. Add no discount, link or fact the brief and refinement do not contain. If the refinement changes nothing in the brief, copy it unchanged. Without a refinement, leave updated_brief empty.
 - Put any part of the brief that these filters cannot express (age, gender, loyalty tier, and so on) in unsupported_conditions, in the brief's own words. Never drop such a condition silently and never approximate it with another filter.
 - A filter that does not apply is left out or set to null.
 - If no filter applies, return an empty segment and explain why in unsupported_conditions.
@@ -83,7 +84,7 @@ func segmentUserMessage(request SegmentRequest) string {
 		fmt.Fprintf(&message, "\n<current_proposal>\n%s\n</current_proposal>\n", request.Current)
 	}
 	if request.Refinement != "" {
-		fmt.Fprintf(&message, "\n<refinement>\n%s\n</refinement>\nApply this change to the current proposal and keep everything else.\n", request.Refinement)
+		fmt.Fprintf(&message, "\n<refinement>\n%s\n</refinement>\nApply this change to the current proposal and keep everything else. Return the brief with this change as updated_brief.\n", request.Refinement)
 	}
 	if request.ValidationError != "" {
 		fmt.Fprintf(&message, "\n<previous_output>\n%s\n</previous_output>\nThat output was rejected: %s\nReturn a corrected proposal.\n", request.PreviousOutput, request.ValidationError)

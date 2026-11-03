@@ -166,7 +166,7 @@ func TestOverviewCountsMatchTheFilters(t *testing.T) {
 
 func TestActivityTellsHowTheAudienceChanged(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t, step{output: validProposal})
+	h := newHarness(t, step{output: validProposal}, step{output: withUpdatedBrief(validProposal, secretBrief)})
 	ctx := context.Background()
 	id := h.create(t)
 	edited := "Istanbul users"

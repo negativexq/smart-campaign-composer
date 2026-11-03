@@ -275,6 +275,8 @@ func CheckDiscounts(c Content, source string) []Issue {
 	return issues
 }
 
+var linkPattern = regexp.MustCompile(`https?://[^\s<>"]+[^\s<>".,;:!?)]`)
+
 func discounts(text string) []int {
 	found := []int{}
 	for _, match := range discountPattern.FindAllStringSubmatch(text, -1) {
@@ -294,6 +296,20 @@ func OfferAgrees(text string, percent int) bool {
 		}
 	}
 	return true
+}
+
+// AddsOffersOrLinks reports whether text has a discount or link that none of the
+// sources has. Message writers trust these in a brief, so a model rewriting one
+// must not bring in new ones.
+func AddsOffersOrLinks(text string, sources ...string) bool {
+	source := strings.Join(sources, "\n")
+	known := discounts(source)
+	for _, found := range discounts(text) {
+		if !slices.Contains(known, found) {
+			return true
+		}
+	}
+	return slices.ContainsFunc(linkPattern.FindAllString(text, -1), func(link string) bool { return !strings.Contains(source, link) })
 }
 
 // OfferSource picks the text that defines the offer: an instruction that names a

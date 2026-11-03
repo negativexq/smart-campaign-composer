@@ -59,8 +59,11 @@ type Evidence struct {
 
 // Proposal is a validated audience proposal. UnsupportedConditions lists parts
 // of the brief no filter can express; they block approval until resolved.
+// UpdatedBrief is the brief rewritten for a refinement. It moves to the campaign
+// once checked, so it is never stored with the proposal.
 type Proposal struct {
 	CampaignName          string       `json:"campaign_name,omitempty"`
+	UpdatedBrief          string       `json:"updated_brief,omitempty"`
 	Segment               Spec         `json:"segment"`
 	Assumptions           []Assumption `json:"assumptions"`
 	Evidence              []Evidence   `json:"evidence"`
@@ -96,6 +99,7 @@ func invalid(reason, problem string) *ValidationError {
 func ParseProposal(raw []byte, cities []string) (Proposal, error) {
 	var decoded struct {
 		CampaignName          string       `json:"campaign_name"`
+		UpdatedBrief          string       `json:"updated_brief"`
 		Segment               *Spec        `json:"segment"`
 		Assumptions           []Assumption `json:"assumptions"`
 		Evidence              []Evidence   `json:"evidence"`
@@ -115,6 +119,7 @@ func ParseProposal(raw []byte, cities []string) (Proposal, error) {
 
 	proposal := Proposal{
 		CampaignName:          decoded.CampaignName,
+		UpdatedBrief:          decoded.UpdatedBrief,
 		Segment:               *decoded.Segment,
 		Assumptions:           decoded.Assumptions,
 		Evidence:              decoded.Evidence,
@@ -305,9 +310,10 @@ func JSONSchema() map[string]any {
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
-		"required":             []string{"campaign_name", "segment", "assumptions", "evidence", "unsupported_conditions"},
+		"required":             []string{"campaign_name", "updated_brief", "segment", "assumptions", "evidence", "unsupported_conditions"},
 		"properties": map[string]any{
 			"campaign_name": map[string]any{"type": "string", "description": "Short title of 2 to 5 words, at most 80 characters"},
+			"updated_brief": map[string]any{"type": "string", "description": "The whole brief with the refinement applied; empty when there is no refinement"},
 			"segment": map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,

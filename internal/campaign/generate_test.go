@@ -54,7 +54,7 @@ func (p *contentProvider) StreamContent(ctx context.Context, request ai.ContentR
 func newContentHarness(t *testing.T, steps ...step) (*harness, *contentProvider, string) {
 	t.Helper()
 	h := newHarness(t, step{output: validProposal})
-	provider := &contentProvider{scriptedProvider: scriptedProvider{steps: []step{{output: validProposal}}}, contentSteps: steps}
+	provider := &contentProvider{scriptedProvider: scriptedProvider{steps: []step{{output: validProposal}, {output: withUpdatedBrief(validProposal, secretBrief)}}}, contentSteps: steps}
 	h.service = h.serviceWith(provider)
 	id := h.create(t)
 	if _, err := h.service.ProposeSegment(context.Background(), id, campaign.ProposeInput{}); err != nil {

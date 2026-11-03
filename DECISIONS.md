@@ -233,3 +233,8 @@ Signing in takes a username or email and no password. The name goes into an unsi
 
 A schedule is a row in `campaign_schedules`, including its next run time, and the scheduler keeps nothing in memory. Restarting any service or the machine loses nothing, and the data stays while the Postgres volume does: `make down` keeps it, `docker compose down -v` deletes it. Seeding skips a database that already has users. A one-time send whose time passed during downtime goes out when the system returns, and missed intervals become one run.
 
+## A refinement rewrites the brief
+
+The brief is what a marketer reads first and what message writing starts from, so it has to say the same thing as the rule. A refinement returns the whole brief rewritten next to the new rule, and the two are saved together.
+
+The rewrite is model output, so it is checked like the rest. It is rejected and retried if it is empty, too long, or brings in a discount or link that neither the old brief nor the refinement contains, and a discount that contradicts the one chosen for the campaign is refused with the existing conflict error. A rewrite on a first proposal is ignored, because only a person's request can change a person's brief. The page says the brief changed and names the request behind it, and the audit trail records that it changed but not the text.

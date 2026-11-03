@@ -337,6 +337,14 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 	if err != nil {
 		return View{}, err
 	}
+	brief := request.Brief
+	if request.Refinement != "" {
+		brief = proposal.UpdatedBrief
+		if err := checkOffer(brief, stored.OfferPercent); err != nil {
+			return View{}, err
+		}
+	}
+	proposal.UpdatedBrief = ""
 	// A refinement starts from the current rule, so a person can still ask to drop it.
 	if request.Refinement == "" && stored.NotMessagedWithinDays != nil {
 		proposal.Segment.NotMessagedWithinDays = stored.NotMessagedWithinDays
@@ -352,7 +360,7 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 	for _, blocker := range blockersFor(proposal, counts) {
 		s.metrics.ValidationFailures.WithLabelValues(stageAudience, blocker.reason).Inc()
 	}
-	if err := s.saveProposal(ctx, id, request.Brief, proposal, counts, asOf, attempts, proposalTrigger(input)); err != nil {
+	if err := s.saveProposal(ctx, id, brief, brief != stored.Brief, proposal, counts, asOf, attempts, proposalTrigger(input)); err != nil {
 		return View{}, err
 	}
 	return s.Get(ctx, id)
@@ -393,6 +401,9 @@ func (s *Service) generateProposal(ctx context.Context, request ai.SegmentReques
 		}
 		proposal, err := s.validateProposal(ctx, response.Output, request.Cities)
 		if err == nil {
+			err = checkUpdatedBrief(&proposal, request)
+		}
+		if err == nil {
 			s.metrics.LLMRequests.WithLabelValues(operationSegment, s.provider.Name(), outcomeSuccess).Inc()
 			return proposal, attempt, nil
 		}
@@ -408,6 +419,29 @@ func (s *Service) generateProposal(ctx context.Context, request ai.SegmentReques
 		request.ValidationError = lastInvalid.Error()
 	}
 	return segment.Proposal{}, MaxProposalAttempts, fmt.Errorf("%w: %w", ErrProposalRejected, lastInvalid)
+}
+
+// checkUpdatedBrief holds a rewritten brief to what the refinement asked. The
+// rule and the brief must not disagree, so a bad rewrite rejects the proposal.
+func checkUpdatedBrief(proposal *segment.Proposal, request ai.SegmentRequest) error {
+	if request.Refinement == "" {
+		return nil
+	}
+	updated, err := cleanBrief(proposal.UpdatedBrief)
+	if err != nil {
+		return &segment.ValidationError{
+			Problems: []string{fmt.Sprintf("updated_brief must be the whole brief, at most %d characters", MaxBriefLength)},
+			Reasons:  []string{"invalid_updated_brief"},
+		}
+	}
+	if content.AddsOffersOrLinks(updated, request.Brief, request.Refinement) {
+		return &segment.ValidationError{
+			Problems: []string{"updated_brief must not add a discount or link that the brief and refinement do not contain"},
+			Reasons:  []string{"invented_brief_facts"},
+		}
+	}
+	proposal.UpdatedBrief = updated
+	return nil
 }
 
 func (s *Service) callProvider(ctx context.Context, request ai.SegmentRequest, attempt int) (ai.Response, error) {
@@ -493,7 +527,7 @@ func (s *Service) cities(ctx context.Context) ([]string, error) {
 	return cities, nil
 }
 
-func (s *Service) saveProposal(ctx context.Context, id, brief string, proposal segment.Proposal, counts segment.Counts, asOf time.Time, attempts int, trigger string) error {
+func (s *Service) saveProposal(ctx context.Context, id, brief string, briefChanged bool, proposal segment.Proposal, counts segment.Counts, asOf time.Time, attempts int, trigger string) error {
 	encoded, err := json.Marshal(proposal)
 	if err != nil {
 		return fmt.Errorf("encode proposal: %w", err)
@@ -533,7 +567,7 @@ func (s *Service) saveProposal(ctx context.Context, id, brief string, proposal s
 		return fmt.Errorf("save version: %w", err)
 	}
 	if err := recordAudit(ctx, tx, id, eventSegmentChosen, map[string]any{
-		"trigger": trigger, "provider": s.provider.Name(), "model": s.provider.Model(), "attempts": attempts,
+		"trigger": trigger, "brief_changed": briefChanged, "provider": s.provider.Name(), "model": s.provider.Model(), "attempts": attempts,
 		"audience": counts, "assumptions": len(proposal.Assumptions),
 		"unsupported_conditions": len(proposal.UnsupportedConditions),
 	}); err != nil {
