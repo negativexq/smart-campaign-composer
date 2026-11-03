@@ -138,3 +138,25 @@ func TestSchemaForbidsExtraFields(t *testing.T) {
 		t.Fatal("segment must forbid additional properties")
 	}
 }
+
+func TestNotMessagedWindowIsValidatedAndDescribed(t *testing.T) {
+	t.Parallel()
+	cities := []string{"İstanbul"}
+	proposal, err := segment.ParseProposal([]byte(`{"segment":{"city":"İstanbul","not_messaged_within_days":7},"assumptions":[{"field":"not_messaged_within_days","note":"x"}],"unsupported_conditions":[]}`), cities)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	conditions := segment.Describe(proposal.Segment)
+	if len(conditions) != 2 || conditions[1].Field != "not_messaged_within_days" || conditions[1].Value != "7 days" {
+		t.Fatalf("conditions: %+v", conditions)
+	}
+	for _, days := range []string{"0", "366"} {
+		if _, err := segment.ParseProposal([]byte(`{"segment":{"not_messaged_within_days":`+days+`},"assumptions":[],"unsupported_conditions":[]}`), cities); err == nil {
+			t.Errorf("%s days was accepted", days)
+		}
+	}
+	schema := segment.JSONSchema()["properties"].(map[string]any)["segment"].(map[string]any)["properties"].(map[string]any)
+	if _, ok := schema["not_messaged_within_days"]; !ok {
+		t.Fatal("the model is not told about it")
+	}
+}

@@ -170,3 +170,63 @@ func TestEmptySpecMatchesNobody(t *testing.T) {
 		t.Fatalf("empty spec matched %d users", len(ids))
 	}
 }
+
+func TestAudienceSkipsPeopleMessagedRecently(t *testing.T) {
+	t.Parallel()
+	pool, _ := seededDatabase(t, 13)
+	ctx := context.Background()
+	var campaignID, versionID string
+	if err := pool.QueryRow(ctx, `INSERT INTO campaigns (brief, name) VALUES ('other', 'other') RETURNING id::text`).Scan(&campaignID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO campaign_versions (campaign_id, version, segment) VALUES ($1, 1, '{}') RETURNING id::text`, campaignID).Scan(&versionID); err != nil {
+		t.Fatal(err)
+	}
+	deliver := func(user int64, channel, status string, at time.Time) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO campaign_deliveries (campaign_id, campaign_version_id, user_id, channel, idempotency_key, status, updated_at)
+			VALUES ($1, $2, $3, $4, gen_random_uuid()::text, $5, $6)`, campaignID, versionID, user, channel, status, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := exampleSpec()
+	before, err := segment.Count(ctx, pool, base, referenceTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := base
+	spec.NotMessagedWithinDays = ptr(7)
+	count := func() int {
+		t.Helper()
+		got, err := segment.Count(ctx, pool, spec, referenceTime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Total
+	}
+	if got := count(); got != before.Total {
+		t.Fatalf("nobody was messaged yet: %d, want %d", got, before.Total)
+	}
+
+	matching, err := segment.MatchingUserIDs(ctx, pool, base, referenceTime)
+	if err != nil || len(matching) < 6 {
+		t.Fatalf("matching: %d %v", len(matching), err)
+	}
+	deliver(matching[0], "sms", "SENT", referenceTime.Add(-24*time.Hour))
+	deliver(matching[1], "email", "UNKNOWN", referenceTime.Add(-24*time.Hour))
+	if got := count(); got != before.Total-2 {
+		t.Fatalf("a sent message and a possibly sent one both count: %d", got)
+	}
+
+	// None of these reached the person within the window.
+	deliver(matching[2], "sms", "SENT", referenceTime.AddDate(0, 0, -8))
+	deliver(matching[3], "sms", "FAILED", referenceTime.Add(-24*time.Hour))
+	deliver(matching[4], "sms", "SKIPPED", referenceTime.Add(-24*time.Hour))
+	// Sent after the audience was counted, as this campaign's own messages are, so
+	// the number under review does not fall as the campaign goes out.
+	deliver(matching[5], "sms", "SENT", referenceTime.Add(time.Hour))
+	if got := count(); got != before.Total-2 {
+		t.Fatalf("only recent messages exclude someone: %d", got)
+	}
+}
