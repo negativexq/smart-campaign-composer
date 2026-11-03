@@ -21,6 +21,8 @@ docker compose up --build
 
 Setup applies migrations and loads 5,000 fake users on first start. Event times are relative to that moment. To reseed, remove the volume with `docker compose down -v`.
 
+The app asks for a username or email, prefilled with `marketer@example.com`. There is no password: the name only records who did what in each campaign's activity.
+
 ## LLM provider
 
 The system runs on a deterministic mock by default, and the top bar says so with a `Mock AI` badge. To use Claude, copy `.env.example` to `.env`, then set `LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`. A chosen provider without its key stops the API at startup instead of quietly using the mock. OpenAI support is planned but not available yet.
@@ -40,6 +42,7 @@ The system runs on a deterministic mock by default, and the top bar says so with
 make test        # Go and frontend tests in containers, no API key needed
 make test-local  # Go tests with the local toolchain, for faster iteration
 make test-e2e    # acceptance test against a stack started with `make up`
+make test-chaos  # kills and stops services under a running stack, takes a few minutes
 ```
 
 Integration tests use real PostgreSQL and fail, rather than skip, when it is missing.

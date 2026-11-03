@@ -150,9 +150,17 @@ We left some out on purpose, because every index on the delivery table slows sen
 
 When dashboards need history across campaigns, a summary table updated when a campaign finishes will serve them better than more indexes on the queue. A filter that matches few rows late in a very large campaign can still take about 100 ms.
 
-## Deferred: recovering messages left in flight
+## Messages left in flight are taken back, and may stay unknown
 
-A worker that crashes after claiming a message leaves that row in SENDING, and the campaign would not finish. Lease recovery is next on the list, and it is a known gap until then. A pause shared between workers after Retry-After is also still to come; today each call waits on its own.
+A worker that crashes after claiming a message leaves that row in SENDING with a lease. The worker loop checks for expired leases every second and takes those rows back. We cannot tell whether the provider received the message, so this counts as an attempt with the outcome `timeout`. If attempts run out, the delivery ends as UNKNOWN instead of being sent again or called failed. A stale worker cannot overwrite the result, because `claim_token` no longer matches.
+
+A 429 pauses the whole channel through a shared Redis key, so every worker honours one Retry-After. The pause only ever gets longer and is capped at 30 seconds. If the provider cannot be reached at all, nothing was sent, so no attempt is used and the channel rests for 5 seconds. If the limiter itself is unavailable, nothing is sent until it returns.
+
+## A simple sign-in that says who, not who you really are
+
+Signing in takes a username or email and no password. The name goes into an unsigned HttpOnly cookie for 30 days, and every campaign route answers 401 without it. This gives the audit trail a name to record and is not authentication: anyone can type any name or edit the cookie, and the page says so. A real login would replace the cookie handling in `internal/httpapi/session.go` and leave the rest alone.
+
+`audit_events` records `actor_type` and `actor`. A step taken in a request is `user` with the name, work the worker or scheduler does is `system`, and rows older than this change are `unknown`, because guessing a name would falsify the record. `campaigns.created_by` and `campaign_schedules.created_by` keep who created a campaign and who set up its schedule, so a scheduled run can read "by the system, set up by X".
 
 ## Schedules live in the database
 
