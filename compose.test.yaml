@@ -54,7 +54,7 @@ services:
     working_dir: /src
     command: sh -c "npm ci --no-audit --no-fund && npm test"
     volumes:
-      - ./frontend:/src:ro
+      - ./frontend:/src
       - frontend-node-modules:/src/node_modules
 
 volumes:
