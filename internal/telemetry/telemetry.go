@@ -31,9 +31,11 @@ import (
 type Metrics struct {
 	LLMRequests        *prometheus.CounterVec
 	LLMDuration        *prometheus.HistogramVec
+	LLMTTFT            *prometheus.HistogramVec
 	LLMTokens          *prometheus.CounterVec
 	ValidationFailures *prometheus.CounterVec
 	HTTPDuration       *prometheus.HistogramVec
+	SSEConnections     prometheus.Gauge
 }
 
 // NewMetrics registers the series on registerer.
@@ -49,6 +51,11 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 			Help:    "Duration of LLM calls.",
 			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 20, 30, 60, 120},
 		}, []string{"operation", "provider"}),
+		LLMTTFT: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "campaign_llm_ttft_seconds",
+			Help:    "Time until a streaming LLM call produced its first text.",
+			Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30},
+		}, []string{"operation", "provider"}),
 		LLMTokens: factory.NewCounterVec(prometheus.CounterOpts{
 			Name: "campaign_llm_tokens_total",
 			Help: "Tokens used by LLM calls.",
@@ -62,6 +69,10 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 			Help:    "Duration of HTTP requests by route pattern.",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"method", "route", "status"}),
+		SSEConnections: factory.NewGauge(prometheus.GaugeOpts{
+			Name: "http_sse_connections",
+			Help: "Server-sent event streams currently open.",
+		}),
 	}
 }
 

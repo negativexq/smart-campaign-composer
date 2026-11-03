@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
+	"github.com/negativexq/smart-campaign-composer/internal/content"
 	"github.com/negativexq/smart-campaign-composer/internal/segment"
 	"github.com/negativexq/smart-campaign-composer/internal/telemetry"
 )
@@ -77,8 +78,13 @@ type View struct {
 	Audience     segment.Counts      `json:"audience"`
 	AudienceAsOf time.Time           `json:"audience_as_of,omitzero"`
 	Blockers     []string            `json:"blockers"`
-	CreatedAt    time.Time           `json:"created_at"`
-	UpdatedAt    time.Time           `json:"updated_at"`
+	Content      *StoredContent      `json:"content,omitempty"`
+	// ContentLimits is how long {{first_name}} can get in this audience.
+	ContentLimits content.Limits `json:"content_limits"`
+	// ContentWarnings are differences from the brief for a person to judge.
+	ContentWarnings []content.Issue `json:"content_warnings"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 // Service runs campaign operations.
@@ -201,7 +207,11 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 	if err != nil {
 		return View{}, err
 	}
-	if stored.Status != statusDraft {
+	switch {
+	case stored.Status == statusDraft, stored.Status == statusReady, stored.Status == statusFailed, generationAbandoned(stored):
+	case stored.Status == statusGenerating:
+		return View{}, ErrGenerationRunning
+	default:
 		return View{}, ErrNotEditable
 	}
 
@@ -372,9 +382,10 @@ func (s *Service) saveProposal(ctx context.Context, id, brief string, proposal s
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
 	// A name someone chose stays. Otherwise a suggestion wins, and a provisional
-	// name follows the brief it came from.
-	if _, err := tx.Exec(ctx, `
-		UPDATE campaigns SET brief = $2, updated_at = now(),
+	// name follows the brief it came from. Content was written for the previous
+	// audience, so the campaign goes back to a draft without any.
+	result, err := tx.Exec(ctx, `
+		UPDATE campaigns SET brief = $2, status = 'DRAFT', updated_at = now(),
 			name = CASE WHEN name_source = 'user' THEN name
 			            WHEN $3::text <> '' THEN $3::text
 			            WHEN name_source = 'brief' THEN $4::text
@@ -382,14 +393,18 @@ func (s *Service) saveProposal(ctx context.Context, id, brief string, proposal s
 			name_source = CASE WHEN name_source = 'user' THEN 'user'
 			                   WHEN $3::text <> '' THEN 'ai'
 			                   ELSE name_source END
-		WHERE id = $1`, id, brief, proposal.CampaignName, provisionalName(brief)); err != nil {
+		WHERE id = $1 AND `+freeToDraft, id, brief, proposal.CampaignName, provisionalName(brief))
+	if err != nil {
 		return fmt.Errorf("update campaign: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrGenerationRunning
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO campaign_versions (campaign_id, version, segment, content, llm_provider, llm_model, audience_as_of)
 		VALUES ($1, 1, $2, '{}', $3, $4, $5)
 		ON CONFLICT (campaign_id, version) DO UPDATE
-		SET segment = EXCLUDED.segment, llm_provider = EXCLUDED.llm_provider,
+		SET segment = EXCLUDED.segment, content = '{}', llm_provider = EXCLUDED.llm_provider,
 		    llm_model = EXCLUDED.llm_model, audience_as_of = EXCLUDED.audience_as_of`,
 		id, encoded, s.provider.Name(), s.provider.Model(), asOf); err != nil {
 		return fmt.Errorf("save version: %w", err)
@@ -435,6 +450,14 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 	for _, blocker := range blockersFor(*view.Proposal, view.Audience) {
 		view.Blockers = append(view.Blockers, blocker.message)
 	}
+	lengths, err := segment.LongestNames(ctx, s.db, view.Proposal.Segment, view.AudienceAsOf)
+	if err != nil {
+		return View{}, err
+	}
+	view.ContentLimits = content.Limits{SMSName: lengths.SMS, EmailName: lengths.Email}
+	if view.Content != nil {
+		view.ContentWarnings = append(view.ContentWarnings, content.CheckDiscounts(view.Content.Content, view.Brief)...)
+	}
 	return view, nil
 }
 
@@ -443,21 +466,22 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 	if err := parsed.Scan(id); err != nil {
 		return View{}, ErrNotFound
 	}
-	view := View{ID: id, Conditions: []segment.Condition{}, Blockers: []string{}}
+	view := View{ID: id, Conditions: []segment.Condition{}, Blockers: []string{}, ContentWarnings: []content.Issue{}}
 	var (
 		version      *int
 		provider     *string
 		model        *string
 		encoded      []byte
+		storedText   []byte
 		audienceAsOf *time.Time
 	)
 	err := s.db.QueryRow(ctx, `
-		SELECT c.name, c.name_source, c.brief, c.status, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.audience_as_of
+		SELECT c.name, c.name_source, c.brief, c.status, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &audienceAsOf)
+		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}
@@ -480,6 +504,13 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 	view.Proposal = &segment.Proposal{}
 	if err := json.Unmarshal(encoded, view.Proposal); err != nil {
 		return View{}, fmt.Errorf("decode stored proposal: %w", err)
+	}
+	stored := StoredContent{}
+	if err := json.Unmarshal(storedText, &stored); err != nil {
+		return View{}, fmt.Errorf("decode stored content: %w", err)
+	}
+	if stored.Content != (content.Content{}) {
+		view.Content = &stored
 	}
 	return view, nil
 }

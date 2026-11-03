@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -96,4 +97,92 @@ func MatchingUserIDs(ctx context.Context, db Querier, spec Spec, now time.Time) 
 		return nil, fmt.Errorf("list audience: %w", err)
 	}
 	return ids, nil
+}
+
+// NameLengths is the longest first name per consented channel, in characters.
+type NameLengths struct {
+	SMS   int
+	Email int
+}
+
+// LongestNames tells how long {{first_name}} can become for people who can
+// actually receive each channel.
+func LongestNames(ctx context.Context, db Querier, spec Spec, now time.Time) (NameLengths, error) {
+	where, args := Compile(spec, now)
+	query := `
+		SELECT COALESCE(max(char_length(u.first_name)) FILTER (WHERE sms.allowed), 0),
+		       COALESCE(max(char_length(u.first_name)) FILTER (WHERE email.allowed), 0)
+		FROM users u
+		LEFT JOIN consents sms ON sms.user_id = u.id AND sms.channel = 'sms'
+		LEFT JOIN consents email ON email.user_id = u.id AND email.channel = 'email'
+		WHERE ` + where
+
+	var lengths NameLengths
+	if err := db.QueryRow(ctx, query, args...).Scan(&lengths.SMS, &lengths.Email); err != nil {
+		return NameLengths{}, fmt.Errorf("longest names: %w", err)
+	}
+	return lengths, nil
+}
+
+// Sample is an audience member shown in a message preview.
+type Sample struct {
+	ID        int64  `json:"id"`
+	Label     string `json:"label"`
+	FirstName string `json:"first_name"`
+}
+
+// SampleRecipients picks a typical person and the names most likely to break a
+// message: the longest and a missing one. Only people who can receive a message
+// are considered.
+func SampleRecipients(ctx context.Context, db Querier, spec Spec, now time.Time) ([]Sample, error) {
+	where, args := Compile(spec, now)
+	rows, err := db.Query(ctx, `
+		SELECT u.id, u.first_name
+		FROM users u
+		WHERE EXISTS (SELECT 1 FROM consents c WHERE c.user_id = u.id AND c.allowed)
+		  AND `+where+`
+		ORDER BY u.id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("sample recipients: %w", err)
+	}
+	people, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Sample, error) {
+		var person Sample
+		err := row.Scan(&person.ID, &person.FirstName)
+		return person, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sample recipients: %w", err)
+	}
+
+	var typical, longest, unnamed *Sample
+	for i := range people {
+		person := &people[i]
+		length := utf8.RuneCountInString(person.FirstName)
+		switch {
+		case length == 0:
+			if unnamed == nil {
+				unnamed = person
+			}
+		case longest == nil || length > utf8.RuneCountInString(longest.FirstName):
+			if typical == nil {
+				typical = longest
+			}
+			longest = person
+		case typical == nil:
+			typical = person
+		}
+	}
+
+	samples := []Sample{}
+	if typical != nil {
+		samples = append(samples, Sample{typical.ID, typical.FirstName, typical.FirstName})
+	}
+	if longest != nil {
+		label := "Longest name: " + longest.FirstName
+		samples = append(samples, Sample{longest.ID, label, longest.FirstName})
+	}
+	if unnamed != nil {
+		samples = append(samples, Sample{unnamed.ID, "No first name", ""})
+	}
+	return samples, nil
 }
