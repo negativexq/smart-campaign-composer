@@ -31,8 +31,8 @@ type failingProvider struct {
 	err error
 }
 
-func (p failingProvider) ProposeSegment(context.Context, ai.SegmentRequest) (ai.SegmentResponse, error) {
-	return ai.SegmentResponse{}, p.err
+func (p failingProvider) ProposeSegment(context.Context, ai.SegmentRequest) (ai.Response, error) {
+	return ai.Response{}, p.err
 }
 
 func newAPI(t *testing.T, provider ai.Provider) http.Handler {
@@ -41,10 +41,11 @@ func newAPI(t *testing.T, provider ai.Provider) http.Handler {
 	if _, err := seed.Apply(context.Background(), pool, seed.Generate(referenceTime, 13)); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	service := campaign.NewService(pool, provider, telemetry.NewMetrics(prometheus.NewRegistry()),
+	metrics := telemetry.NewMetrics(prometheus.NewRegistry())
+	service := campaign.NewService(pool, provider, metrics,
 		noop.NewTracerProvider().Tracer("test"), func() time.Time { return referenceTime })
 	mux := http.NewServeMux()
-	httpapi.Register(mux, service, provider)
+	httpapi.Register(mux, service, provider, metrics)
 	return mux
 }
 

@@ -4,12 +4,16 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
 	"github.com/negativexq/smart-campaign-composer/internal/campaign"
+	"github.com/negativexq/smart-campaign-composer/internal/content"
+	"github.com/negativexq/smart-campaign-composer/internal/telemetry"
 )
 
 const maxBodyBytes = 64 << 10
@@ -17,11 +21,12 @@ const maxBodyBytes = 64 << 10
 type api struct {
 	campaigns *campaign.Service
 	provider  ai.Provider
+	metrics   *telemetry.Metrics
 }
 
 // Register adds the campaign routes to mux.
-func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provider) {
-	a := &api{campaigns, provider}
+func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provider, metrics *telemetry.Metrics) {
+	a := &api{campaigns, provider, metrics}
 	mux.HandleFunc("GET /api/config", a.config)
 	mux.HandleFunc("GET /api/overview", a.overview)
 	mux.HandleFunc("GET /api/campaigns", a.list)
@@ -30,6 +35,9 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 	mux.HandleFunc("PATCH /api/campaigns/{id}", a.rename)
 	mux.HandleFunc("POST /api/campaigns/{id}/segment", a.proposeSegment)
 	mux.HandleFunc("GET /api/campaigns/{id}/audience", a.audience)
+	mux.HandleFunc("POST /api/campaigns/{id}/generate", a.generate)
+	mux.HandleFunc("PUT /api/campaigns/{id}/content", a.saveContent)
+	mux.HandleFunc("GET /api/campaigns/{id}/sample-recipients", a.sampleRecipients)
 	mux.HandleFunc("GET /api/campaigns/{id}/activity", a.activity)
 }
 
@@ -137,6 +145,104 @@ func (a *api) audience(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view.Audience)
 }
 
+// generate streams one generation as server-sent events. Anything that stops it
+// from starting is an ordinary JSON error; after that the status is already sent,
+// so failures travel as an error event.
+func (a *api) generate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Instruction string `json:"instruction"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	generation, err := a.campaigns.StartGeneration(r.Context(), r.PathValue("id"), campaign.GenerateInput{Instruction: body.Instruction})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	a.metrics.SSEConnections.Inc()
+	defer a.metrics.SSEConnections.Dec()
+	stream := newEventStream(w, r)
+	stream.send("started", struct{}{})
+	view, err := generation.Run(r.Context(), func(event campaign.GenerationEvent) {
+		if event.Type == campaign.EventReset {
+			stream.send("reset", struct{}{})
+			return
+		}
+		stream.send("delta", map[string]string{"field": event.Field, "text": event.Text})
+	})
+	if r.Context().Err() != nil {
+		return
+	}
+	if err != nil {
+		_, message := describeError(r, err)
+		stream.send("error", errorBody(message))
+		return
+	}
+	stream.send("done", view)
+}
+
+// eventStream writes server-sent events and pushes each one out immediately.
+type eventStream struct {
+	w          http.ResponseWriter
+	controller *http.ResponseController
+}
+
+func newEventStream(w http.ResponseWriter, r *http.Request) *eventStream {
+	controller := http.NewResponseController(w)
+	// A generation can outlast any general write timeout on the server.
+	if err := controller.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		slog.WarnContext(r.Context(), "clear write deadline", "error", err)
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	return &eventStream{w, controller}
+}
+
+// send ignores write errors: a client that left cancels the request context,
+// which is what stops the generation.
+func (s *eventStream) send(event string, data any) {
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		slog.Error("encode event", "event", event, "error", err)
+		return
+	}
+	fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", event, encoded) //nolint:errcheck // see above
+	if err := s.controller.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		slog.Debug("flush event", "error", err)
+	}
+}
+
+func (a *api) saveContent(w http.ResponseWriter, r *http.Request) {
+	var body content.Content
+	if !decode(w, r, &body) {
+		return
+	}
+	view, err := a.campaigns.SaveContent(r.Context(), r.PathValue("id"), body)
+	var invalid *content.ValidationError
+	if errors.As(err, &invalid) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "Fix the highlighted messages before saving.", "issues": invalid.Issues})
+		return
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *api) sampleRecipients(w http.ResponseWriter, r *http.Request) {
+	samples, err := a.campaigns.SampleRecipients(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"recipients": samples})
+}
+
 // decode reads a strict JSON body. An empty body is allowed and means defaults.
 func decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
@@ -148,9 +254,14 @@ func decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	return true
 }
 
-// writeError maps failures to messages a marketer can act on. Anything not
-// listed is logged and reported without detail.
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
+	status, message := describeError(r, err)
+	writeJSON(w, status, errorBody(message))
+}
+
+// describeError maps failures to messages a marketer can act on. Anything not
+// listed is logged and reported without detail.
+func describeError(r *http.Request, err error) (int, string) {
 	status, message := http.StatusInternalServerError, "Something went wrong on our side. Try again."
 	switch {
 	case errors.Is(err, campaign.ErrInvalidBrief):
@@ -165,6 +276,16 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		status, message = http.StatusConflict, "This campaign has moved past drafting and can no longer be edited."
 	case errors.Is(err, campaign.ErrProposalRejected):
 		status, message = http.StatusUnprocessableEntity, "We could not turn this brief into a valid audience: "+err.Error()+". Try naming a city, a time window or cart and purchase behaviour."
+	case errors.Is(err, campaign.ErrInvalidInstruction):
+		status, message = http.StatusBadRequest, "Write an instruction of up to 500 characters."
+	case errors.Is(err, campaign.ErrNoAudience):
+		status, message = http.StatusConflict, "This campaign has no audience yet."
+	case errors.Is(err, campaign.ErrAudienceBlocked):
+		status, message = http.StatusConflict, "Resolve the audience problems before writing messages."
+	case errors.Is(err, campaign.ErrGenerationRunning):
+		status, message = http.StatusConflict, "Messages are already being written for this campaign."
+	case errors.Is(err, campaign.ErrContentRejected):
+		status, message = http.StatusUnprocessableEntity, "We could not write messages that pass validation: "+err.Error()+". Try again, or give an instruction."
 	case errors.Is(err, ai.ErrRefused):
 		status, message = http.StatusUnprocessableEntity, "The AI declined this brief. Rephrase it and try again."
 	case errors.Is(err, ai.ErrTruncated), errors.Is(err, ai.ErrInvalidOutput):
@@ -174,7 +295,7 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		slog.ErrorContext(r.Context(), "request failed", "error", err)
 	}
-	writeJSON(w, status, errorBody(message))
+	return status, message
 }
 
 func errorBody(message string) map[string]string {

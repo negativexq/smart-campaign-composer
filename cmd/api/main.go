@@ -68,7 +68,7 @@ func run(logger *slog.Logger) error {
 	mux := http.NewServeMux()
 	health.Register(mux, map[string]health.Check{"postgres": pool.Ping})
 	mux.Handle("GET /metrics", promhttp.Handler())
-	httpapi.Register(mux, campaigns, provider)
+	httpapi.Register(mux, campaigns, provider, metrics)
 
 	slog.Info("llm provider selected", "provider", provider.Name(), "model", provider.Model())
 	return server.Run(ctx, ":"+server.Env("PORT", "8080"), telemetry.Middleware(metrics, logger, mux))
