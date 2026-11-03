@@ -2,7 +2,7 @@
 import { CheckCircle2, CircleAlert, LoaderCircle, PencilLine } from "lucide-vue-next";
 import { computed, useId } from "vue";
 
-import { countCharacters, findUnknownVariables } from "../lib/message";
+import { countCharacters, findUnknownVariables, longestRenderedLength } from "../lib/message";
 import OriginTag, { type ContentOrigin } from "./OriginTag.vue";
 
 const props = defineProps<{
@@ -13,12 +13,19 @@ const props = defineProps<{
   // "validated" must only come from the backend. Streaming text is always a draft.
   state: "streaming" | "draft" | "validated" | "invalid";
   origin: ContentOrigin;
+  // Longest {{first_name}} in the audience. When given, the count is what the
+  // longest recipient would get rather than the template as written.
+  longestName?: number;
+  problem?: string;
 }>();
 
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();
 
 const id = useId();
-const length = computed(() => countCharacters(props.modelValue));
+const countsRendered = computed(() => props.longestName !== undefined);
+const length = computed(() =>
+  countsRendered.value ? longestRenderedLength(props.modelValue, props.longestName ?? 0) : countCharacters(props.modelValue),
+);
 const overBy = computed(() => (props.limit ? length.value - props.limit : 0));
 const unknownVariables = computed(() => findUnknownVariables(props.modelValue));
 const streaming = computed(() => props.state === "streaming");
@@ -65,6 +72,8 @@ function insertFirstName() {
       <span class="mono">{{ unknownVariables.join(", ") }}</span>
     </p>
 
+    <p v-if="problem" class="problem small" data-testid="message-problem">{{ problem }}</p>
+
     <div class="footer">
       <button
         type="button"
@@ -79,7 +88,7 @@ function insertFirstName() {
         <component :is="display.icon" :size="14" aria-hidden="true" />
         {{ display.text }}
       </span>
-      <span class="count small mono" :class="{ 'count--over': overBy > 0 }" data-testid="char-count">{{ counter }}</span>
+      <span class="count small mono" :class="{ 'count--over': overBy > 0 }" data-testid="char-count" :title="countsRendered ? 'Length for the longest name in this audience' : undefined">{{ counter }}</span>
     </div>
   </div>
 </template>

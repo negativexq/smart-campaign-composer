@@ -1,36 +1,48 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
-import { errorMessage, getActivity, getCampaign, type ActivityEntry, type Campaign } from "../api/campaigns";
+import { errorMessage, getActivity, getCampaign, type ActivityEntry, type Campaign, type MessageField } from "../api/campaigns";
 import ActivityTimeline from "../components/ActivityTimeline.vue";
 import AudienceRule from "../components/AudienceRule.vue";
 import CampaignName from "../components/CampaignName.vue";
 import CampaignStatusBadge from "../components/CampaignStatusBadge.vue";
 import MetricCard from "../components/MetricCard.vue";
+import OriginTag from "../components/OriginTag.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { isDraftStatus } from "../lib/campaignStatus";
 import { formatDateTime } from "../lib/format";
 
 const props = defineProps<{ campaignId: string }>();
 
-// Content and Deliveries join these tabs when those stages have real data.
-const tabs = [
-  { id: "overview", label: "Overview" },
-  { id: "audience", label: "Audience" },
-  { id: "activity", label: "Activity" },
-] as const;
+type Tab = "overview" | "audience" | "content" | "activity";
 
 const campaign = ref<Campaign | null>(null);
 const activity = ref<ActivityEntry[] | null>(null);
 const error = ref("");
 const activityError = ref("");
-const tab = ref<(typeof tabs)[number]["id"]>("overview");
+const tab = ref<Tab>("overview");
+
+// Deliveries joins these tabs when that stage has real data.
+const tabs = computed(() => {
+  const list: { id: Tab; label: string }[] = [
+    { id: "overview", label: "Overview" },
+    { id: "audience", label: "Audience" },
+  ];
+  if (campaign.value?.content) list.push({ id: "content", label: "Content" });
+  list.push({ id: "activity", label: "Activity" });
+  return list;
+});
 
 const isDraft = computed(() => (campaign.value ? isDraftStatus(campaign.value.status) : false));
+const editHref = computed(() => `/campaigns/${props.campaignId}/${campaign.value?.content ? "content" : "edit"}`);
 const assumptions = computed(() => campaign.value?.proposal?.assumptions ?? []);
 
 function isAssumed(field: string) {
   return assumptions.value.some((assumption) => assumption.field === field);
+}
+
+function originOf(field: MessageField) {
+  return campaign.value?.content?.edited.includes(field) ? "user" : "ai";
 }
 
 function onRenamed(updated: Campaign) {
@@ -70,7 +82,7 @@ onMounted(async () => {
       <a
         v-if="isDraft"
         class="button button--primary link-button"
-        :href="`/campaigns/${campaignId}/edit`"
+        :href="editHref"
         data-testid="continue-editing"
       >
         Continue editing
@@ -130,6 +142,21 @@ onMounted(async () => {
         <li v-for="assumption in assumptions" :key="assumption.field">{{ assumption.note }}</li>
       </ul>
       <p v-if="campaign.audience_as_of" class="muted small">Counted on {{ formatDateTime(campaign.audience_as_of) }}.</p>
+    </section>
+
+    <section v-else-if="tab === 'content' && campaign.content" id="panel-content" class="panel" role="tabpanel" aria-labelledby="tab-content">
+      <ValidationNotice v-for="warning in campaign.content_warnings" :key="warning.field + warning.reason" tone="warning" title="Differs from the brief">
+        {{ warning.message }}
+      </ValidationNotice>
+      <article class="message card" data-testid="content-sms">
+        <div class="message-head"><h2>SMS</h2><OriginTag :origin="originOf('sms')" /></div>
+        <p class="message-text">{{ campaign.content.sms }}</p>
+      </article>
+      <article class="message card" data-testid="content-email">
+        <div class="message-head"><h2>Email</h2><OriginTag :origin="originOf('email_body')" /></div>
+        <p class="message-subject">{{ campaign.content.email_subject }}</p>
+        <p class="message-text">{{ campaign.content.email_body }}</p>
+      </article>
     </section>
 
     <section v-else id="panel-activity" class="panel" role="tabpanel" aria-labelledby="tab-activity">
@@ -225,6 +252,29 @@ onMounted(async () => {
 .notes {
   margin: 0;
   padding-left: var(--space-4);
+}
+
+.message {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+}
+
+.message-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.message-subject {
+  font-weight: 500;
+}
+
+.message-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .activity {

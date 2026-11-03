@@ -1,5 +1,15 @@
 import type { ActivityEntry } from "../api/campaigns";
 
+const FAILURE_REASONS: Record<string, string> = {
+  invalid_output: "the output never passed validation",
+  refused: "the AI declined the request",
+  truncated: "the response was cut off",
+  rate_limited: "the AI service was rate limited",
+  unavailable: "the AI service was unavailable",
+};
+
+const FIELD_NAMES: Record<string, string> = { sms: "SMS", email_subject: "email subject", email_body: "email body" };
+
 const TRIGGER_TITLES: Record<string, string> = {
   refinement: "Audience refined",
   brief_edit: "Brief edited, audience proposed again",
@@ -28,6 +38,18 @@ export function describeActivity(entry: ActivityEntry): { title: string; detail:
         detail: parts.filter(Boolean).join(", "),
       };
     }
+    case "content.generated": {
+      const attempts = Number(details.attempts ?? 1);
+      const parts = [`by ${details.provider}`];
+      if (attempts > 1) parts.push(`${attempts} attempts`);
+      return { title: details.regenerated ? "Messages rewritten" : "Messages written", detail: parts.join(", ") };
+    }
+    case "content.edited": {
+      const fields = (details.fields as string[] | undefined) ?? [];
+      return { title: "Messages edited", detail: fields.map((field) => FIELD_NAMES[field] ?? field).join(", ") };
+    }
+    case "content.generation_failed":
+      return { title: "Writing messages failed", detail: FAILURE_REASONS[String(details.reason)] ?? "" };
     default:
       return { title: entry.type, detail: "" };
   }

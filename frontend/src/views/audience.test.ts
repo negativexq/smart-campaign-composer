@@ -23,6 +23,8 @@ const campaign: Campaign = {
   audience: { total: 1284, sms: 900, email: 1000 },
   audience_as_of: "2026-11-03T12:00:00Z",
   blockers: [],
+  content_limits: { sms_name_length: 21, email_name_length: 21 },
+  content_warnings: [],
   created_at: "2026-11-03T12:00:00Z",
   updated_at: "2026-11-03T12:00:00Z",
 };

@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 import { fetchAiConfig, type AiConfig } from "./api/campaigns";
 import { fetchSystemStatus, type SystemStatus } from "./api/system";
 import AiModeBadge from "./components/AiModeBadge.vue";
 import AppShell from "./components/AppShell.vue";
 import CampaignStepper from "./components/CampaignStepper.vue";
+import { campaignStatusMeta } from "./lib/campaignStatus";
 import { currentPath } from "./lib/navigation";
 import AudienceView from "./views/AudienceView.vue";
 import CampaignDetailView from "./views/CampaignDetailView.vue";
 import CampaignsView from "./views/CampaignsView.vue";
 import ComposeView from "./views/ComposeView.vue";
+import ContentView from "./views/ContentView.vue";
 import DesignView from "./views/DesignView.vue";
 import OverviewView from "./views/OverviewView.vue";
 
@@ -22,12 +24,17 @@ const route = computed(() => {
   if (path === "/campaigns/new") return { name: "new", id: "" };
   const edit = path.match(/^\/campaigns\/([^/]+)\/edit$/);
   if (edit) return { name: "edit", id: edit[1] };
+  const content = path.match(/^\/campaigns\/([^/]+)\/content$/);
+  if (content) return { name: "content", id: content[1] };
   const detail = path.match(/^\/campaigns\/([^/]+)$/);
   if (detail) return { name: "detail", id: detail[1] };
   return { name: "not-found", id: "" };
 });
 const status = ref<SystemStatus | "checking">("checking");
 const aiConfig = ref<AiConfig | null>(null);
+
+const wizardStatus = ref("DRAFT");
+watch(() => route.value.id, () => (wizardStatus.value = "DRAFT"));
 
 const steps = [
   { id: "brief", label: "Brief" },
@@ -62,10 +69,26 @@ onMounted(async () => {
   </AppShell>
 
   <AppShell
+    v-else-if="route.name === 'content'"
+    active-path="/campaigns"
+    title="New campaign"
+    :campaign-status="campaignStatusMeta(wizardStatus).label"
+    :system-status="status"
+  >
+    <template #topbar>
+      <div class="topbar-actions">
+        <CampaignStepper :steps="steps" current-id="content" />
+        <AiModeBadge v-if="aiConfig" :config="aiConfig" />
+      </div>
+    </template>
+    <ContentView :key="route.id" :campaign-id="route.id" @status="wizardStatus = $event" />
+  </AppShell>
+
+  <AppShell
     v-else-if="route.name === 'new' || route.name === 'edit'"
     active-path="/campaigns"
     title="New campaign"
-    campaign-status="Draft"
+    :campaign-status="campaignStatusMeta(wizardStatus).label"
     :system-status="status"
   >
     <template #topbar>
@@ -75,7 +98,7 @@ onMounted(async () => {
       </div>
     </template>
 
-    <AudienceView v-if="route.name === 'edit'" :key="route.id" :campaign-id="route.id" />
+    <AudienceView v-if="route.name === 'edit'" :key="route.id" :campaign-id="route.id" @status="wizardStatus = $event" />
     <ComposeView v-else />
 
     <template #panel>

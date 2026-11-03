@@ -1,6 +1,13 @@
+import { EventStreamParser } from "../lib/sse";
+
 export type Condition = { field: string; label: string; value: string };
 export type Assumption = { field: string; note: string };
 export type Audience = { total: number; sms: number; email: number };
+
+export type MessageField = "sms" | "email_subject" | "email_body";
+export type Messages = Record<MessageField, string>;
+export type ContentIssue = { field: string; reason: string; message: string };
+export type SampleRecipient = { id: number; label: string; first_name: string };
 
 export type Campaign = {
   id: string;
@@ -14,6 +21,9 @@ export type Campaign = {
   audience: Audience;
   audience_as_of?: string;
   blockers: string[];
+  content?: Messages & { edited: MessageField[] };
+  content_limits: { sms_name_length: number; email_name_length: number };
+  content_warnings: ContentIssue[];
   created_at: string;
   updated_at: string;
 };
@@ -52,11 +62,13 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly issues: ContentIssue[] = [],
   ) {
     super(message);
   }
 }
 
+const STREAM_LOST = "The connection dropped before the messages were finished. Try again.";
 const UNREACHABLE = "We could not reach the server. Check your connection and try again.";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -68,7 +80,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const body = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new ApiError(body?.error ?? UNREACHABLE, response.status);
+    throw new ApiError(body?.error ?? UNREACHABLE, response.status, body?.issues);
   }
   return body as T;
 }
@@ -115,6 +127,69 @@ export async function listCampaigns(filter: { group: CampaignGroup; query: strin
 
 export async function getActivity(id: string): Promise<ActivityEntry[]> {
   return (await request<{ activity: ActivityEntry[] }>(`/api/campaigns/${encodeURIComponent(id)}/activity`)).activity;
+}
+
+export function saveContent(id: string, messages: Messages): Promise<Campaign> {
+  return request<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/content`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(messages),
+  });
+}
+
+export async function getSampleRecipients(id: string): Promise<SampleRecipient[]> {
+  return (await request<{ recipients: SampleRecipient[] }>(`/api/campaigns/${encodeURIComponent(id)}/sample-recipients`)).recipients;
+}
+
+export type GenerationHandlers = {
+  onDelta: (field: MessageField, text: string) => void;
+  onReset: () => void;
+};
+
+// Streams a generation and resolves with the validated campaign. The streamed
+// text is only a preview: what counts is the campaign in the final event.
+export async function generateContent(
+  id: string,
+  input: { instruction?: string },
+  handlers: GenerationHandlers,
+  signal: AbortSignal,
+): Promise<Campaign> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/campaigns/${encodeURIComponent(id)}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+      signal,
+    });
+  } catch (failure) {
+    if (signal.aborted) throw failure;
+    throw new ApiError(UNREACHABLE, 0);
+  }
+  if (!response.ok || !response.body) {
+    const body = await response.json().catch(() => null);
+    throw new ApiError(body?.error ?? UNREACHABLE, response.status);
+  }
+
+  const parser = new EventStreamParser();
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) throw new ApiError(STREAM_LOST, 0);
+      for (const { event, data } of parser.push(decoder.decode(value, { stream: true }))) {
+        const payload = JSON.parse(data);
+        if (event === "delta") handlers.onDelta(payload.field, payload.text);
+        if (event === "reset") handlers.onReset();
+        if (event === "done") return payload as Campaign;
+        if (event === "error") throw new ApiError(payload.error, 0);
+      }
+    }
+  } catch (failure) {
+    if (signal.aborted || failure instanceof ApiError) throw failure;
+    throw new ApiError(STREAM_LOST, 0);
+  }
 }
 
 export function errorMessage(failure: unknown): string {

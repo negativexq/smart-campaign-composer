@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 import { errorMessage, getCampaign, proposeSegment, type Campaign } from "../api/campaigns";
 import AudienceRule from "../components/AudienceRule.vue";
@@ -8,6 +8,7 @@ import MetricCard from "../components/MetricCard.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 
 const props = defineProps<{ campaignId: string }>();
+const emit = defineEmits<{ status: [status: string] }>();
 
 const campaign = ref<Campaign | null>(null);
 const loadError = ref("");
@@ -19,9 +20,7 @@ const editedBrief = ref("");
 
 const assumptions = computed(() => campaign.value?.proposal?.assumptions ?? []);
 const hasProposal = computed(() => Boolean(campaign.value?.proposal));
-const continueHint = computed(() =>
-  campaign.value?.blockers.length ? "Resolve the issues above to continue." : "Content generation is not available yet.",
-);
+const blocked = computed(() => Boolean(campaign.value?.blockers.length));
 const asOf = computed(() =>
   campaign.value?.audience_as_of
     ? new Date(campaign.value.audience_as_of).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })
@@ -58,6 +57,8 @@ function startEditingBrief() {
 async function saveBrief() {
   if (await propose({ brief: editedBrief.value }, "Finding your audience...")) editingBrief.value = false;
 }
+
+watch(() => campaign.value?.status, (status) => status && emit("status", status));
 
 onMounted(async () => {
   try {
@@ -135,6 +136,7 @@ onMounted(async () => {
 
       <form class="section" @submit.prevent="refine">
         <label for="refinement"><h2>Refine with AI</h2></label>
+        <p v-if="campaign.content" class="muted small" data-testid="clears-content">Changing the audience clears the messages written for it.</p>
         <div class="row">
           <input
             id="refinement"
@@ -147,8 +149,13 @@ onMounted(async () => {
       </form>
 
       <div class="row">
-        <button class="button button--primary" type="button" disabled>Continue to content</button>
-        <span class="muted small" data-testid="continue-hint">{{ continueHint }}</span>
+        <a v-if="!blocked" class="button button--primary link-button" :href="`/campaigns/${campaignId}/content`" data-testid="continue-content">
+          Continue to content
+        </a>
+        <template v-else>
+          <button class="button button--primary" type="button" disabled>Continue to content</button>
+          <span class="muted small" data-testid="continue-hint">Resolve the issues above to continue.</span>
+        </template>
         <a class="exit small" :href="`/campaigns/${campaignId}`">Save and exit</a>
       </div>
     </template>
@@ -165,6 +172,11 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.link-button {
+  display: inline-flex;
+  text-decoration: none;
+}
+
 .exit {
   margin-left: auto;
 }

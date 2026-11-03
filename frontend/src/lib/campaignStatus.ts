@@ -16,4 +16,4 @@ export function campaignStatusMeta(status: string) {
   return META[status] ?? { label: status, tone: "neutral" as StatusTone };
 }
 
-export const isDraftStatus = (status: string) => ["DRAFT", "READY_FOR_REVIEW"].includes(status);
+export const isDraftStatus = (status: string) => ["DRAFT", "READY_FOR_REVIEW", "GENERATION_FAILED"].includes(status);

@@ -11,6 +11,15 @@ export function countCharacters(text: string): number {
   return [...text].length;
 }
 
+// The length once sent to the person with the longest name, or to someone whose
+// name is replaced by the fallback. It matches the limit the backend enforces.
+export function longestRenderedLength(template: string, longestName: number): number {
+  const fill = Math.max(longestName, FALLBACKS.first_name.length);
+  return countCharacters(
+    template.replace(VARIABLE, (placeholder, name: string) => (isSupported(name) ? "x".repeat(fill) : placeholder)),
+  );
+}
+
 export function renderMessage(template: string, values: MessageValues): string {
   return template.replace(VARIABLE, (placeholder, name: string) => {
     if (!isSupported(name)) return placeholder;

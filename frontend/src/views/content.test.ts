@@ -1,0 +1,225 @@
+import { flushPromises, mount } from "@vue/test-utils";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { Campaign } from "../api/campaigns";
+import { navigate } from "../lib/navigation";
+import ContentView from "./ContentView.vue";
+import CampaignDetailView from "./CampaignDetailView.vue";
+
+const base: Campaign = {
+  id: "c1",
+  name: "Cart Recovery",
+  name_source: "ai",
+  brief: "Istanbul cart reminder",
+  status: "DRAFT",
+  version: 1,
+  proposal: { assumptions: [], unsupported_conditions: [] },
+  conditions: [],
+  audience: { total: 9, sms: 7, email: 7 },
+  blockers: [],
+  content_limits: { sms_name_length: 21, email_name_length: 21 },
+  content_warnings: [],
+  created_at: "2026-11-03T12:00:00Z",
+  updated_at: "2026-11-03T12:00:00Z",
+};
+const stored = { sms: "Hi {{first_name}}", email_subject: "Subject", email_body: "Body", edited: [] };
+const ready: Campaign = { ...base, status: "READY_FOR_REVIEW", content: stored };
+const recipients = [
+  { id: 1, label: "Ayşe", first_name: "Ayşe" },
+  { id: 2, label: "No first name", first_name: "" },
+];
+
+function streamOf(...chunks: string[]) {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    start(sink) {
+      chunks.forEach((chunk) => sink.enqueue(encoder.encode(chunk)));
+      sink.close();
+    },
+  });
+}
+
+const event = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+
+function stub(campaign: Campaign, generate?: () => Promise<unknown>, put?: () => unknown) {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/generate")) return (await generate!()) as Response;
+    if (url.endsWith("/sample-recipients")) return { ok: true, status: 200, json: async () => ({ recipients }) } as Response;
+    if (init?.method === "PUT") return put!() as Response;
+    return { ok: true, status: 200, json: async () => campaign } as Response;
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function generateCalls(fetchMock: ReturnType<typeof stub>) {
+  return fetchMock.mock.calls.filter(([url]) => url.endsWith("/generate"));
+}
+
+afterEach(() => {
+  navigate("/");
+  vi.unstubAllGlobals();
+});
+
+function open() {
+  return mount(ContentView, { props: { campaignId: "c1" } });
+}
+
+describe("content page", () => {
+  it("writes messages on arrival and only marks them validated at the end", async () => {
+    const fetchMock = stub(base, async () => ({
+      ok: true,
+      status: 200,
+      body: streamOf(event("started", {}), event("delta", { field: "sms", text: "Hi " }), event("delta", { field: "sms", text: "{{first_name}}" }), event("done", ready)),
+    }));
+    const wrapper = open();
+    await flushPromises();
+    await vi.waitFor(() => expect(wrapper.find("[data-testid=save]").exists()).toBe(true));
+
+    expect(generateCalls(fetchMock)).toHaveLength(1);
+    expect(wrapper.findAll("textarea")[0].element.value).toBe("Hi {{first_name}}");
+    expect(wrapper.findAll("[data-testid=message-state]")[0].text()).toContain("Validated");
+  });
+
+  it("discards streamed text when the stream starts over", async () => {
+    stub(base, async () => ({
+      ok: true,
+      status: 200,
+      body: streamOf(event("delta", { field: "sms", text: "abandoned" }), event("reset", {}), event("delta", { field: "sms", text: "kept" }), event("done", { ...ready, content: { ...stored, sms: "kept" } })),
+    }));
+    const wrapper = open();
+    await vi.waitFor(() => expect(wrapper.find("[data-testid=save]").exists()).toBe(true));
+    expect(wrapper.findAll("textarea")[0].element.value).toBe("kept");
+  });
+
+  it("does not generate again when content exists", async () => {
+    const fetchMock = stub(ready);
+    const wrapper = open();
+    await flushPromises();
+    expect(generateCalls(fetchMock)).toHaveLength(0);
+    expect(wrapper.findAll("textarea")[0].element.value).toBe(stored.sms);
+  });
+
+  it("shows partial text is gone and offers a retry when generation fails", async () => {
+    const fetchMock = stub(base, async () => ({
+      ok: true,
+      status: 200,
+      body: streamOf(event("delta", { field: "sms", text: "partial" }), event("error", { error: "The AI service is unavailable." })),
+    }));
+    const wrapper = open();
+    await vi.waitFor(() => expect(wrapper.text()).toContain("The AI service is unavailable."));
+    expect(wrapper.findAll("textarea")[0].element.value).toBe("");
+    expect(wrapper.find("[data-testid=regenerate]").text()).toBe("Try again");
+    expect(generateCalls(fetchMock)).toHaveLength(1);
+  });
+
+  it("does not retry by itself after an earlier failure", async () => {
+    const fetchMock = stub({ ...base, status: "GENERATION_FAILED" });
+    const wrapper = open();
+    await flushPromises();
+    expect(generateCalls(fetchMock)).toHaveLength(0);
+    expect(wrapper.find("[data-testid=regenerate]").text()).toBe("Try again");
+  });
+
+  it("keeps existing messages when a regeneration fails", async () => {
+    stub(ready, async () => ({ ok: true, status: 200, body: streamOf(event("error", { error: "Nope." })) }));
+    const wrapper = open();
+    await flushPromises();
+    await wrapper.find("form").trigger("submit");
+    await vi.waitFor(() => expect(wrapper.text()).toContain("Nope."));
+    expect(wrapper.findAll("textarea")[0].element.value).toBe(stored.sms);
+    expect(wrapper.text()).toContain("unchanged");
+  });
+
+  it("stops on request", async () => {
+    stub(base, () => new Promise(() => {}));
+    const wrapper = open();
+    await flushPromises();
+    const fetchMock = vi.mocked(fetch);
+    const [, init] = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/generate"))!;
+    expect(wrapper.find("[data-testid=generating]").exists()).toBe(true);
+    await wrapper.find("[data-testid=stop]").trigger("click");
+    expect(init?.signal?.aborted).toBe(true);
+  });
+
+  it("saves edits and shows what the backend rejected on the field", async () => {
+    stub(ready, undefined, () => ({
+      ok: false,
+      status: 422,
+      json: async () => ({ error: "Fix the highlighted messages.", issues: [{ field: "sms", reason: "too_long", message: "SMS is too long." }] }),
+    }));
+    const wrapper = open();
+    await flushPromises();
+    expect((wrapper.find("[data-testid=save]").element as HTMLButtonElement).disabled).toBe(true);
+
+    await wrapper.findAll("textarea")[0].setValue("Changed");
+    expect(wrapper.find("[data-testid=unsaved]").exists()).toBe(true);
+    expect(wrapper.findAll("[data-testid=message-state]")[0].text()).toContain("Draft");
+    await wrapper.find("[data-testid=save]").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid=message-problem]").text()).toBe("SMS is too long.");
+    expect(wrapper.findAll("[data-testid=message-state]")[0].text()).toContain("Needs changes");
+  });
+
+  it("counts length for the longest name in the audience", async () => {
+    stub(ready);
+    const wrapper = open();
+    await flushPromises();
+    // "Hi " plus a 21 character name.
+    expect(wrapper.findAll("[data-testid=char-count]")[0].text()).toContain("24 / 160");
+  });
+
+  it("previews messages for a person without a name using the fallback", async () => {
+    stub(ready);
+    const wrapper = open();
+    await flushPromises();
+    expect(wrapper.find("[data-testid=phone-message]").text()).toBe("Hi Ayşe");
+    await wrapper.find("select").setValue("2");
+    expect(wrapper.find("[data-testid=phone-message]").text()).toBe("Hi there");
+  });
+
+  it("surfaces differences from the brief for a person to judge", async () => {
+    stub({ ...ready, content_warnings: [{ field: "sms", reason: "invented_discount", message: "SMS mentions 40%." }] });
+    const wrapper = open();
+    await flushPromises();
+    expect(wrapper.text()).toContain("Differs from the brief");
+    expect(wrapper.text()).toContain("SMS mentions 40%.");
+  });
+
+  it("sends people back when the audience is not ready", async () => {
+    stub({ ...base, blockers: ["No users match."] });
+    const wrapper = open();
+    await flushPromises();
+    expect(wrapper.find("a").attributes("href")).toBe("/campaigns/c1/edit");
+  });
+});
+
+describe("content on the campaign page", () => {
+  it("shows a read-only tab once content exists", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => (url.endsWith("/activity") ? { activity: [] } : { ...ready, content: { ...stored, edited: ["sms"] } }),
+    })));
+    const wrapper = mount(CampaignDetailView, { props: { campaignId: "c1" } });
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid=continue-editing]").attributes("href")).toBe("/campaigns/c1/content");
+    await wrapper.find("#tab-content").trigger("click");
+    expect(wrapper.find("[data-testid=content-sms]").text()).toContain("Edited by you");
+    expect(wrapper.find("[data-testid=content-email]").text()).toContain("AI suggested");
+    expect(wrapper.find("textarea").exists()).toBe(false);
+  });
+
+  it("has no content tab before content exists", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => (url.endsWith("/activity") ? { activity: [] } : base),
+    })));
+    const wrapper = mount(CampaignDetailView, { props: { campaignId: "c1" } });
+    await flushPromises();
+    expect(wrapper.find("#tab-content").exists()).toBe(false);
+  });
+});
