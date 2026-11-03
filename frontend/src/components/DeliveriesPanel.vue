@@ -1,37 +1,23 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from "vue";
 
-import { errorMessage, getDeliveries, getDeliveryAttempts, type Delivery, type DeliveryAttempt } from "../api/campaigns";
+import { errorMessage, getDeliveries, getDeliveryAttempts, type Delivery, type DeliveryAttempt, type Progress } from "../api/campaigns";
 import { DELIVERY_STATUSES, deliveryStatusMeta, type DeliveryStatus } from "../lib/deliveryStatus";
 import { formatDateTime } from "../lib/format";
+import { OUTCOMES, REASONS, describeQuery, isFiltered, matches, noFilter, type DeliveryQuery } from "../lib/report";
+import DeliveryReport from "./DeliveryReport.vue";
 import StatusBadge from "./StatusBadge.vue";
 import ValidationNotice from "./ValidationNotice.vue";
 
 const PAGE = 100;
-const REASONS: Record<string, string> = {
-  no_consent: "No consent for this channel",
-  consent_withdrawn: "Consent withdrawn before sending",
-  server_error: "Provider error",
-  rejected: "Rejected by the provider",
-  timeout: "No response from the provider",
-  rate_limited: "Rate limited by the provider",
-  rate_limiter_unavailable: "Waiting for the rate limiter",
-  provider_unreachable: "Provider cannot be reached",
-  lease_expired: "A worker stopped while sending",
-};
-const OUTCOMES: Record<string, string> = {
-  accepted: "Accepted",
-  rate_limited: "Rate limited",
-  server_error: "Provider error",
-  rejected: "Rejected",
-  timeout: "No response",
-};
+const REASON_OPTIONS = ["no_consent", "consent_withdrawn", "server_error", "rejected", "timeout", "lease_expired"];
+const PROBLEM_OPTIONS = ["rate_limited", "server_error", "rejected", "timeout"];
 
-const props = defineProps<{ campaignId: string; refreshKey?: number }>();
+const props = defineProps<{ campaignId: string; refreshKey?: number; progress?: Progress | null }>();
 
 const rows = ref<Delivery[] | null>(null);
-const status = ref("");
-const channel = ref("");
+const query = ref<DeliveryQuery>(noFilter());
+const tableStart = ref<HTMLElement | null>(null);
 const error = ref("");
 const hasMore = ref(false);
 const openId = ref("");
@@ -41,7 +27,7 @@ let latest = 0;
 async function load(limit: number) {
   const request = ++latest;
   try {
-    const page = await getDeliveries(props.campaignId, { status: status.value, channel: channel.value, limit });
+    const page = await getDeliveries(props.campaignId, { ...query.value, limit });
     // A slower answer for earlier filters must not replace a newer one.
     if (request !== latest) return;
     rows.value = page;
@@ -72,29 +58,73 @@ function changeFilter() {
   load(PAGE);
 }
 
+// Selecting what is already selected clears it.
+function selectFromChart(selection: Partial<DeliveryQuery>) {
+  query.value = matches(query.value, selection) ? noFilter() : { ...noFilter(), ...selection };
+  changeFilter();
+  tableStart.value?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+}
+
+function clearFilters() {
+  query.value = noFilter();
+  changeFilter();
+}
+
 watch(() => props.refreshKey, () => load(Math.max(rows.value?.length ?? 0, PAGE)));
 onMounted(() => load(PAGE));
 </script>
 
 <template>
   <section class="deliveries">
-    <div class="filters">
+    <DeliveryReport
+      v-if="progress?.total"
+      :campaign-id="campaignId"
+      :progress="progress"
+      :query="query"
+      :refresh-key="refreshKey"
+      @select="selectFromChart"
+    />
+
+    <div ref="tableStart" class="filters">
       <label class="filter">
         <span class="small muted">Status</span>
-        <select v-model="status" class="field select" data-testid="filter-status" @change="changeFilter">
+        <select v-model="query.status" class="field select" data-testid="filter-status" @change="changeFilter">
           <option value="">All</option>
           <option v-for="item in DELIVERY_STATUSES" :key="item" :value="item">{{ deliveryStatusMeta[item].label }}</option>
         </select>
       </label>
       <label class="filter">
         <span class="small muted">Channel</span>
-        <select v-model="channel" class="field select" data-testid="filter-channel" @change="changeFilter">
+        <select v-model="query.channel" class="field select" data-testid="filter-channel" @change="changeFilter">
           <option value="">All</option>
           <option value="sms">SMS</option>
           <option value="email">Email</option>
         </select>
       </label>
+      <label class="filter">
+        <span class="small muted">Ended as</span>
+        <select v-model="query.reason" class="field select" data-testid="filter-reason" @change="changeFilter">
+          <option value="">Any</option>
+          <option v-for="item in REASON_OPTIONS" :key="item" :value="item">{{ REASONS[item] }}</option>
+        </select>
+      </label>
+      <label class="filter">
+        <span class="small muted">Had a call that was</span>
+        <select v-model="query.outcome" class="field select" data-testid="filter-outcome" @change="changeFilter">
+          <option value="">Any</option>
+          <option v-for="item in PROBLEM_OPTIONS" :key="item" :value="item">{{ OUTCOMES[item] }}</option>
+        </select>
+      </label>
+      <label class="check small">
+        <input v-model="query.retried" type="checkbox" data-testid="filter-retried" @change="changeFilter" />
+        Called more than once
+      </label>
     </div>
+
+    <p v-if="isFiltered(query)" class="active small" data-testid="active-filter">
+      <span>Showing: {{ describeQuery(query) }}</span>
+      <button class="link small" type="button" data-testid="clear-filters" @click="clearFilters">Clear filters</button>
+    </p>
 
     <ValidationNotice v-if="error" tone="error" title="We could not load the deliveries">{{ error }}</ValidationNotice>
     <p v-if="!rows && !error" class="muted" role="status">Loading deliveries...</p>
@@ -165,6 +195,26 @@ onMounted(() => load(PAGE));
   gap: var(--space-3);
 }
 
+.check {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: var(--space-2);
+  min-height: 40px;
+}
+
+.active {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-primary-soft);
+  border-radius: 8px;
+}
+
 .filter {
   display: grid;
   gap: var(--space-1);
@@ -176,7 +226,10 @@ onMounted(() => load(PAGE));
   padding-block: 0;
 }
 
+/* Positioned so the table's hidden header text scrolls with it instead of
+   widening the page. */
 .table-wrap {
+  position: relative;
   overflow-x: auto;
 }
 

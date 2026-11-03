@@ -293,6 +293,7 @@ describe("campaign page after approval", () => {
     const { wrapper } = await open({
       ...routes({ ...ready, status: "COMPLETED" }, progress),
       "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [row] } },
+      "GET /api/campaigns/c1/report": { body: { reasons: [], problems: [], timeline: { bucket_seconds: 0, buckets: [] } } },
       "GET /api/campaigns/c1/deliveries?limit=100&status=FAILED": { body: { deliveries: [] } },
       "GET /api/campaigns/c1/deliveries/d1/attempts": {
         body: { attempts: [{ attempt: 1, response_code: 500, outcome: "server_error", error: "", occurred_at: "2026-11-03T12:00:00Z" }, { attempt: 2, response_code: 202, outcome: "accepted", error: "", occurred_at: "2026-11-03T12:00:05Z" }] },
@@ -310,6 +311,101 @@ describe("campaign page after approval", () => {
     await wrapper.find("[data-testid=filter-status]").setValue("FAILED");
     await flushPromises();
     expect(wrapper.find("[data-testid=deliveries-empty]").exists()).toBe(true);
+  });
+
+  describe("report", () => {
+    const row = { id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 2, response_code: 202, reason: "", provider_message_id: "m", next_attempt_at: "2026-11-03T12:00:00Z", sent_at: null, updated_at: "2026-11-03T12:00:00Z" };
+    const report = {
+      reasons: [{ reason: "no_consent", deliveries: 5 }, { reason: "server_error", deliveries: 1 }],
+      problems: [{ outcome: "rate_limited", deliveries: 3, attempts: 4 }],
+      timeline: {
+        bucket_seconds: 10,
+        buckets: [
+          { at: "2026-11-03T12:00:00Z", accepted: 7, rate_limited: 4, server_error: 0, rejected: 0, timeout: 0 },
+          { at: "2026-11-03T12:00:10Z", accepted: 0, rate_limited: 0, server_error: 0, rejected: 0, timeout: 0 },
+          { at: "2026-11-03T12:00:20Z", accepted: 5, rate_limited: 0, server_error: 1, rejected: 0, timeout: 0 },
+        ],
+      },
+    };
+
+    async function openReport(body: unknown = report) {
+      const fetchMock = stub({
+        ...routes({ ...ready, status: "COMPLETED" }, progress),
+        "GET /api/campaigns/c1/report": { body },
+        "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [row] } },
+        "GET /api/campaigns/c1/deliveries?limit=100&status=SENT&channel=sms": { body: { deliveries: [row] } },
+        "GET /api/campaigns/c1/deliveries?limit=100&outcome=rate_limited": { body: { deliveries: [] } },
+        "GET /api/campaigns/c1/deliveries?limit=100&reason=server_error": { body: { deliveries: [] } },
+        "GET /api/campaigns/c1/deliveries?limit=100&from=2026-11-03T12%3A00%3A00Z&to=2026-11-03T12%3A00%3A10.000Z": { body: { deliveries: [] } },
+      });
+      const wrapper = mount(CampaignDetailView, { props: { campaignId: "c1" } });
+      await flushPromises();
+      await wrapper.find("#tab-deliveries").trigger("click");
+      await flushPromises();
+      return { wrapper, fetchMock };
+    }
+
+    const asked = (fetchMock: ReturnType<typeof stub>, query: string) =>
+      fetchMock.mock.calls.filter(([url]) => url === `/api/campaigns/c1/deliveries?limit=100&${query}`).length;
+
+    it("selecting a problem lists the people it happened to, and selecting it again clears it", async () => {
+      const { wrapper, fetchMock } = await openReport();
+      await wrapper.find("[data-testid=problem-rate_limited]").trigger("click");
+      await flushPromises();
+      expect(asked(fetchMock, "outcome=rate_limited")).toBe(1);
+      expect(wrapper.find("[data-testid=active-filter]").text()).toContain("Had a call: Rate limited");
+      expect(wrapper.find("[data-testid=filter-outcome]").element).toHaveProperty("value", "rate_limited");
+      expect(wrapper.find("[data-testid=problem-rate_limited]").attributes("aria-pressed")).toBe("true");
+
+      await wrapper.find("[data-testid=problem-rate_limited]").trigger("click");
+      await flushPromises();
+      expect(wrapper.find("[data-testid=active-filter]").exists()).toBe(false);
+      expect(wrapper.find("[data-testid=delivery-row]").exists()).toBe(true);
+    });
+
+    it("selecting a reason replaces the earlier selection", async () => {
+      const { wrapper, fetchMock } = await openReport();
+      await wrapper.find("[data-testid=problem-rate_limited]").trigger("click");
+      await flushPromises();
+      await wrapper.find("[data-testid=reason-server_error]").trigger("click");
+      await flushPromises();
+      expect(asked(fetchMock, "reason=server_error")).toBe(1);
+      expect(wrapper.find("[data-testid=filter-outcome]").element).toHaveProperty("value", "");
+    });
+
+    it("selecting a channel segment filters by channel and status", async () => {
+      const { wrapper, fetchMock } = await openReport();
+      await wrapper.find("[data-testid=segment-sms-SENT]").trigger("click");
+      await flushPromises();
+      expect(asked(fetchMock, "status=SENT&channel=sms")).toBe(1);
+      expect(wrapper.find("[data-testid=active-filter]").text()).toContain("SMS");
+    });
+
+    it("selecting a time bar lists who was called in that period, and a quiet period cannot be selected", async () => {
+      const { wrapper, fetchMock } = await openReport();
+      const bars = wrapper.findAll("[data-testid=timeline-bar]");
+      expect(bars).toHaveLength(3);
+      expect(bars[1].attributes("disabled")).toBeDefined();
+      await bars[0].trigger("click");
+      await flushPromises();
+      expect(asked(fetchMock, "from=2026-11-03T12%3A00%3A00Z&to=2026-11-03T12%3A00%3A10.000Z")).toBe(1);
+      await wrapper.find("[data-testid=clear-filters]").trigger("click");
+      await flushPromises();
+      expect(wrapper.find("[data-testid=active-filter]").exists()).toBe(false);
+    });
+
+    it("offers the time chart as a table of the periods with calls", async () => {
+      const { wrapper } = await openReport();
+      expect(wrapper.findAll("[data-testid=timeline-table] tbody tr")).toHaveLength(2);
+    });
+
+    it("says so when nothing went wrong and draws no timeline before any call", async () => {
+      const { wrapper } = await openReport({ reasons: [], problems: [], timeline: { bucket_seconds: 0, buckets: [] } });
+      expect(wrapper.find("[data-testid=no-reasons]").exists()).toBe(true);
+      expect(wrapper.find("[data-testid=no-problems]").exists()).toBe(true);
+      expect(wrapper.find("[data-testid=timeline-chart]").exists()).toBe(false);
+      expect(wrapper.find("[data-testid=channel-chart]").exists()).toBe(true);
+    });
   });
 
   it("has no deliveries tab before anything is queued", async () => {

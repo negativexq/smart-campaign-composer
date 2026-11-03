@@ -1,4 +1,5 @@
 import { EventStreamParser } from "../lib/sse";
+import type { DeliveryQuery } from "../lib/report";
 import { currentUser } from "../lib/session";
 
 export type Condition = { field: string; label: string; value: string };
@@ -220,11 +221,31 @@ export function getProgress(id: string): Promise<Progress> {
   return request<Progress>(`/api/campaigns/${encodeURIComponent(id)}/progress`);
 }
 
-export async function getDeliveries(id: string, filter: { status: string; channel: string; limit: number }): Promise<Delivery[]> {
+export async function getDeliveries(id: string, filter: Partial<DeliveryQuery> & { limit: number }): Promise<Delivery[]> {
   const params = new URLSearchParams({ limit: String(filter.limit) });
-  if (filter.status) params.set("status", filter.status);
-  if (filter.channel) params.set("channel", filter.channel);
+  for (const [key, value] of Object.entries(filter)) {
+    if (value && key !== "limit") params.set(key, String(value));
+  }
   return (await request<{ deliveries: Delivery[] }>(`/api/campaigns/${encodeURIComponent(id)}/deliveries?${params}`)).deliveries;
+}
+
+export type TimelineBucket = {
+  at: string;
+  accepted: number;
+  rate_limited: number;
+  server_error: number;
+  rejected: number;
+  timeout: number;
+};
+
+export type Report = {
+  reasons: { reason: string; deliveries: number }[];
+  problems: { outcome: string; deliveries: number; attempts: number }[];
+  timeline: { bucket_seconds: number; buckets: TimelineBucket[] };
+};
+
+export async function getReport(id: string): Promise<Report> {
+  return request<Report>(`/api/campaigns/${encodeURIComponent(id)}/report`);
 }
 
 export async function getDeliveryAttempts(id: string, delivery: string): Promise<DeliveryAttempt[]> {

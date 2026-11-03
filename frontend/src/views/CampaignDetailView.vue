@@ -266,7 +266,7 @@ onBeforeUnmount(() => stopWatching?.());
     </section>
 
     <section v-else-if="tab === 'deliveries'" id="panel-deliveries" class="panel" role="tabpanel" aria-labelledby="tab-deliveries">
-      <DeliveriesPanel :campaign-id="campaignId" :refresh-key="refreshKey" />
+      <DeliveriesPanel :campaign-id="campaignId" :refresh-key="refreshKey" :progress="progress" />
     </section>
 
     <section v-else id="panel-activity" class="panel" role="tabpanel" aria-labelledby="tab-activity">

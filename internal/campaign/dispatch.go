@@ -40,6 +40,7 @@ var (
 var (
 	deliveryStatuses = []string{"QUEUED", "SENDING", "SENT", "RETRYING", "FAILED", "SKIPPED", "UNKNOWN"}
 	channels         = []string{"sms", "email"}
+	attemptOutcomes  = []string{"accepted", "rate_limited", "server_error", "rejected", "timeout"}
 )
 
 // lockStatus takes the campaign's row lock, which edits and generation also need,
@@ -300,6 +301,15 @@ var terminalStatuses = []string{"SENT", "FAILED", "SKIPPED", "UNKNOWN"}
 type DeliveryFilter struct {
 	Status  string
 	Channel string
+	// Reason is why a delivery ended.
+	Reason string
+	// Outcome and the window select deliveries by their provider calls, so one
+	// accepted after a 429 is still found under rate_limited.
+	Outcome string
+	From    *time.Time
+	To      *time.Time
+	// Retried keeps deliveries with more than one provider call.
+	Retried bool
 	Limit   int
 	Offset  int
 }
@@ -329,6 +339,9 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 	if filter.Channel != "" && !slices.Contains(channels, filter.Channel) {
 		return nil, ErrUnknownFilter
 	}
+	if filter.Outcome != "" && !slices.Contains(attemptOutcomes, filter.Outcome) {
+		return nil, ErrUnknownFilter
+	}
 	if _, err := s.load(ctx, id); err != nil {
 		return nil, err
 	}
@@ -347,8 +360,16 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 			SELECT response_code FROM delivery_attempts WHERE delivery_id = d.id ORDER BY id DESC LIMIT 1
 		) last ON true
 		WHERE d.campaign_id = $1 AND ($2 = '' OR d.status = $2) AND ($3 = '' OR d.channel = $3)
+		  AND ($6 = '' OR d.last_error = $6)
+		  AND (NOT $7 OR (SELECT count(*) FROM delivery_attempts a WHERE a.delivery_id = d.id) > 1)
+		  AND (($8 = '' AND $9::timestamptz IS NULL AND $10::timestamptz IS NULL) OR EXISTS (
+			SELECT 1 FROM delivery_attempts a
+			WHERE a.delivery_id = d.id AND ($8 = '' OR a.outcome = $8)
+			  AND ($9::timestamptz IS NULL OR a.occurred_at >= $9) AND ($10::timestamptz IS NULL OR a.occurred_at < $10)
+		  ))
 		ORDER BY d.user_id, d.channel
-		LIMIT $4 OFFSET $5`, id, filter.Status, filter.Channel, limit, max(filter.Offset, 0))
+		LIMIT $4 OFFSET $5`, id, filter.Status, filter.Channel, limit, max(filter.Offset, 0),
+		filter.Reason, filter.Retried, filter.Outcome, filter.From, filter.To)
 	if err != nil {
 		return nil, fmt.Errorf("list deliveries: %w", err)
 	}

@@ -56,6 +56,7 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 		"GET /api/campaigns/{id}/progress":                       a.progress,
 		"GET /api/campaigns/{id}/events":                         a.events,
 		"GET /api/campaigns/{id}/deliveries":                     a.deliveries,
+		"GET /api/campaigns/{id}/report":                         a.report,
 		"GET /api/campaigns/{id}/deliveries/{delivery}/attempts": a.deliveryAttempts,
 		"GET /api/campaigns/{id}/activity":                       a.activity,
 	} {
@@ -386,14 +387,42 @@ func (a *api) deliveries(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	limit, _ := strconv.Atoi(query.Get("limit"))   //nolint:errcheck // anything invalid means the default
 	offset, _ := strconv.Atoi(query.Get("offset")) //nolint:errcheck // anything invalid means the start
+	from, fromErr := parseTime(query.Get("from"))
+	to, toErr := parseTime(query.Get("to"))
+	if fromErr != nil || toErr != nil {
+		writeError(w, r, campaign.ErrUnknownFilter)
+		return
+	}
 	deliveries, err := a.campaigns.Deliveries(r.Context(), r.PathValue("id"), campaign.DeliveryFilter{
-		Status: query.Get("status"), Channel: query.Get("channel"), Limit: limit, Offset: offset,
+		Status: query.Get("status"), Channel: query.Get("channel"), Reason: query.Get("reason"), Outcome: query.Get("outcome"),
+		From: from, To: to, Retried: query.Get("retried") == "true", Limit: limit, Offset: offset,
 	})
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deliveries": deliveries})
+}
+
+func (a *api) report(w http.ResponseWriter, r *http.Request) {
+	report, err := a.campaigns.Report(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+// parseTime reads an optional RFC 3339 query value.
+func parseTime(value string) (*time.Time, error) {
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
 }
 
 func (a *api) deliveryAttempts(w http.ResponseWriter, r *http.Request) {
