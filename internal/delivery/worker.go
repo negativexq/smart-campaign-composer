@@ -261,8 +261,8 @@ func (w *Worker) takeDue(ctx context.Context, channel string, want int) ([]claim
 		return nil, permits.Retry, nil
 	}
 	claims, err := w.claim(ctx, channel, permits.Granted)
-	breaker.giveBack(allowed - len(claims))
 	claims = w.settle(ctx, channel, permits, claims)
+	breaker.giveBack(allowed - len(claims))
 	for i := range claims {
 		claims[i].probe = probing
 	}
@@ -277,15 +277,16 @@ func (w *Worker) takeDue(ctx context.Context, channel string, want int) ([]claim
 
 // settle gives back what was not claimed, which keeps an idle queue from using up the
 // channel's rate, and counts the rest from now. A claim that outlasted its permits may
-// find the window full: those messages go back in the queue, at no cost to them.
-// Failing to settle only makes the count slightly old, so it stops nothing.
+// find the window full: those messages go back in the queue, at no cost to them. So do
+// all of them if settling fails, because this can take seconds and the limiter may be
+// gone by then, and nothing is sent without it.
 func (w *Worker) settle(ctx context.Context, channel string, permits Permits, claims []claim) []claim {
 	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
 	defer cancel()
 	confirmed, err := w.limiter.Settle(settleCtx, channel, permits, len(claims))
 	if err != nil {
 		slog.WarnContext(ctx, "settle permits", "channel", channel, "error", err)
-		return claims
+		confirmed = 0
 	}
 	for _, item := range claims[confirmed:] {
 		next := update{status: statusRetrying, attempts: item.attempts, retryIn: time.Second}

@@ -60,6 +60,8 @@ type fakeLimiter struct {
 	pauseErr error
 	// confirm, when set, is how many used permits settling allows.
 	confirm int
+	// settleErr, when set, is what settling fails with.
+	settleErr error
 }
 
 func (f *fakeLimiter) Pause(_ context.Context, channel string, length time.Duration) error {
@@ -92,6 +94,9 @@ func (f *fakeLimiter) Reserve(_ context.Context, channel string, want int) (deli
 func (f *fakeLimiter) Settle(_ context.Context, channel string, permits delivery.Permits, used int) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.settleErr != nil {
+		return 0, f.settleErr
+	}
 	f.permits[channel] -= permits.Granted - used
 	if f.confirm > 0 {
 		return f.confirm, nil
@@ -1332,6 +1337,78 @@ func TestAClaimWithoutConfirmedPermitsReturnsToTheQueue(t *testing.T) {
 	}
 	if sending != 0 || returned == 0 || attempts != 0 {
 		t.Fatalf("sending %d, returned %d, attempts %d", sending, returned, attempts)
+	}
+}
+
+// Redis stopping between a permit and its use must stop the send, however late it comes.
+func TestAClaimThatCannotBeSettledIsNotSent(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.limiter.settleErr = errors.New("redis is down")
+	ctx := context.Background()
+	if _, err := r.worker.ProcessBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.sender.calls) != 0 {
+		t.Fatalf("%d messages went out without the rate limiter", len(r.sender.calls))
+	}
+	var sending, returned, attempts int
+	err := r.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status = 'SENDING'), count(*) FILTER (WHERE status = 'RETRYING'),
+		coalesce(sum(attempts), 0) FROM campaign_deliveries WHERE campaign_id = $1`, r.id).Scan(&sending, &returned, &attempts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sending != 0 || returned == 0 || attempts != 0 {
+		t.Fatalf("sending %d, returned %d, attempts %d", sending, returned, attempts)
+	}
+}
+
+// A probe that never went out says nothing about the provider. If it were lost, the
+// breaker would wait for its result forever and the channel would never send again.
+func TestAProbeThatCannotBeSettledIsNotLost(t *testing.T) {
+	t.Parallel()
+	var down atomic.Bool
+	down.Store(true)
+	r := newRig(t, func(int, delivery.Message) (delivery.Result, error) {
+		if down.Load() {
+			return delivery.Result{StatusCode: http.StatusBadGateway}, nil
+		}
+		return accepted, nil
+	})
+	queued := r.queuedCount(t)
+	worker := delivery.New(r.pool, r.sender, r.limiter, r.metrics, noop.NewTracerProvider().Tracer("test"), delivery.Config{
+		BatchSize: 50, Concurrency: 4, Lease: time.Minute, MaxAttempts: 1000, SendTimeout: time.Second,
+		Backoff: func(int) time.Duration { return 0 },
+		Breaker: delivery.BreakerConfig{Window: 10 * time.Second, MinCalls: 3, FailureRatio: 0.5, FirstWait: 10 * time.Millisecond, MaxWait: 40 * time.Millisecond, Probes: 2},
+	})
+	setSettleErr := func(err error) {
+		r.limiter.mu.Lock()
+		defer r.limiter.mu.Unlock()
+		r.limiter.settleErr = err
+	}
+
+	ctx, stop := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() { stopped <- worker.Run(ctx) }()
+	defer func() {
+		stop()
+		if err := <-stopped; err != nil {
+			t.Errorf("run: %v", err)
+		}
+	}()
+
+	time.Sleep(time.Second) // both channels trip and start probing
+	setSettleErr(errors.New("redis is down"))
+	time.Sleep(time.Second) // every probe is claimed and handed back
+	setSettleErr(nil)
+	down.Store(false)
+
+	deadline := time.Now().Add(10 * time.Second)
+	for r.statuses(t)["SENT"] < queued && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := r.statuses(t); got["SENT"] != queued {
+		t.Fatalf("after the outage: %v, want %d sent", got, queued)
 	}
 }
 
