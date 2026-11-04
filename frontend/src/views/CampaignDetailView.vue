@@ -12,6 +12,7 @@ import {
   type ActivityEntry,
   type Campaign,
   type MessageField,
+  type MessageVersion,
   type LiveState,
   type Progress,
 } from "../api/campaigns";
@@ -28,8 +29,9 @@ import ValidationNotice from "../components/ValidationNotice.vue";
 import { firstMessagePath } from "../lib/campaignSteps";
 import { isDraftStatus } from "../lib/campaignStatus";
 import { formatDateTime } from "../lib/format";
+import { languageVersions } from "../lib/languages";
 import { sendingBlockers } from "../lib/systemHealth";
-import { campaignDiscount, reachHint } from "../lib/message";
+import { campaignDiscount, reachHint, uniqueWarnings, warningTitle } from "../lib/message";
 
 const props = defineProps<{ campaignId: string }>();
 
@@ -62,9 +64,17 @@ const isLive = computed(() => campaign.value?.status === "DISPATCHING");
 const isDraft = computed(() => (campaign.value ? isDraftStatus(campaign.value.status) : false));
 const editHref = computed(() => (campaign.value?.content ? firstMessagePath(props.campaignId, campaign.value.channels) : `/campaigns/${props.campaignId}/edit`));
 
-function originOf(field: MessageField) {
-  return campaign.value?.content?.edited.includes(field) ? "user" : "ai";
+function originOf(field: MessageField, version: MessageVersion) {
+  return version.edited.includes(field) ? "user" : "ai";
 }
+
+// Every language someone reads, or the one version an older campaign has.
+const versions = computed(() => {
+  const current = campaign.value;
+  if (!current?.content) return [];
+  const known = languageVersions(current);
+  return known.length > 1 ? known : [{ language: current.content.language ?? "", name: "", version: current.content as MessageVersion }];
+});
 
 async function refresh() {
   const [updated, counts, entries] = await Promise.all([getCampaign(props.campaignId), getProgress(props.campaignId), getActivity(props.campaignId)]);
@@ -242,18 +252,20 @@ onBeforeUnmount(() => stopWatching?.());
 
     <section v-else-if="tab === 'content' && campaign.content" id="panel-content" class="panel" role="tabpanel" aria-labelledby="tab-content">
       <p v-if="campaign.approved_at" class="muted small" data-testid="approved-note">Version {{ campaign.version }}, approved {{ formatDateTime(campaign.approved_at) }}. This is exactly what is sent, and it can no longer change.</p>
-      <ValidationNotice v-for="warning in campaign.content_warnings" :key="warning.field + warning.reason" tone="warning" title="Differs from the brief">
+      <ValidationNotice v-for="warning in uniqueWarnings(campaign.content_warnings)" :key="warning.field + warning.reason" tone="warning" :title="warningTitle(warning)">
         {{ warning.message }}
       </ValidationNotice>
       <p v-if="campaignDiscount(campaign)" class="muted small" data-testid="content-discount">Discount in these messages: <strong>{{ campaignDiscount(campaign) }}</strong></p>
-      <article v-if="campaign.channels.includes('sms')" class="message card" data-testid="content-sms">
-        <div class="message-head"><h2>SMS</h2><OriginTag :origin="originOf('sms')" /></div>
-        <p class="message-text">{{ campaign.content.sms }}</p>
-      </article>
-      <article v-if="campaign.channels.includes('email')" class="message card" data-testid="content-email">
-        <div class="message-head"><h2>Email</h2><OriginTag :origin="originOf('email_body')" /></div>
-        <EmailPreview :message="campaign.content" :recipients="[]" />
-      </article>
+      <template v-for="entry in versions" :key="entry.language">
+        <article v-if="campaign.channels.includes('sms')" class="message card" data-testid="content-sms">
+          <div class="message-head"><h2>SMS<template v-if="entry.name"> · {{ entry.name }}</template></h2><OriginTag :origin="originOf('sms', entry.version)" /></div>
+          <p class="message-text">{{ entry.version.sms }}</p>
+        </article>
+        <article v-if="campaign.channels.includes('email')" class="message card" data-testid="content-email">
+          <div class="message-head"><h2>Email<template v-if="entry.name"> · {{ entry.name }}</template></h2><OriginTag :origin="originOf('email_body', entry.version)" /></div>
+          <EmailPreview :message="entry.version" :recipients="[]" :language="entry.language" />
+        </article>
+      </template>
     </section>
 
     <section v-else-if="tab === 'deliveries'" id="panel-deliveries" class="panel" role="tabpanel" aria-labelledby="tab-deliveries">

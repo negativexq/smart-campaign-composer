@@ -79,7 +79,7 @@ func TestABriefAndAnOfferThatDisagreeAreRefused(t *testing.T) {
 func TestToneChangesTheWriting(t *testing.T) {
 	t.Parallel()
 	api := newAPI(t, fastMock())
-	for tone, want := range map[string]string{"formal": "Dear ", "urgent": "Hurry"} {
+	for tone, want := range map[string]string{"formal": "Sayın ", "urgent": "Acele"} {
 		view, messages := written(t, api, createWith(t, api, map[string]any{"brief": plainBrief, "tone": tone}))
 		if view["tone"] != tone {
 			t.Fatalf("view: %v", view["tone"])

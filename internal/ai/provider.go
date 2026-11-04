@@ -48,6 +48,10 @@ type Response struct {
 // ContentRequest asks for messages. Current and Instruction are set when
 // regenerating; PreviousOutput and ValidationError when repairing.
 type ContentRequest struct {
+	// Language is who this version is for. Reference is the version already written
+	// for another language, which this one has to say the same as.
+	Language        string
+	Reference       json.RawMessage
 	Tone            string
 	Brief           string
 	Conditions      []string

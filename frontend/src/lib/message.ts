@@ -3,6 +3,7 @@ export const SUPPORTED_VARIABLES = ["first_name"] as const;
 export type MessageValues = Record<(typeof SUPPORTED_VARIABLES)[number], string>;
 
 const FALLBACKS: MessageValues = { first_name: "there" };
+const NAME_FALLBACKS: Record<string, string> = { tr: "müşterimiz", en: "there" };
 const VARIABLE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
 
 // Counts Unicode code points. The backend counts the same way, so a message
@@ -20,11 +21,16 @@ export function longestRenderedLength(template: string, longestName: number): nu
   );
 }
 
-export function renderMessage(template: string, values: MessageValues): string {
+export function renderMessage(template: string, values: MessageValues, language = ""): string {
   return template.replace(VARIABLE, (placeholder, name: string) => {
     if (!isSupported(name)) return placeholder;
-    return values[name] || FALLBACKS[name];
+    return values[name] || fallbackName(language);
   });
+}
+
+/** The word that stands in for a missing first name, in the reader's language. */
+export function fallbackName(language: string): string {
+  return NAME_FALLBACKS[language] ?? FALLBACKS.first_name;
 }
 
 export function findUnknownVariables(template: string): string[] {
@@ -69,4 +75,15 @@ export function reachHint(total: number, reached: number, channel: string): stri
   const missed = Math.max(total - reached, 0);
   if (!missed) return `Everyone matching consented to ${channel}`;
   return `${missed.toLocaleString("en-US")} not reachable: no ${channel} consent`;
+}
+
+type Warning = { field: string; reason: string; message: string };
+
+/** A note about several fields of one request reads as one note. */
+export function uniqueWarnings<T extends Warning>(warnings: T[]): T[] {
+  return warnings.filter((warning, index) => warnings.findIndex((other) => other.reason === warning.reason && other.message === warning.message) === index);
+}
+
+export function warningTitle(warning: Warning): string {
+  return warning.reason === "not_applied" ? "Not done" : "Differs from the brief";
 }

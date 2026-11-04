@@ -42,6 +42,7 @@ const (
 	outcomeInvalid     = "invalid_output"
 	reasonUnsupported  = "unsupported_condition"
 	reasonUnmatched    = "brief_not_matched"
+	defaultLanguage    = "en"
 	reasonEmpty        = "empty_audience"
 	reasonNoConsent    = "no_consented_recipients"
 	eventRenamed       = "campaign.renamed"
@@ -97,10 +98,12 @@ type View struct {
 	ContentLimits content.Limits `json:"content_limits"`
 	// ContentWarnings are differences from the brief for a person to judge.
 	ContentWarnings []content.Issue `json:"content_warnings"`
-	ApprovedAt      time.Time       `json:"approved_at,omitzero"`
-	Schedule        *ScheduleView   `json:"schedule,omitempty"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
+	// Languages splits the audience by the language people read.
+	Languages  []segment.LanguageAudience `json:"languages"`
+	ApprovedAt time.Time                  `json:"approved_at,omitzero"`
+	Schedule   *ScheduleView              `json:"schedule,omitempty"`
+	CreatedAt  time.Time                  `json:"created_at"`
+	UpdatedAt  time.Time                  `json:"updated_at"`
 }
 
 // Service runs campaign operations.
@@ -673,9 +676,28 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 		SMSName: lengths.SMS, EmailName: lengths.Email,
 		SkipSMS: !slices.Contains(view.Channels, "sms"), SkipEmail: !slices.Contains(view.Channels, "email"),
 	}
+	if view.Languages, err = segment.Languages(ctx, s.db, view.Proposal.Segment, view.AudienceAsOf); err != nil {
+		return View{}, err
+	}
+	for i := range view.Languages {
+		// Reachable means on a channel this campaign uses.
+		if !slices.Contains(view.Channels, "sms") {
+			view.Languages[i].SMS = 0
+		}
+		if !slices.Contains(view.Channels, "email") {
+			view.Languages[i].Email = 0
+		}
+	}
 	if view.Content != nil {
 		view.ContentWarnings = append(view.ContentWarnings, content.CheckDiscounts(view.Content.Content, view.writingBrief())...)
 		view.ContentWarnings = append(view.ContentWarnings, view.Content.NotApplied...)
+		for _, translation := range view.Content.Translations {
+			issues := append(content.CheckDiscounts(translation.Content, view.writingBrief()), translation.NotApplied...)
+			for _, issue := range issues {
+				issue.Message = segment.LanguageName(translation.Language) + " version: " + issue.Message
+				view.ContentWarnings = append(view.ContentWarnings, issue)
+			}
+		}
 	}
 	return view, nil
 }
@@ -754,6 +776,35 @@ type AudienceSnapshot struct {
 type blocker struct {
 	reason  string
 	message string
+}
+
+// writingLanguages is who needs a version: every language with someone reachable on
+// this campaign's channels, largest first. A language we cannot write in gets the main
+// version when it is sent.
+func (v *View) writingLanguages() []string {
+	languages := []string{}
+	for _, language := range v.Languages {
+		if language.SMS+language.Email > 0 && segment.LanguageName(language.Language) != "" {
+			languages = append(languages, language.Language)
+		}
+	}
+	if len(languages) == 0 {
+		return []string{defaultLanguage}
+	}
+	return languages
+}
+
+// limitsFor is the campaign's limits with the longest name among this language's
+// readers, or the word that stands in for a missing name if that is longer.
+func (v *View) limitsFor(language string) content.Limits {
+	limits := v.ContentLimits
+	for _, audience := range v.Languages {
+		if audience.Language == language {
+			fallback := utf8.RuneCountInString(content.FallbackName(language))
+			limits.SMSName, limits.EmailName = max(audience.SMSName, fallback), max(audience.EmailName, fallback)
+		}
+	}
+	return limits
 }
 
 // blockersFor lists what must change before this audience can be approved.

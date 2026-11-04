@@ -15,6 +15,8 @@ import MetricCard from "../components/MetricCard.vue";
 import SchedulePicker from "../components/SchedulePicker.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { channelLabel, lastChannel, lastMessagePath } from "../lib/campaignSteps";
+import { languageVersions, missingLanguages, languageName } from "../lib/languages";
+import { uniqueWarnings, warningTitle } from "../lib/message";
 import { navigate } from "../lib/navigation";
 import { buildSchedule, emptyScheduleForm, scheduleProblem } from "../lib/schedule";
 
@@ -30,6 +32,14 @@ const form = ref(emptyScheduleForm());
 const reviewable = computed(() => ["READY_FOR_REVIEW", "APPROVED"].includes(campaign.value?.status ?? ""));
 const messageCount = computed(() => (campaign.value ? campaign.value.audience.sms + campaign.value.audience.email : 0));
 const problem = computed(() => scheduleProblem(form.value));
+// Every version is on the page, so nobody approves a language they did not see.
+const versions = computed(() => {
+  const current = campaign.value;
+  if (!current?.content) return [];
+  const known = languageVersions(current);
+  return known.length ? known : [{ language: "", name: "", sms: current.audience.sms, email: current.audience.email, version: current.content }];
+});
+const missing = computed(() => (campaign.value ? missingLanguages(campaign.value).map(languageName) : []));
 type Check = { label: string; detail: string; ok: boolean };
 const checks = computed<Check[]>(() => {
   const current = campaign.value;
@@ -41,15 +51,26 @@ const checks = computed<Check[]>(() => {
   ];
   // A campaign without a discount has nothing to check here.
   const hasDiscount = Boolean(current.offer_percent) || /%\s*\d|\d\s*%/.test(current.brief);
-  if (current.content_warnings.length || hasDiscount) {
+  // What the model left undone is its own notice, whatever it was about.
+  const differs = current.content_warnings.filter((warning) => warning.reason !== "not_applied");
+  if (differs.length || hasDiscount) {
     list.push({
       label: "Discount",
-      detail: current.content_warnings.length
-        ? current.content_warnings.map((warning) => warning.message).join(" ")
+      detail: differs.length
+        ? uniqueWarnings(differs).map((warning) => warning.message).join(" ")
         : current.offer_percent
           ? `Every message carries the ${current.offer_percent}% discount you entered.`
           : "Every message carries the discount from the brief.",
-      ok: !current.content_warnings.length,
+      ok: !differs.length,
+    });
+  }
+  if (current.content && (versions.value.length > 1 || missing.value.length)) {
+    list.push({
+      label: "Languages",
+      detail: missing.value.length
+        ? `Part of this audience reads ${missing.value.join(" and ")} and has no messages yet.`
+        : `Each person gets ${versions.value.map((entry) => entry.name).join(" or ")}, with the same offer.`,
+      ok: !missing.value.length,
     });
   }
   if (current.channels.includes("email") && current.content) {
@@ -63,7 +84,7 @@ const checks = computed<Check[]>(() => {
   list.push({ label: "When", detail: problem.value || (form.value.mode === "now" ? "Sends as soon as you approve." : "Sends on the schedule below."), ok: !problem.value });
   return list;
 });
-const blocked = computed(() => Boolean(campaign.value?.blockers.length) || messageCount.value === 0);
+const blocked = computed(() => Boolean(campaign.value?.blockers.length) || messageCount.value === 0 || missing.value.length > 0);
 const actionLabel = computed(() => {
   if (submitting.value) return "Working...";
   if (form.value.mode !== "now") return "Approve and schedule";
@@ -116,7 +137,7 @@ onMounted(async () => {
     </header>
 
     <ValidationNotice v-for="blocker in campaign.blockers" :key="blocker" tone="error" title="This blocks approval">{{ blocker }}</ValidationNotice>
-    <ValidationNotice v-for="warning in campaign.content_warnings" :key="warning.field + warning.reason" tone="warning" title="Differs from the brief">
+    <ValidationNotice v-for="warning in uniqueWarnings(campaign.content_warnings)" :key="warning.field + warning.reason" tone="warning" :title="warningTitle(warning)">
       {{ warning.message }}
     </ValidationNotice>
 
@@ -134,14 +155,20 @@ onMounted(async () => {
 
     <section v-if="campaign.content" class="section">
       <h2>What they read</h2>
-      <article v-if="campaign.channels.includes('sms')" class="message card" data-testid="review-sms">
-        <h3 class="muted small">SMS</h3>
-        <p class="text">{{ campaign.content.sms }}</p>
-      </article>
-      <article v-if="campaign.channels.includes('email')" class="message card" data-testid="review-email">
-        <h3 class="muted small">Email</h3>
-        <EmailPreview :message="campaign.content" :recipients="[]" />
-      </article>
+      <div v-for="entry in versions" :key="entry.language" class="version" :data-testid="entry.language ? `review-${entry.language}` : undefined">
+        <h3 v-if="versions.length > 1" class="version-head">
+          {{ entry.name }}
+          <span class="muted small">{{ (entry.sms + entry.email).toLocaleString("en-US") }} messages</span>
+        </h3>
+        <article v-if="campaign.channels.includes('sms') && (entry.sms || versions.length === 1)" class="message card" data-testid="review-sms">
+          <h3 class="muted small">SMS</h3>
+          <p class="text">{{ entry.version.sms }}</p>
+        </article>
+        <article v-if="campaign.channels.includes('email') && (entry.email || versions.length === 1)" class="message card" data-testid="review-email">
+          <h3 class="muted small">Email</h3>
+          <EmailPreview :message="entry.version" :recipients="[]" :language="entry.language" />
+        </article>
+      </div>
     </section>
 
     <SchedulePicker v-model="form" />
@@ -228,6 +255,20 @@ onMounted(async () => {
 
 .check-icon--attention {
   color: var(--color-warning);
+}
+
+.version {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.version-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: inherit;
+  font-weight: 500;
 }
 
 .message {

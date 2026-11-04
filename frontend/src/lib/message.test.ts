@@ -82,3 +82,11 @@ describe("campaignDiscount", () => {
     expect(campaignDiscount({ brief: "Remind them" })).toBe("");
   });
 });
+
+describe("a missing first name", () => {
+  it("is replaced in the reader's language", () => {
+    expect(renderMessage("Hi {{first_name}}", { first_name: "" }, "tr")).toBe("Hi müşterimiz");
+    expect(renderMessage("Hi {{first_name}}", { first_name: "" }, "en")).toBe("Hi there");
+    expect(renderMessage("Hi {{first_name}}", { first_name: "" })).toBe("Hi there");
+  });
+});

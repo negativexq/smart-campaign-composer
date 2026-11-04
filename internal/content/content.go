@@ -60,6 +60,52 @@ type Content struct {
 	EmailCTAURL    string `json:"email_cta_url"`
 	// EmailTemplate is a person's choice of design. Models only write text.
 	EmailTemplate string `json:"email_template"`
+	// Language says who this version is for. Older campaigns have none.
+	Language string `json:"language,omitempty"`
+}
+
+// firstNameFallbacks is what stands in for a missing name in each language, because
+// "Merhaba there" reads as a mistake.
+var firstNameFallbacks = map[string]string{"tr": "müşterimiz", "en": FirstNameFallback}
+
+// FallbackName is the word used for a person with no name in this language.
+func FallbackName(language string) string {
+	if fallback, ok := firstNameFallbacks[language]; ok {
+		return fallback
+	}
+	return FirstNameFallback
+}
+
+// NameFor is the name to fill in: the person's, or the word for this language.
+func NameFor(language, firstName string) string {
+	if strings.TrimSpace(firstName) == "" {
+		return FallbackName(language)
+	}
+	return firstName
+}
+
+// ForLanguage picks the version a person reads. Someone in a language with no version
+// gets the main one rather than nothing, which is only possible if their language
+// changed after approval.
+func ForLanguage(main Content, translations []Content, language string) Content {
+	for _, translation := range translations {
+		if translation.Language == language {
+			return translation
+		}
+	}
+	return main
+}
+
+// OffersDiffer reports whether two versions promise different discounts.
+func OffersDiffer(a, b Content) bool {
+	first, second := allDiscounts(a), allDiscounts(b)
+	slices.Sort(first)
+	slices.Sort(second)
+	return !slices.Equal(first, second)
+}
+
+func allDiscounts(c Content) []int {
+	return discounts(strings.Join([]string{c.SMS, c.EmailSubject, c.EmailPreheader, c.EmailHeadline, c.EmailBody, c.EmailCTALabel}, "\n"))
 }
 
 // Limits holds the longest first name per channel in the audience, which
@@ -121,7 +167,7 @@ func ParseGenerated(raw []byte, limits Limits, offerSource string) (Content, err
 		return Content{}, malformed("trailing content after the object")
 	}
 	generated := limits.Keep(decoded.Content)
-	generated.EmailTemplate = ""
+	generated.EmailTemplate, generated.Language = "", ""
 	issues := append(CheckMessages(generated, limits), CheckDiscounts(generated, offerSource)...)
 	if len(issues) > 0 {
 		return Content{}, &ValidationError{Issues: issues}
@@ -198,7 +244,8 @@ func checkField(field, label, text string, limit, nameLength int) []Issue {
 		}
 	}
 	remainder := variablePattern.ReplaceAllString(text, "")
-	if strings.Contains(remainder, "{{") || strings.Contains(remainder, "}}") {
+	// A lone brace is what a broken variable leaves behind, and nobody writes one to a customer.
+	if strings.ContainsAny(remainder, "{}") {
 		issues = append(issues, Issue{field, "malformed_variable", label + " has a broken variable; write it as {{first_name}}."})
 	}
 	return issues

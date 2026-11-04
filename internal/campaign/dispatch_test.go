@@ -668,3 +668,41 @@ func TestApprovalFreezesTheAudienceCounts(t *testing.T) {
 		t.Fatalf("breakdown moved after approval: %+v became %+v", before, after)
 	}
 }
+
+func TestApprovalNeedsAVersionForEveryLanguage(t *testing.T) {
+	t.Parallel()
+	h, id := readyCampaign(t)
+	ctx := context.Background()
+	if _, err := h.pool.Exec(ctx, `UPDATE campaign_versions SET content = content - 'translations' WHERE campaign_id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrMissingLanguage) {
+		t.Fatalf("approve: %v", err)
+	}
+	// A draft from before languages were kept says nothing about who it was for.
+	if _, err := h.pool.Exec(ctx, `UPDATE campaign_versions SET content = content - 'language' WHERE campaign_id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrMissingLanguage) {
+		t.Fatalf("approve an old draft: %v", err)
+	}
+}
+
+func TestLanguagesMustPromiseTheSameDiscount(t *testing.T) {
+	t.Parallel()
+	h, id := readyCampaign(t)
+	ctx := context.Background()
+	view, err := h.service.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	english := view.Content.Translations[0].Content
+	english.SMS = "20% off for {{first_name}}"
+	english.EmailBody = "20% off today."
+	if _, err := h.service.SaveContent(ctx, id, english); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrLanguageDiscount) {
+		t.Fatalf("approve: %v", err)
+	}
+}

@@ -27,6 +27,9 @@ const (
 	// EventDelta carries text for one field; EventReset discards what was shown.
 	EventDelta = "delta"
 	EventReset = "reset"
+	// EventLanguage says which language is being written after the first one, whose
+	// text is not shown as it comes because the screen shows the main version.
+	EventLanguage = "language"
 
 	statusGenerating = "GENERATING"
 	statusReady      = "READY_FOR_REVIEW"
@@ -53,6 +56,8 @@ var (
 	ErrContentRejected    = errors.New("content failed validation")
 	ErrInvalidInstruction = errors.New("instruction is too long")
 	ErrChannelDiscount    = errors.New("channels would promise different discounts")
+	ErrLanguageDiscount   = errors.New("languages would promise different discounts")
+	ErrMissingLanguage    = errors.New("part of the audience reads a language with no messages")
 )
 
 // freeToDraft is the SQL condition for a campaign nothing else is generating
@@ -69,6 +74,49 @@ type StoredContent struct {
 	// NotApplied holds one note per channel on what the last instruction asked for
 	// and the messages do not do. Writing that channel again replaces its note.
 	NotApplied []content.Issue `json:"not_applied,omitempty"`
+	// Translations holds the versions for the other languages in the audience. The
+	// embedded Content is the version for its largest language.
+	Translations []StoredContent `json:"translations,omitempty"`
+}
+
+// version finds what was written for a language, or nothing.
+func (c *StoredContent) version(language string) *StoredContent {
+	if c == nil {
+		return nil
+	}
+	if c.Language == language {
+		return c
+	}
+	for i := range c.Translations {
+		if c.Translations[i].Language == language {
+			return &c.Translations[i]
+		}
+	}
+	return nil
+}
+
+// withVersion puts a changed version back in its place.
+func (c StoredContent) withVersion(changed StoredContent) StoredContent {
+	if c.Language == changed.Language {
+		changed.Translations = c.Translations
+		return changed
+	}
+	c.Translations = slices.Clone(c.Translations)
+	for i := range c.Translations {
+		if c.Translations[i].Language == changed.Language {
+			c.Translations[i] = changed
+		}
+	}
+	return c
+}
+
+// all lists every version, the main one first.
+func (c *StoredContent) all() []*StoredContent {
+	versions := []*StoredContent{c}
+	for i := range c.Translations {
+		versions = append(versions, &c.Translations[i])
+	}
+	return versions
 }
 
 // GenerateInput steers a generation. Instruction is optional. Channel rewrites
@@ -94,6 +142,10 @@ type Generation struct {
 	channel     string
 	cities      []string
 	reported    []string
+	languages   []string
+	// language and reference describe the version one pass is writing.
+	language  string
+	reference []byte
 }
 
 // StartGeneration checks the campaign can get content and claims it, so that
@@ -140,7 +192,12 @@ func (s *Service) StartGeneration(ctx context.Context, id string, input Generate
 	if result.RowsAffected() == 0 {
 		return nil, ErrGenerationRunning
 	}
-	return &Generation{service: s, view: view, instruction: instruction, channel: channel, cities: cities}, nil
+	languages := view.writingLanguages()
+	// A draft from before languages were kept was written for the audience's largest one.
+	if view.Content != nil && view.Content.Language == "" {
+		view.Content.Language = languages[0]
+	}
+	return &Generation{service: s, view: view, instruction: instruction, channel: channel, cities: cities, languages: languages}, nil
 }
 
 // Run writes the messages, repairing invalid output a bounded number of times.
@@ -156,7 +213,7 @@ func (g *Generation) Run(ctx context.Context, emit func(GenerationEvent)) (view 
 		span.End()
 	}()
 
-	generated, attempts, usage, err := g.generate(ctx, emit)
+	stored, attempts, usage, err := g.writeLanguages(ctx, emit)
 	// The outcome is recorded even when the client has just gone away.
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), saveTimeout)
 	defer cancel()
@@ -169,10 +226,64 @@ func (g *Generation) Run(ctx context.Context, emit func(GenerationEvent)) (view 
 		}
 		return View{}, err
 	}
-	if err := g.save(saveCtx, generated, attempts, usage); err != nil {
+	if err := g.save(saveCtx, stored, attempts, usage); err != nil {
 		return View{}, err
 	}
 	return s.Get(saveCtx, g.view.ID)
+}
+
+// writeLanguages writes one version per language, each checked on its own. Later
+// languages say what the first one says. Nothing is kept unless all of them pass, so
+// an audience is never left with some people's messages out of date.
+func (g *Generation) writeLanguages(ctx context.Context, emit func(GenerationEvent)) (StoredContent, int, ai.Usage, error) {
+	var (
+		main     StoredContent
+		attempts int
+		usage    ai.Usage
+	)
+	for index, language := range g.languages {
+		pass := g.forLanguage(language)
+		passEmit := emit
+		if index > 0 {
+			emit(GenerationEvent{Type: EventLanguage, Text: language})
+			passEmit = func(GenerationEvent) {}
+			reference, err := json.Marshal(pass.limits().Keep(main.Content))
+			if err != nil {
+				return StoredContent{}, attempts, usage, fmt.Errorf("encode reference: %w", err)
+			}
+			pass.reference = reference
+		}
+		generated, tried, used, err := pass.generate(ctx, passEmit)
+		attempts += tried
+		usage.InputTokens += used.InputTokens
+		usage.OutputTokens += used.OutputTokens
+		if err != nil {
+			return StoredContent{}, attempts, usage, err
+		}
+		version := pass.merged(generated)
+		version.Language = language
+		if index == 0 {
+			main = version
+			continue
+		}
+		// The design is one choice for the whole campaign.
+		version.EmailTemplate = main.EmailTemplate
+		main.Translations = append(main.Translations, version)
+	}
+	return main, attempts, usage, nil
+}
+
+// forLanguage is this generation seen from one language's version and limits.
+func (g *Generation) forLanguage(language string) *Generation {
+	pass := *g
+	pass.language = language
+	pass.view.Content = g.view.Content.version(language)
+	pass.view.ContentLimits = g.view.limitsFor(language)
+	// A language with nothing written yet gets every channel.
+	if pass.view.Content == nil {
+		pass.channel = ""
+	}
+	return &pass
 }
 
 func (g *Generation) generate(ctx context.Context, emit func(GenerationEvent)) (content.Content, int, ai.Usage, error) {
@@ -236,6 +347,8 @@ func (g *Generation) request() (ai.ContentRequest, error) {
 		channels = []string{g.channel}
 	}
 	request := ai.ContentRequest{
+		Language:    segment.LanguageName(g.language),
+		Reference:   g.reference,
 		Brief:       g.view.writingBrief(),
 		Tone:        g.view.Tone,
 		Schema:      content.JSONSchema(channels...),
@@ -245,7 +358,7 @@ func (g *Generation) request() (ai.ContentRequest, error) {
 	for _, condition := range g.view.Conditions {
 		request.Conditions = append(request.Conditions, condition.Label+" "+condition.Value)
 	}
-	if g.view.Content != nil {
+	if g.view.Content != nil && len(g.reference) == 0 {
 		current, err := json.Marshal(g.limits().Keep(g.view.Content.Content))
 		if err != nil {
 			return ai.ContentRequest{}, fmt.Errorf("encode current content: %w", err)
@@ -349,7 +462,7 @@ func (g *Generation) linkSource() string {
 	if g.view.Content != nil {
 		source += "\n" + g.view.Content.EmailCTAURL
 	}
-	return source
+	return source + "\n" + string(g.reference)
 }
 
 func issueReasons(invalid *content.ValidationError) []string {
@@ -422,9 +535,9 @@ func notesExcept(notes []content.Issue, channel string) []content.Issue {
 	return kept
 }
 
-func (g *Generation) save(ctx context.Context, generated content.Content, attempts int, usage ai.Usage) error {
+func (g *Generation) save(ctx context.Context, stored StoredContent, attempts int, usage ai.Usage) error {
 	s := g.service
-	encoded, err := json.Marshal(g.merged(generated))
+	encoded, err := json.Marshal(stored)
 	if err != nil {
 		return fmt.Errorf("encode content: %w", err)
 	}
@@ -447,7 +560,7 @@ func (g *Generation) save(ctx context.Context, generated content.Content, attemp
 	}
 	if err := recordAudit(ctx, tx, g.view.ID, eventGenerated, map[string]any{
 		"provider": s.provider.Name(), "model": s.provider.Model(), "attempts": attempts,
-		"regenerated": g.view.Content != nil, "channel": g.channel, "instruction_given": g.instruction != "",
+		"regenerated": g.view.Content != nil, "channel": g.channel, "instruction_given": g.instruction != "", "languages": g.languages,
 		"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens,
 	}); err != nil {
 		return err
@@ -501,16 +614,24 @@ func (s *Service) SaveContent(ctx context.Context, id string, edited content.Con
 	if view.Status != statusReady || view.Content == nil {
 		return View{}, ErrNotEditable
 	}
-	edited = view.ContentLimits.Keep(edited)
-	if issues := content.CheckMessages(edited, view.ContentLimits); len(issues) > 0 {
+	target := view.Content
+	if edited.Language != "" {
+		if target = view.Content.version(edited.Language); target == nil {
+			return View{}, ErrNotEditable
+		}
+	}
+	limits := view.limitsFor(target.Language)
+	edited = limits.Keep(edited)
+	edited.Language = target.Language
+	if issues := content.CheckMessages(edited, limits); len(issues) > 0 {
 		return View{}, &content.ValidationError{Issues: issues}
 	}
-	changed := changedFields(view.Content.Content, edited)
+	changed := changedFields(target.Content, edited)
 	if len(changed) == 0 {
 		return view, nil
 	}
 	// A person who edits a channel has dealt with what the model left undone there.
-	notes := view.Content.NotApplied
+	notes := target.NotApplied
 	for _, field := range changed {
 		channel := "email"
 		if field == content.FieldSMS {
@@ -518,7 +639,12 @@ func (s *Service) SaveContent(ctx context.Context, id string, edited content.Con
 		}
 		notes = notesExcept(notes, channel)
 	}
-	encoded, err := json.Marshal(StoredContent{Content: edited, Edited: mergeEdited(view.Content.Edited, changed), NotApplied: notes})
+	stored := view.Content.withVersion(StoredContent{Content: edited, Edited: mergeEdited(target.Edited, changed), NotApplied: notes})
+	// The design is one choice for the whole campaign.
+	for _, version := range stored.all() {
+		version.EmailTemplate = edited.EmailTemplate
+	}
+	encoded, err := json.Marshal(stored)
 	if err != nil {
 		return View{}, fmt.Errorf("encode content: %w", err)
 	}

@@ -7,6 +7,7 @@ import { renderMessage } from "../lib/message";
 const props = defineProps<{
   message: Partial<Messages>;
   recipients: { id: number; label: string; first_name: string }[];
+  language?: string;
 }>();
 
 const MODES = [
@@ -31,7 +32,7 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 async function load() {
   const request = ++latest;
   try {
-    const result = await previewEmail(props.message, firstName.value);
+    const result = await previewEmail(props.message, firstName.value, props.language);
     if (request === latest) rendered.value = result.html ? result : null;
   } catch {
     if (request === latest) rendered.value = null;
@@ -101,11 +102,11 @@ onBeforeUnmount(() => {
 
     <div class="mail card">
       <div class="head">
-        <p class="subject" data-testid="email-subject">{{ renderMessage(message.email_subject ?? "", values) }}</p>
-        <p v-if="message.email_preheader" class="muted small preheader" data-testid="email-preheader">{{ renderMessage(message.email_preheader, values) }}</p>
+        <p class="subject" data-testid="email-subject">{{ renderMessage(message.email_subject ?? "", values, language) }}</p>
+        <p v-if="message.email_preheader" class="muted small preheader" data-testid="email-preheader">{{ renderMessage(message.email_preheader, values, language) }}</p>
       </div>
       <div ref="frameBox" class="box">
-        <p v-if="!rendered" class="text" data-testid="email-body">{{ renderMessage(message.email_body ?? "", values) }}</p>
+        <p v-if="!rendered" class="text" data-testid="email-body">{{ renderMessage(message.email_body ?? "", values, language) }}</p>
         <p v-else-if="mode === 'text'" class="text" data-testid="email-text">{{ rendered.text }}</p>
         <div v-else class="stage" :style="{ height: `${frameHeight * scale}px` }">
           <iframe

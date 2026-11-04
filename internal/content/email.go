@@ -32,12 +32,15 @@ type Email struct {
 // text, which html/template escapes, so neither can add markup or an
 // unsafe link. Without an unsubscribeURL this is a preview, whose footer goes nowhere.
 func RenderEmail(c Content, firstName, unsubscribeURL string) (Email, error) {
+	firstName = NameFor(c.Language, firstName)
+	footer := footerFor(c.Language)
 	body := Render(c.EmailBody, firstName)
 	data := struct {
 		Subject, Preheader, Headline string
 		Paragraphs                   [][]string
 		CTALabel, CTAURL             string
 		Unsubscribe                  string
+		Lang, Received, StopLabel    string
 	}{
 		Subject:     Render(c.EmailSubject, firstName),
 		Preheader:   Render(c.EmailPreheader, firstName),
@@ -46,6 +49,9 @@ func RenderEmail(c Content, firstName, unsubscribeURL string) (Email, error) {
 		CTALabel:    Render(c.EmailCTALabel, firstName),
 		CTAURL:      c.EmailCTAURL,
 		Unsubscribe: unsubscribeURL,
+		Lang:        footer.lang,
+		Received:    footer.received,
+		StopLabel:   footer.unsubscribe,
 	}
 	if data.Unsubscribe == "" {
 		data.Unsubscribe = "#"
@@ -64,11 +70,20 @@ func RenderEmail(c Content, firstName, unsubscribeURL string) (Email, error) {
 		parts = append(parts, data.CTALabel+": "+data.CTAURL)
 	}
 	if unsubscribeURL != "" {
-		parts = append(parts, "Unsubscribe: "+unsubscribeURL)
+		parts = append(parts, footer.unsubscribe+": "+unsubscribeURL)
 	} else {
-		parts = append(parts, "Unsubscribe: the link is added when this is sent")
+		parts = append(parts, footer.unsubscribe+": "+footer.linkLater)
 	}
 	return Email{Subject: data.Subject, HTML: html.String(), Text: strings.Join(parts, "\n\n")}, nil
+}
+
+type emailFooter struct{ lang, received, unsubscribe, linkLater string }
+
+func footerFor(language string) emailFooter {
+	if language == "tr" {
+		return emailFooter{"tr", "Kampanya e-postalarına izin verdiğiniz için bu e-postayı aldınız.", "Abonelikten çık", "bağlantı gönderimde eklenir"}
+	}
+	return emailFooter{"en", "You received this because you agreed to campaign emails.", "Unsubscribe", "the link is added when this is sent"}
 }
 
 // templateName falls back to the default, so older drafts and anything already

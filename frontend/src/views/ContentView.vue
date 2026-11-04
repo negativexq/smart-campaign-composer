@@ -23,6 +23,7 @@ import PhonePreview from "../components/PhonePreview.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { channelLabel, firstMessagePath } from "../lib/campaignSteps";
 import { isDraftStatus } from "../lib/campaignStatus";
+import { audienceLanguages, languageName, longestNameFor, missingLanguages, versionFor } from "../lib/languages";
 import { EMAIL_TEMPLATES } from "../lib/emailTemplates";
 import { navigate } from "../lib/navigation";
 
@@ -42,16 +43,30 @@ const saving = ref(false);
 const issues = ref<ContentIssue[]>([]);
 const instruction = ref("");
 const messages = reactive<Messages>({ sms: "", email_subject: "", email_preheader: "", email_headline: "", email_body: "", email_cta_label: "", email_cta_url: "", email_template: "" });
+const selectedLanguage = ref("");
+const writingLanguage = ref("");
 let controller: AbortController | null = null;
 
-const stored = computed(() => campaign.value?.content);
+const stored = computed(() => (campaign.value ? versionFor(campaign.value, selectedLanguage.value) : undefined));
+const languageTabs = computed(() => {
+  const current = campaign.value;
+  if (!current?.content?.language) return [];
+  return audienceLanguages(current, props.channel)
+    .filter((audience) => versionFor(current, audience.language))
+    .map((audience) => ({ language: audience.language, name: languageName(audience.language), people: props.channel === "sms" ? audience.sms : audience.email }));
+});
+const missing = computed(() => (campaign.value ? missingLanguages(campaign.value, props.channel).map(languageName) : []));
+const shownRecipients = computed(() => {
+  const own = recipients.value.filter((recipient) => recipient.language === selectedLanguage.value);
+  return own.length ? own : recipients.value;
+});
 const dirty = computed(() =>
   stored.value ? (Object.keys(messages) as MessageField[]).some((field) => messages[field] !== (stored.value?.[field] ?? "")) : false,
 );
 const canGenerate = computed(() => !generating.value && !saving.value);
 const name = computed(() => channelLabel(props.channel));
 const fields = computed<MessageField[]>(() => (props.channel === "sms" ? ["sms"] : EMAIL_FIELDS));
-const nameLength = computed(() => (props.channel === "sms" ? campaign.value?.content_limits.sms_name_length : campaign.value?.content_limits.email_name_length));
+const nameLength = computed(() => (campaign.value ? longestNameFor(campaign.value, selectedLanguage.value, props.channel) : undefined));
 const reachable = computed(() => (props.channel === "sms" ? campaign.value?.audience.sms : campaign.value?.audience.email) ?? 0);
 const warnings = computed(() => campaign.value?.content_warnings.filter((warning) => fields.value.includes(warning.field as MessageField)) ?? []);
 const otherChannel = computed(() => campaign.value?.channels.find((channel) => channel !== props.channel));
@@ -73,7 +88,7 @@ const buttonHasProblem = computed(() => Boolean(issueFor("email_cta_label") || i
 
 // The one state of this message. "Validated" only ever comes from the backend.
 const state = computed(() => {
-  if (generating.value) return { icon: LoaderCircle, text: "Writing", tone: "ai" };
+  if (generating.value) return { icon: LoaderCircle, text: writingLanguage.value ? `Writing the ${languageName(writingLanguage.value)} version` : "Writing", tone: "ai" };
   if (fields.value.some((field) => issueFor(field))) return { icon: CircleAlert, text: "Needs changes", tone: "error" };
   if (dirty.value) return { icon: PencilLine, text: "Unsaved changes", tone: "muted" };
   if (stored.value) return { icon: CheckCircle2, text: "Validated", tone: "success" };
@@ -84,8 +99,23 @@ const origin = computed(() => {
   return fields.value.some((field) => stored.value?.edited.includes(field) || (stored.value && messages[field] !== stored.value[field])) ? "user" : "ai";
 });
 
-function fill(content: Campaign["content"]) {
+function fill(content: Partial<Messages> | undefined) {
   for (const field of Object.keys(messages) as MessageField[]) messages[field] = content?.[field] ?? "";
+}
+
+// Opens the language most of this channel's people read.
+function showFirstLanguage() {
+  const current = campaign.value;
+  selectedLanguage.value = languageTabs.value[0]?.language ?? current?.content?.language ?? "";
+  fill(stored.value);
+}
+
+// Moving to another language keeps what was typed here. Text the backend refuses stays.
+async function selectLanguage(language: string) {
+  if (language === selectedLanguage.value || !(await save())) return;
+  selectedLanguage.value = language;
+  issues.value = [];
+  fill(stored.value);
 }
 
 // What a generation is about to replace. The other channel stays until it is done.
@@ -104,6 +134,8 @@ function editorState(field: MessageField) {
 
 async function generate(input: { instruction?: string } = {}) {
   controller = new AbortController();
+  // The first version written is the one that shows as it comes.
+  selectedLanguage.value = campaign.value?.content?.language ?? "";
   const before = stored.value;
   // A template picked just now is not saved yet, and new text should not undo it.
   const pickedTemplate = messages.email_template;
@@ -111,7 +143,9 @@ async function generate(input: { instruction?: string } = {}) {
   generationError.value = "";
   saveError.value = "";
   stopped.value = false;
+  writingLanguage.value = "";
   issues.value = [];
+  fill(before);
   clearOwnFields();
   try {
     campaign.value = await generateContent(
@@ -122,15 +156,16 @@ async function generate(input: { instruction?: string } = {}) {
           if (field in messages) messages[field] += text;
         },
         onReset: clearOwnFields,
+        onLanguage: (language) => (writingLanguage.value = language),
       },
       controller.signal,
     );
-    fill(campaign.value.content);
+    showFirstLanguage();
     messages.email_template = pickedTemplate || messages.email_template;
     instruction.value = "";
   } catch (failure) {
     // Nothing unvalidated stays on screen.
-    fill(before);
+    showFirstLanguage();
     messages.email_template = pickedTemplate;
     if (controller?.signal.aborted) stopped.value = true;
     else generationError.value = errorMessage(failure);
@@ -150,8 +185,8 @@ async function save() {
   saveError.value = "";
   issues.value = [];
   try {
-    campaign.value = await saveContent(props.campaignId, { ...messages });
-    fill(campaign.value.content);
+    campaign.value = await saveContent(props.campaignId, { ...messages, ...(selectedLanguage.value ? { language: selectedLanguage.value } : {}) });
+    fill(stored.value);
     return true;
   } catch (failure) {
     if (failure instanceof ApiError) issues.value = failure.issues;
@@ -186,7 +221,7 @@ onMounted(async () => {
   }
   const current = campaign.value;
   if (!current?.proposal || current.blockers.length || !(isDraftStatus(current.status) || current.status === "GENERATING")) return;
-  if (current.content) fill(current.content);
+  if (current.content) showFirstLanguage();
   // A person who left after a failure decides for themselves when to try again.
   else if (current.status === "GENERATION_FAILED") generationError.value = "The last attempt to write these messages failed.";
   else await generate();
@@ -232,6 +267,27 @@ onBeforeUnmount(() => controller?.abort());
         {{ warning.message }}
       </ValidationNotice>
     </template>
+
+    <ValidationNotice v-if="!generating && missing.length" tone="warning" title="A language has no messages">
+      Part of this audience reads {{ missing.join(" and ") }}. Regenerate to write for them.
+    </ValidationNotice>
+
+    <div v-if="languageTabs.length > 1" class="languages" role="tablist" aria-label="Message language" data-testid="language-tabs">
+      <button
+        v-for="tab in languageTabs"
+        :key="tab.language"
+        class="language"
+        :class="{ 'language--active': tab.language === selectedLanguage }"
+        type="button"
+        role="tab"
+        :aria-selected="tab.language === selectedLanguage"
+        :disabled="generating || saving"
+        :data-testid="`language-${tab.language}`"
+        @click="selectLanguage(tab.language)"
+      >
+        {{ tab.name }} <span class="muted small">{{ tab.people.toLocaleString("en-US") }} {{ tab.people === 1 ? "person" : "people" }}</span>
+      </button>
+    </div>
 
     <div class="grid" :class="`grid--${channel}`">
       <div class="editors">
@@ -300,8 +356,8 @@ onBeforeUnmount(() => controller?.abort());
       </div>
 
       <aside v-if="recipients.length" class="previews" aria-label="Message preview">
-        <PhonePreview v-if="channel === 'sms'" :message="messages.sms" :recipients="recipients" />
-        <EmailPreview v-else :message="messages" :recipients="recipients" />
+        <PhonePreview v-if="channel === 'sms'" :key="selectedLanguage" :message="messages.sms" :recipients="shownRecipients" :language="selectedLanguage" />
+        <EmailPreview v-else :key="selectedLanguage" :message="messages" :recipients="shownRecipients" :language="selectedLanguage" />
       </aside>
     </div>
   </div>
@@ -330,6 +386,33 @@ onBeforeUnmount(() => controller?.abort());
   display: grid;
   gap: var(--space-2);
   max-width: 720px;
+}
+
+.languages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.language {
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text);
+  font: inherit;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+
+.language--active {
+  font-weight: 500;
+  border-bottom-color: var(--color-primary);
+}
+
+.language:disabled {
+  cursor: not-allowed;
 }
 
 .grid {

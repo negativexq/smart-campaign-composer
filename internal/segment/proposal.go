@@ -23,6 +23,11 @@ const (
 // languageNames lists the languages present in user data.
 var languageNames = map[string]string{"tr": "Turkish", "en": "English"}
 
+// LanguageName names a language we can write in, or returns nothing.
+func LanguageName(code string) string {
+	return languageNames[code]
+}
+
 // Spec is the allowlist of audience filters. Nil fields are not applied.
 type Spec struct {
 	City                   *string `json:"city,omitempty"`

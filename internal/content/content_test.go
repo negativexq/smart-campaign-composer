@@ -129,6 +129,7 @@ func TestCheckMessagesFindsEachProblem(t *testing.T) {
 		{"long body", func(c *content.Content) { c.EmailBody = strings.Repeat("x", content.MaxEmailBody+1) }, "email_body:too_long"},
 		{"unknown variable", func(c *content.Content) { c.SMS = "Use {{coupon}}" }, "sms:unknown_variable"},
 		{"broken variable", func(c *content.Content) { c.EmailBody = "Hi {{first_name" }, "email_body:malformed_variable"},
+		{"lone brace", func(c *content.Content) { c.EmailBody = "Hi {{first_name}},{\n\nWelcome" }, "email_body:malformed_variable"},
 		{"line break in subject", func(c *content.Content) { c.EmailSubject = "a\nb" }, "email_subject:line_break"},
 	}
 	for _, tt := range tests {

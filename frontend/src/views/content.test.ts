@@ -67,6 +67,64 @@ function open(channel: "sms" | "email" = "sms") {
 }
 
 describe("content page", () => {
+  describe("with two languages", () => {
+    const english = { ...stored, language: "en", sms: "Hello {{first_name}}" };
+    const twoLanguages: Campaign = {
+      ...ready,
+      content: { ...stored, language: "tr", sms: "Merhaba {{first_name}}", translations: [english] },
+      languages: [
+        { language: "tr", total: 7, sms: 6, email: 5, sms_name_length: 7, email_name_length: 7 },
+        { language: "en", total: 2, sms: 1, email: 2, sms_name_length: 21, email_name_length: 21 },
+      ],
+    };
+
+    it("opens the largest language and shows each one's people", async () => {
+      stub(twoLanguages);
+      const wrapper = open();
+      await flushPromises();
+      expect(wrapper.find("[data-testid=language-tr]").text()).toContain("6 people");
+      expect(wrapper.find("[data-testid=language-en]").text()).toContain("1 person");
+      expect((wrapper.find("textarea").element as HTMLTextAreaElement).value).toBe("Merhaba {{first_name}}");
+      await wrapper.find("[data-testid=language-en]").trigger("click");
+      await flushPromises();
+      expect((wrapper.find("textarea").element as HTMLTextAreaElement).value).toBe("Hello {{first_name}}");
+    });
+
+    it("saves an edit as that language's before moving on", async () => {
+      const fetchMock = stub(twoLanguages, undefined, () => ({ ok: true, status: 200, json: async () => twoLanguages }));
+      const wrapper = open();
+      await flushPromises();
+      await wrapper.find("[data-testid=language-en]").trigger("click");
+      await flushPromises();
+      await wrapper.find("textarea").setValue("Edited {{first_name}}");
+      await wrapper.find("[data-testid=language-tr]").trigger("click");
+      await flushPromises();
+      const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+      expect(JSON.parse(String(put?.[1]?.body))).toMatchObject({ language: "en", sms: "Edited {{first_name}}" });
+    });
+
+    it("says which version is being written after the first", async () => {
+      let finish: () => void = () => {};
+      const stream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode(event("started", {}) + event("language", { language: "en" })));
+          finish = () => {
+            controller.enqueue(encoder.encode(event("done", twoLanguages)));
+            controller.close();
+          };
+        },
+      });
+      stub(base, async () => ({ ok: true, status: 200, body: stream }));
+      const wrapper = open();
+      await flushPromises();
+      await vi.waitFor(() => expect(wrapper.find("[data-testid=message-state]").text()).toBe("Writing the English version"));
+      finish();
+      await flushPromises();
+      await vi.waitFor(() => expect(wrapper.find("[data-testid=language-tabs]").exists()).toBe(true));
+    });
+  });
+
   it("writes messages on arrival and only marks them validated at the end", async () => {
     const fetchMock = stub(base, async () => ({
       ok: true,

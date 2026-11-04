@@ -93,11 +93,8 @@ func (s *Service) Approve(ctx context.Context, id string) (View, error) {
 	if len(view.Blockers) > 0 {
 		return View{}, ErrAudienceBlocked
 	}
-	if issues := content.CheckMessages(view.Content.Content, view.ContentLimits); len(issues) > 0 {
-		return View{}, &content.ValidationError{Issues: issues}
-	}
-	if content.DiscountsDiffer(view.Content.Content) {
-		return View{}, ErrChannelDiscount
+	if err := checkVersions(&view); err != nil {
+		return View{}, err
 	}
 
 	breakdown, err := segment.Narrow(ctx, tx, view.Proposal.Segment, view.AudienceAsOf)
@@ -445,4 +442,41 @@ func (s *Service) DeliveryAttempts(ctx context.Context, id, deliveryID string) (
 		return nil, fmt.Errorf("read attempts: %w", err)
 	}
 	return attempts, nil
+}
+
+// checkVersions holds every language's messages to the rules, and to each other: a
+// person's language must not change what they are offered.
+func checkVersions(view *View) error {
+	languages := view.writingLanguages()
+	// A draft from before languages were kept covers only the audience's largest one.
+	if view.Content.Language == "" {
+		if len(languages) > 1 {
+			return ErrMissingLanguage
+		}
+		return checkVersion(view, view.Content)
+	}
+	for _, language := range languages {
+		if view.Content.version(language) == nil {
+			return ErrMissingLanguage
+		}
+	}
+	for _, version := range view.Content.all() {
+		if err := checkVersion(view, version); err != nil {
+			return err
+		}
+		if content.OffersDiffer(view.Content.Content, version.Content) {
+			return ErrLanguageDiscount
+		}
+	}
+	return nil
+}
+
+func checkVersion(view *View, version *StoredContent) error {
+	if issues := content.CheckMessages(version.Content, view.limitsFor(version.Language)); len(issues) > 0 {
+		return &content.ValidationError{Issues: issues}
+	}
+	if content.DiscountsDiffer(version.Content) {
+		return ErrChannelDiscount
+	}
+	return nil
 }

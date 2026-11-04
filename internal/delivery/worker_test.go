@@ -237,7 +237,7 @@ func TestMessagesAreRenderedForEachPerson(t *testing.T) {
 			t.Fatalf("an email needs a subject: %+v", message)
 		}
 		sawLongName = sawLongName || strings.Contains(message.Body, "Maximiliano Alexander")
-		sawFallback = sawFallback || strings.Contains(message.Body, "there")
+		sawFallback = sawFallback || strings.Contains(message.Body, "there") || strings.Contains(message.Body, "müşterimiz")
 	}
 	if !sawLongName || !sawFallback {
 		t.Fatalf("long name %v, fallback %v", sawLongName, sawFallback)
@@ -785,7 +785,7 @@ func TestAnEmailGoesOutDesignedWithAWayToUnsubscribe(t *testing.T) {
 		if !strings.Contains(message.HTML, "<table") || !strings.Contains(message.HTML, message.UnsubscribeURL) {
 			t.Fatalf("html: %s", message.HTML)
 		}
-		if !strings.Contains(message.Body, "Unsubscribe: "+message.UnsubscribeURL) || strings.Contains(message.Body, "<table") {
+		if !strings.Contains(message.Body, ": "+message.UnsubscribeURL) || strings.Contains(message.Body, "<table") {
 			t.Fatalf("plain text: %s", message.Body)
 		}
 	}
@@ -837,5 +837,41 @@ func TestComposeWaitsLongerThanAWorkerCanTakeToStop(t *testing.T) {
 	}
 	if grace <= delivery.MaxDrain {
 		t.Fatalf("stop_grace_period %v must be longer than %v", grace, delivery.MaxDrain)
+	}
+}
+
+func TestEachPersonReadsTheirOwnLanguage(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.drain(t)
+
+	languages := map[string]string{}
+	rows, err := r.pool.Query(context.Background(), `SELECT email, phone, language FROM users`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var email, phone, language string
+		if err := rows.Scan(&email, &phone, &language); err != nil {
+			t.Fatal(err)
+		}
+		languages[email], languages[phone] = language, language
+	}
+
+	seen := map[string]bool{}
+	for _, message := range r.sender.calls {
+		if message.Channel != "email" {
+			continue
+		}
+		language := languages[message.To]
+		seen[language] = true
+		want := map[string]string{"tr": "Abonelikten çık", "en": "Unsubscribe"}[language]
+		if !strings.Contains(message.Body, want) {
+			t.Fatalf("%s reader got: %s", language, message.Body)
+		}
+	}
+	if !seen["tr"] || !seen["en"] {
+		t.Fatalf("languages sent: %v", seen)
 	}
 }

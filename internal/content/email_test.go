@@ -424,3 +424,44 @@ func TestWhatAnInstructionAskedForIsLookedForInTheResult(t *testing.T) {
 		t.Fatalf("missing: %v", missing)
 	}
 }
+
+func TestEmailSpeaksThePersonsLanguageAroundTheMessage(t *testing.T) {
+	t.Parallel()
+	turkish := fullEmail
+	turkish.Language = "tr"
+	email, err := content.RenderEmail(turkish, "", "https://app.example.com/u/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(email.HTML, `lang="tr"`) || !strings.Contains(email.HTML, "Abonelikten çık") || !strings.Contains(email.Text, "Abonelikten çık") {
+		t.Fatalf("footer: %s", email.HTML)
+	}
+	if !strings.Contains(email.Subject, "müşterimiz") || strings.Contains(email.Subject, "there") {
+		t.Fatalf("missing name: %s", email.Subject)
+	}
+}
+
+func TestPeopleGetTheVersionForTheirLanguageOrTheMainOne(t *testing.T) {
+	t.Parallel()
+	main := content.Content{Language: "tr", SMS: "Merhaba"}
+	translations := []content.Content{{Language: "en", SMS: "Hello"}}
+	for language, want := range map[string]string{"tr": "Merhaba", "en": "Hello", "de": "Merhaba"} {
+		if got := content.ForLanguage(main, translations, language); got.SMS != want {
+			t.Fatalf("%s: %q", language, got.SMS)
+		}
+	}
+	if content.NameFor("tr", "") != "müşterimiz" || content.NameFor("en", "") != "there" || content.NameFor("tr", "Ayşe") != "Ayşe" {
+		t.Fatal("names")
+	}
+}
+
+func TestOffersDifferAcrossVersions(t *testing.T) {
+	t.Parallel()
+	a := content.Content{SMS: "%20 indirim"}
+	if content.OffersDiffer(a, content.Content{EmailBody: "20% off"}) {
+		t.Fatal("the same discount in another language")
+	}
+	if !content.OffersDiffer(a, content.Content{SMS: "30% off"}) {
+		t.Fatal("a different discount")
+	}
+}

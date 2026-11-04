@@ -224,6 +224,10 @@ func (a *api) generate(w http.ResponseWriter, r *http.Request) {
 			stream.send("reset", struct{}{})
 			return
 		}
+		if event.Type == campaign.EventLanguage {
+			stream.send("language", map[string]string{"language": event.Text})
+			return
+		}
 		stream.send("delta", map[string]string{"field": event.Field, "text": event.Text})
 	})
 	if r.Context().Err() != nil {
@@ -494,6 +498,10 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusBadRequest, "Check the tone, the discount of 1 to 100 percent and the days to skip of 1 to 365."
 	case errors.Is(err, campaign.ErrChannelDiscount):
 		status, message = http.StatusConflict, "The SMS and the email would promise different discounts. Change the discount in the brief, or make both messages say the same."
+	case errors.Is(err, campaign.ErrLanguageDiscount):
+		status, message = http.StatusConflict, "The languages would promise different discounts. Edit them to say the same, or write the messages again."
+	case errors.Is(err, campaign.ErrMissingLanguage):
+		status, message = http.StatusConflict, "Part of this audience reads a language with no messages yet. Write the messages again to add it."
 	case errors.Is(err, campaign.ErrOfferConflict):
 		status, message = http.StatusBadRequest, "The brief mentions a different discount than the one you entered. Change one of them."
 	case errors.Is(err, campaign.ErrInvalidName):

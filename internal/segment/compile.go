@@ -181,15 +181,55 @@ type Sample struct {
 	ID        int64  `json:"id"`
 	Label     string `json:"label"`
 	FirstName string `json:"first_name"`
+	Language  string `json:"language"`
 }
 
-// SampleRecipients picks a typical person and the names most likely to break a
-// message: the longest and a missing one. Only people who can receive a message
-// are considered.
+// LanguageAudience is the part of an audience that reads one language.
+type LanguageAudience struct {
+	Language  string `json:"language"`
+	Total     int    `json:"total"`
+	SMS       int    `json:"sms"`
+	Email     int    `json:"email"`
+	SMSName   int    `json:"sms_name_length"`
+	EmailName int    `json:"email_name_length"`
+}
+
+// Languages splits an audience by the language people prefer, largest first.
+func Languages(ctx context.Context, db Querier, spec Spec, now time.Time) ([]LanguageAudience, error) {
+	where, args := Compile(spec, now)
+	rows, err := db.Query(ctx, `
+		SELECT u.language, count(*),
+		       count(*) FILTER (WHERE sms.allowed),
+		       count(*) FILTER (WHERE email.allowed),
+		       COALESCE(max(char_length(u.first_name)) FILTER (WHERE sms.allowed), 0),
+		       COALESCE(max(char_length(u.first_name)) FILTER (WHERE email.allowed), 0)
+		FROM users u
+		LEFT JOIN consents sms ON sms.user_id = u.id AND sms.channel = 'sms'
+		LEFT JOIN consents email ON email.user_id = u.id AND email.channel = 'email'
+		WHERE `+where+`
+		GROUP BY u.language
+		ORDER BY count(*) DESC, u.language`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("audience languages: %w", err)
+	}
+	languages, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (LanguageAudience, error) {
+		var language LanguageAudience
+		err := row.Scan(&language.Language, &language.Total, &language.SMS, &language.Email, &language.SMSName, &language.EmailName)
+		return language, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("audience languages: %w", err)
+	}
+	return languages, nil
+}
+
+// SampleRecipients picks, for each language, a typical person and the names most
+// likely to break a message: the longest and a missing one. Only people who can
+// receive a message are considered.
 func SampleRecipients(ctx context.Context, db Querier, spec Spec, now time.Time) ([]Sample, error) {
 	where, args := Compile(spec, now)
 	rows, err := db.Query(ctx, `
-		SELECT u.id, u.first_name
+		SELECT u.id, u.first_name, u.language
 		FROM users u
 		WHERE EXISTS (SELECT 1 FROM consents c WHERE c.user_id = u.id AND c.allowed)
 		  AND `+where+`
@@ -199,13 +239,29 @@ func SampleRecipients(ctx context.Context, db Querier, spec Spec, now time.Time)
 	}
 	people, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Sample, error) {
 		var person Sample
-		err := row.Scan(&person.ID, &person.FirstName)
+		err := row.Scan(&person.ID, &person.FirstName, &person.Language)
 		return person, err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sample recipients: %w", err)
 	}
 
+	languages := []string{}
+	byLanguage := map[string][]Sample{}
+	for _, person := range people {
+		if _, seen := byLanguage[person.Language]; !seen {
+			languages = append(languages, person.Language)
+		}
+		byLanguage[person.Language] = append(byLanguage[person.Language], person)
+	}
+	samples := []Sample{}
+	for _, language := range languages {
+		samples = append(samples, samplesOf(byLanguage[language])...)
+	}
+	return samples, nil
+}
+
+func samplesOf(people []Sample) []Sample {
 	var typical, longest, unnamed *Sample
 	for i := range people {
 		person := &people[i]
@@ -227,14 +283,14 @@ func SampleRecipients(ctx context.Context, db Querier, spec Spec, now time.Time)
 
 	samples := []Sample{}
 	if typical != nil {
-		samples = append(samples, Sample{typical.ID, typical.FirstName, typical.FirstName})
+		samples = append(samples, Sample{typical.ID, typical.FirstName, typical.FirstName, typical.Language})
 	}
 	if longest != nil {
 		label := "Longest name: " + longest.FirstName
-		samples = append(samples, Sample{longest.ID, label, longest.FirstName})
+		samples = append(samples, Sample{longest.ID, label, longest.FirstName, longest.Language})
 	}
 	if unnamed != nil {
-		samples = append(samples, Sample{unnamed.ID, "No first name", ""})
+		samples = append(samples, Sample{unnamed.ID, "No first name", "", unnamed.Language})
 	}
-	return samples, nil
+	return samples
 }

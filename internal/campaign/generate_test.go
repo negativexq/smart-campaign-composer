@@ -28,9 +28,36 @@ type contentProvider struct {
 	contentSteps []step
 	contentCalls []ai.ContentRequest
 	beforeOutput func(handler ai.StreamHandler)
+	// The other languages say what the main version says unless a test wants more.
+	lastOutput       string
+	translationCalls []ai.ContentRequest
+	translationSteps []step
+}
+
+// translate answers a pass that has another language's version to follow.
+func (p *contentProvider) translate(ctx context.Context, request ai.ContentRequest) (ai.Response, error) {
+	p.contentMu.Lock()
+	defer p.contentMu.Unlock()
+	p.translationCalls = append(p.translationCalls, request)
+	output := p.lastOutput
+	if len(p.translationSteps) > 0 {
+		current := p.translationSteps[0]
+		p.translationSteps = p.translationSteps[1:]
+		if current.err != nil {
+			return ai.Response{}, current.err
+		}
+		output = current.output
+	}
+	if err := ctx.Err(); err != nil {
+		return ai.Response{}, err
+	}
+	return ai.Response{Output: []byte(output), Usage: ai.Usage{InputTokens: 10, OutputTokens: 5}}, nil
 }
 
 func (p *contentProvider) StreamContent(ctx context.Context, request ai.ContentRequest, handler ai.StreamHandler) (ai.Response, error) {
+	if len(request.Reference) > 0 {
+		return p.translate(ctx, request)
+	}
 	p.contentMu.Lock()
 	p.contentCalls = append(p.contentCalls, request)
 	current := p.contentSteps[0]
@@ -48,6 +75,9 @@ func (p *contentProvider) StreamContent(ctx context.Context, request ai.ContentR
 	if current.err != nil {
 		return ai.Response{}, current.err
 	}
+	p.contentMu.Lock()
+	p.lastOutput = current.output
+	p.contentMu.Unlock()
 	handler.OnText(current.output)
 	return ai.Response{Output: []byte(current.output), Usage: ai.Usage{InputTokens: 10, OutputTokens: 5}}, nil
 }
@@ -135,14 +165,14 @@ func TestGenerationStreamsAndStoresValidatedContent(t *testing.T) {
 	}
 
 	request := provider.contentCalls[0]
-	if request.Limits.SMSName != len("Maximiliano Alexander") {
-		t.Fatalf("limits: %+v", request.Limits)
+	if english := provider.translationCalls[0]; english.Limits.SMSName != len("Maximiliano Alexander") {
+		t.Fatalf("limits: %+v", english.Limits)
 	}
 	if len(request.Conditions) == 0 || request.Schema == nil {
 		t.Fatalf("request: %+v", request)
 	}
-	if got := testutil.ToFloat64(h.metrics.LLMRequests.WithLabelValues("content_generation", "scripted", "success")); got != 1 {
-		t.Fatalf("metric: %v", got)
+	if got := testutil.ToFloat64(h.metrics.LLMRequests.WithLabelValues("content_generation", "scripted", "success")); got != 2 {
+		t.Fatalf("one call per language, metric: %v", got)
 	}
 	if got := testutil.CollectAndCount(h.metrics.LLMTTFT); got != 1 {
 		t.Fatalf("ttft series: %d", got)
@@ -503,8 +533,15 @@ func TestSampleRecipientsShowTheEdgeCases(t *testing.T) {
 			t.Fatal("a user without consent will never see this message")
 		}
 	}
-	if !got["Maximiliano Alexander"] || !got[""] || len(samples) != 3 {
+	if !got["Maximiliano Alexander"] || !got[""] {
 		t.Fatalf("samples: %+v", samples)
+	}
+	languages := map[string]bool{}
+	for _, sample := range samples {
+		languages[sample.Language] = true
+	}
+	if !languages["tr"] || !languages["en"] {
+		t.Fatalf("each language shows its own people: %+v", samples)
 	}
 }
 
@@ -772,5 +809,83 @@ func TestAnInstructionTheModelSkippedIsShown(t *testing.T) {
 	}
 	if slices.ContainsFunc(view.ContentWarnings, func(w content.Issue) bool { return w.Reason == "not_applied" }) {
 		t.Fatalf("a later generation keeps the warning: %+v", view.ContentWarnings)
+	}
+}
+
+func TestEachLanguageInTheAudienceGetsItsOwnVersion(t *testing.T) {
+	t.Parallel()
+	h, provider, id := newContentHarness(t, step{output: validContent})
+	provider.translationSteps = []step{{output: `{"sms":"Hey {{first_name}}","email_subject":"Hey {{first_name}}","email_body":"Still here."}`}}
+	view, log, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	total := 0
+	for _, language := range view.Languages {
+		total += language.Total
+	}
+	if total != view.Audience.Total {
+		t.Fatalf("languages %+v do not add up to %+v", view.Languages, view.Audience)
+	}
+	if view.Content.Language != "tr" || len(view.Content.Translations) != 1 || view.Content.Translations[0].Language != "en" {
+		t.Fatalf("versions: %+v", view.Content)
+	}
+	if view.Content.Translations[0].SMS != "Hey {{first_name}}" || view.Content.SMS != "Hi {{first_name}}" {
+		t.Fatalf("messages: %+v", view.Content)
+	}
+	if provider.contentCalls[0].Language != "Turkish" || len(provider.contentCalls[0].Reference) != 0 {
+		t.Fatalf("main pass: %+v", provider.contentCalls[0])
+	}
+	english := provider.translationCalls[0]
+	if english.Language != "English" || !strings.Contains(string(english.Reference), "Hi {{first_name}}") {
+		t.Fatalf("second pass: %+v", english)
+	}
+	saw := false
+	for _, event := range log.events {
+		saw = saw || (event.Type == campaign.EventLanguage && event.Text == "en")
+	}
+	if !saw {
+		t.Fatalf("events: %+v", log.events)
+	}
+}
+
+func TestALanguageThatFailsKeepsNothing(t *testing.T) {
+	t.Parallel()
+	h, provider, id := newContentHarness(t, step{output: validContent})
+	failure := errors.New("provider down")
+	for range 5 {
+		provider.translationSteps = append(provider.translationSteps, step{err: failure})
+	}
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err == nil {
+		t.Fatal("a missing language must fail the whole generation")
+	}
+	view, err := h.service.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Content != nil {
+		t.Fatalf("half of the messages were kept: %+v", view.Content)
+	}
+}
+
+func TestEditingOneLanguageLeavesTheOthers(t *testing.T) {
+	t.Parallel()
+	h, _, id := newContentHarness(t, step{output: validContent})
+	generated, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	edited := generated.Content.Translations[0].Content
+	edited.SMS = "Only in English {{first_name}}"
+	view, err := h.service.SaveContent(context.Background(), id, edited)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if view.Content.SMS != generated.Content.SMS || len(view.Content.Edited) != 0 {
+		t.Fatalf("main version changed: %+v", view.Content)
+	}
+	if english := view.Content.Translations[0]; english.SMS != edited.SMS || strings.Join(english.Edited, ",") != "sms" {
+		t.Fatalf("english: %+v", english)
 	}
 }

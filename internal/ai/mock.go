@@ -295,11 +295,13 @@ var (
 // switching when regenerating, and carries the discount the text asks for.
 func (m *Mock) StreamContent(ctx context.Context, request ContentRequest, handler StreamHandler) (Response, error) {
 	source := content.OfferSource(request.Brief, request.Instruction)
-	draft := mockDraft(mockTurkish.MatchString(request.Brief), mockDiscount.FindString(source), string(request.Current))
-	draft = mockTone(draft, request.Tone, mockTurkish.MatchString(request.Brief))
+	// The language tag holds a language's name, and older callers leave it empty.
+	turkish := request.Language == "Turkish" || (request.Language == "" && mockTurkish.MatchString(request.Brief))
+	draft := mockDraft(turkish, mockDiscount.FindString(source), string(request.Current))
+	draft = mockTone(draft, request.Tone, turkish)
 	if link := mockLink.FindString(request.Brief + " " + request.Instruction); link != "" {
 		draft.EmailCTAURL, draft.EmailCTALabel = link, "See the offer"
-		if mockTurkish.MatchString(request.Brief) {
+		if turkish {
 			draft.EmailCTALabel = "Teklifi gör"
 		}
 	}

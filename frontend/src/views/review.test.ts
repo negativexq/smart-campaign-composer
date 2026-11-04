@@ -104,6 +104,49 @@ describe("review", () => {
     expect(called(fetchMock, "POST", "/api/campaigns/c1/approve")).toHaveLength(0);
   });
 
+  it("shows every language's messages and who reads them", async () => {
+    const content = ready.content!;
+    const { wrapper } = await open({
+      ...ready,
+      content: { ...content, language: "tr", sms: "Merhaba", translations: [{ ...content, language: "en", sms: "Hello" }] },
+      languages: [
+        { language: "tr", total: 7, sms: 6, email: 4, sms_name_length: 7, email_name_length: 7 },
+        { language: "en", total: 2, sms: 1, email: 2, sms_name_length: 21, email_name_length: 21 },
+      ],
+    });
+    expect(wrapper.find("[data-testid=review-tr]").text()).toContain("Merhaba");
+    expect(wrapper.find("[data-testid=review-tr]").text()).toContain("10 messages");
+    expect(wrapper.find("[data-testid=review-en]").text()).toContain("Hello");
+    expect(wrapper.find("[data-testid=review-checks]").text()).toContain("Each person gets Turkish or English");
+  });
+
+  it("cannot be approved while a language has no messages", async () => {
+    const { wrapper } = await open({
+      ...ready,
+      content: { ...ready.content!, language: "tr" },
+      languages: [
+        { language: "tr", total: 7, sms: 6, email: 4, sms_name_length: 7, email_name_length: 7 },
+        { language: "en", total: 2, sms: 1, email: 2, sms_name_length: 21, email_name_length: 21 },
+      ],
+    });
+    expect(wrapper.find("[data-testid=approve]").attributes("disabled")).toBeDefined();
+    expect(wrapper.find("[data-testid=review-checks]").text()).toContain("reads English");
+  });
+
+  it("shows a note about several fields once, under its own title", async () => {
+    const message = "Each person receives the language they prefer.";
+    const { wrapper } = await open({
+      ...ready,
+      content_warnings: [
+        { field: "sms", reason: "not_applied", message },
+        { field: "email_body", reason: "not_applied", message },
+      ],
+    });
+    expect(wrapper.text().split(message)).toHaveLength(2);
+    expect(wrapper.text()).toContain("Not done");
+    expect(wrapper.text()).not.toContain("Differs from the brief");
+  });
+
   it("approves and sends, then opens the campaign", async () => {
     const { wrapper, fetchMock } = await open();
     await wrapper.find("[data-testid=approve]").trigger("click");

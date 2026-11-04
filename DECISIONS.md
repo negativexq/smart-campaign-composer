@@ -298,6 +298,20 @@ Finding the missing condition does not depend on a list of words. The model spli
 
 Where it blocks without need, by choice: words the lists know used in another sense (`yaş fark etmeksizin`) and behaviour the filters only roughly match (`mağazamıza uğramayan`). That costs time and not a wrong send.
 
+## Each person reads their own language
+
+`users.language` decides what a person receives. The audience is split by language and one version is written for each language it contains, largest first, so a Turkish reader gets Turkish SMS and email, and an English reader gets English. Only Turkish and English are written; anyone else gets the main version.
+
+- The stored person's preference wins over a brief. "Write it in English" still reaches Turkish readers in Turkish, and the marketer sees that as a "Not done" note. A brief is one sentence about many people; the preference is what each of them told us.
+- Each version is checked on its own: the 160 and 80 limits use the longest name among that language's readers, or the word for a missing name if that is longer ("müşterimiz" is longer than "there"). Discounts and facts are compared with the same brief.
+- Versions must promise the same discount, or approval is closed. A person's language must not change what they are offered.
+- Generation is all or none. If one language fails, nothing is saved, so an audience is never left with some messages out of date.
+- All versions sit on the approval page one under another, not behind tabs, so nobody approves a language they did not see. The message screens use tabs because there a person works on one version at a time.
+- What surrounds the message follows the person too: the missing-name word, the email footer and the unsubscribe label.
+- A draft or approved campaign from before this keeps its one version. A draft with more than one language in its audience has to be written again before it can be approved.
+
+This costs one extra model call per language. Translation quality is checked only on numbers, cities, discounts and links; the wording is for the person approving to read.
+
 ## What was asked and not done is shown
 
 A model can pass over part of a request without breaking any rule, and the screen then looks as if the work was done. Asking the model to admit it is not enough, so there are two sources. The model reports in `not_applied`, and the backend compares the result with the request itself: a refinement that changed neither the rule nor the brief says so, and a number or city named in a request but missing from the result is listed. These are notes, not blockers, because only the person knows whether the outcome is acceptable. Writing or editing that channel again clears its note.

@@ -11,7 +11,9 @@ export type Audience = { total: number; sms: number; email: number };
 export type MessageField = "sms" | "email_subject" | "email_preheader" | "email_headline" | "email_body" | "email_cta_label" | "email_cta_url" | "email_template";
 export type Messages = Record<MessageField, string>;
 export type ContentIssue = { field: string; reason: string; message: string };
-export type SampleRecipient = { id: number; label: string; first_name: string };
+export type SampleRecipient = { id: number; label: string; first_name: string; language?: string };
+export type LanguageAudience = { language: string; total: number; sms: number; email: number; sms_name_length: number; email_name_length: number };
+export type MessageVersion = Messages & { edited: MessageField[]; language?: string };
 
 export type ScheduleSpec = {
   kind: "once" | "interval" | "weekly";
@@ -92,7 +94,8 @@ export type Campaign = {
   provider?: string;
   model?: string;
   blockers: string[];
-  content?: Messages & { edited: MessageField[] };
+  content?: MessageVersion & { translations?: MessageVersion[] };
+  languages?: LanguageAudience[] | null;
   content_limits: { sms_name_length: number; email_name_length: number };
   content_warnings: ContentIssue[];
   approved_at?: string;
@@ -216,13 +219,13 @@ const EMAIL_FIELDS: MessageField[] = ["email_subject", "email_preheader", "email
 
 export type EmailPreviewResult = { subject: string; html: string; text: string };
 
-export function previewEmail(message: Partial<Messages>, firstName: string): Promise<EmailPreviewResult> {
+export function previewEmail(message: Partial<Messages>, firstName: string, language = ""): Promise<EmailPreviewResult> {
   // Stored content also says who edited what, which the template has no use for.
   const fields = EMAIL_FIELDS.map((field) => [field, message[field] ?? ""]);
-  return post<EmailPreviewResult>("/api/email-preview", { ...Object.fromEntries(fields), first_name: firstName });
+  return post<EmailPreviewResult>("/api/email-preview", { ...Object.fromEntries(fields), ...(language ? { language } : {}), first_name: firstName });
 }
 
-export function saveContent(id: string, messages: Messages): Promise<Campaign> {
+export function saveContent(id: string, messages: Messages & { language?: string }): Promise<Campaign> {
   return request<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/content`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -319,6 +322,7 @@ export function watchCampaign(id: string, handlers: LiveHandlers): () => void {
 export type GenerationHandlers = {
   onDelta: (field: MessageField, text: string) => void;
   onReset: () => void;
+  onLanguage?: (language: string) => void;
 };
 
 // Streams a generation and resolves with the validated campaign. The streamed
@@ -357,6 +361,7 @@ export async function generateContent(
         const payload = JSON.parse(data);
         if (event === "delta") handlers.onDelta(payload.field, payload.text);
         if (event === "reset") handlers.onReset();
+        if (event === "language") handlers.onLanguage?.(payload.language);
         if (event === "done") return payload as Campaign;
         if (event === "error") throw new ApiError(payload.error, 0);
       }

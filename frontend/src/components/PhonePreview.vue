@@ -6,12 +6,13 @@ import { countCharacters, renderMessage, smsSegments } from "../lib/message";
 const props = defineProps<{
   message: string;
   recipients: { id: number; label: string; first_name: string }[];
+  language?: string;
 }>();
 
 const id = useId();
 const selectedId = ref(String(props.recipients[0]?.id ?? ""));
 const selected = computed(() => props.recipients.find((recipient) => String(recipient.id) === selectedId.value));
-const rendered = computed(() => renderMessage(props.message, { first_name: selected.value?.first_name ?? "" }));
+const rendered = computed(() => renderMessage(props.message, { first_name: selected.value?.first_name ?? "" }, props.language));
 const parts = computed(() => smsSegments(rendered.value));
 </script>
 
