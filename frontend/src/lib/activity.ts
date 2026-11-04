@@ -1,4 +1,5 @@
 import type { ActivityEntry } from "../api/campaigns";
+import { languageName } from "./languages";
 
 const FAILURE_REASONS: Record<string, string> = {
   invalid_output: "the output never passed validation",
@@ -56,6 +57,10 @@ export function describeActivity(entry: ActivityEntry): { title: string; detail:
       return { title: `Copied from "${details.source_name}"`, detail: "" };
     case "deliveries.exported":
       return { title: "Deliveries exported as CSV", detail: "" };
+    case "campaign.languages_changed": {
+      const excluded = (details.excluded as string[] | undefined) ?? [];
+      return { title: "Message languages changed", detail: excluded.length ? `English for readers of ${excluded.map(languageName).join(", ")}` : "Every language gets its own version" };
+    }
     case "campaign.renamed":
       return { title: `Renamed to "${details.name}"`, detail: "" };
     case "segment.proposed": {

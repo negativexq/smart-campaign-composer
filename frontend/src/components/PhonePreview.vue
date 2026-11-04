@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useId } from "vue";
+import { computed, ref, useId, watch } from "vue";
 
 import { countCharacters, renderMessage, smsSegments } from "../lib/message";
 
@@ -11,6 +11,13 @@ const props = defineProps<{
 
 const id = useId();
 const selectedId = ref(String(props.recipients[0]?.id ?? ""));
+// The people change with the language shown and can arrive after the first render.
+watch(
+  () => props.recipients,
+  (people) => {
+    if (!people.some((person) => String(person.id) === selectedId.value)) selectedId.value = String(people[0]?.id ?? "");
+  },
+);
 const selected = computed(() => props.recipients.find((recipient) => String(recipient.id) === selectedId.value));
 const rendered = computed(() => renderMessage(props.message, { first_name: selected.value?.first_name ?? "" }, props.language));
 const parts = computed(() => smsSegments(rendered.value));
@@ -18,7 +25,7 @@ const parts = computed(() => smsSegments(rendered.value));
 
 <template>
   <section class="preview" aria-label="SMS preview">
-    <div class="control">
+    <div v-if="recipients.length" class="control">
       <label class="small muted" :for="id">Preview as</label>
       <select :id="id" v-model="selectedId" class="field select">
         <option v-for="recipient in recipients" :key="recipient.id" :value="String(recipient.id)">
@@ -27,8 +34,14 @@ const parts = computed(() => smsSegments(rendered.value));
       </select>
     </div>
 
-    <div class="phone">
-      <p class="bubble" data-testid="phone-message">{{ rendered }}</p>
+    <div class="phone" data-testid="phone-frame">
+      <div class="screen">
+        <div class="notch" aria-hidden="true"></div>
+        <p class="sender small">Your brand</p>
+        <div class="thread">
+          <p v-show="rendered.trim()" class="bubble" data-testid="phone-message">{{ rendered }}</p>
+        </div>
+      </div>
     </div>
 
     <p class="small muted" data-testid="phone-length">
@@ -58,15 +71,47 @@ const parts = computed(() => smsSegments(rendered.value));
 }
 
 .phone {
-  min-height: 220px;
-  padding: var(--space-6) var(--space-4);
+  justify-self: center;
+  width: min(100%, 280px);
+  padding: 10px;
+  background: var(--color-text);
+  border-radius: 36px;
+}
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 380px;
+  overflow: hidden;
+  background: var(--color-surface);
+  border-radius: 27px;
+}
+
+.notch {
+  align-self: center;
+  width: 84px;
+  height: 18px;
+  background: var(--color-text);
+  border-radius: 0 0 12px 12px;
+}
+
+.sender {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-weight: 500;
+  text-align: center;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.thread {
+  flex: 1;
+  padding: var(--space-3);
   background: var(--color-surface-subtle);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
 }
 
 .bubble {
   max-width: 88%;
+  margin: 0;
   padding: var(--space-2) var(--space-3);
   background: var(--color-surface);
   border: 1px solid var(--color-border);

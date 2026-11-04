@@ -23,6 +23,7 @@ import (
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
 	"github.com/negativexq/smart-campaign-composer/internal/content"
+	"github.com/negativexq/smart-campaign-composer/internal/language"
 	"github.com/negativexq/smart-campaign-composer/internal/segment"
 	"github.com/negativexq/smart-campaign-composer/internal/telemetry"
 )
@@ -42,10 +43,10 @@ const (
 	outcomeInvalid     = "invalid_output"
 	reasonUnsupported  = "unsupported_condition"
 	reasonUnmatched    = "brief_not_matched"
-	defaultLanguage    = "en"
 	reasonEmpty        = "empty_audience"
 	reasonNoConsent    = "no_consented_recipients"
 	eventRenamed       = "campaign.renamed"
+	eventLanguages     = "campaign.languages_changed"
 	maxProvisionalName = 60
 	eventCreated       = "campaign.created"
 	eventDuplicated    = "campaign.duplicated"
@@ -56,6 +57,7 @@ const (
 var (
 	ErrInvalidBrief     = errors.New("brief is empty or too long")
 	ErrInvalidChannels  = errors.New("channels must be sms, email or both")
+	ErrInvalidLanguages = errors.New("only languages we write in, other than English, can be left out")
 	ErrInvalidOptions   = errors.New("tone, offer or exclusion is not valid")
 	ErrOfferConflict    = errors.New("brief mentions a different discount than the offer")
 	ErrInvalidName      = errors.New("campaign name is empty or too long")
@@ -73,16 +75,18 @@ type ProposeInput struct {
 
 // View is a campaign as the marketer sees it.
 type View struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	NameSource      string   `json:"name_source"`
-	Brief           string   `json:"brief"`
-	Status          string   `json:"status"`
-	Channels        []string `json:"channels"`
-	Tone            string   `json:"tone"`
-	ABTest          bool     `json:"ab_test"`
-	VariantAPercent int      `json:"variant_a_percent"`
-	OfferPercent    *int     `json:"offer_percent"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	NameSource string   `json:"name_source"`
+	Brief      string   `json:"brief"`
+	Status     string   `json:"status"`
+	Channels   []string `json:"channels"`
+	// ExcludedLanguages get no version of their own, and their readers get English.
+	ExcludedLanguages []string `json:"excluded_languages"`
+	Tone              string   `json:"tone"`
+	ABTest            bool     `json:"ab_test"`
+	VariantAPercent   int      `json:"variant_a_percent"`
+	OfferPercent      *int     `json:"offer_percent"`
 	// NotMessagedWithinDays is what the form asked for; the audience rule that
 	// applies is in Proposal.
 	NotMessagedWithinDays *int                `json:"not_messaged_within_days"`
@@ -227,8 +231,8 @@ func (s *Service) Duplicate(ctx context.Context, id string) (View, error) {
 
 	var copied string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO campaigns (brief, name, name_source, created_by, channels, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, status)
-		SELECT brief, $2, name_source, $3, channels, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, $4
+		INSERT INTO campaigns (brief, name, name_source, created_by, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, status)
+		SELECT brief, $2, name_source, $3, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, $4
 		FROM campaigns WHERE id = $1
 		RETURNING id::text`, id, string(name)+suffix, personFrom(ctx), status).Scan(&copied); err != nil {
 		return View{}, fmt.Errorf("copy campaign: %w", err)
@@ -278,6 +282,65 @@ func (s *Service) Rename(ctx context.Context, id, name string) (View, error) {
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return View{}, fmt.Errorf("commit rename: %w", err)
+	}
+	return s.Get(ctx, id)
+}
+
+// SetExcludedLanguages chooses which languages get no version. It says nothing about
+// who receives the campaign: their readers stay in the audience and get English.
+// Versions of a language left out are removed, since nobody would read them.
+func (s *Service) SetExcludedLanguages(ctx context.Context, id string, excluded []string) (View, error) {
+	chosen := []string{}
+	for _, code := range excluded {
+		if !language.Known(code) || code == language.Fallback {
+			return View{}, ErrInvalidLanguages
+		}
+		if !slices.Contains(chosen, code) {
+			chosen = append(chosen, code)
+		}
+	}
+	slices.Sort(chosen)
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return View{}, fmt.Errorf("begin languages: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+
+	status, err := lockStatus(ctx, tx, id)
+	if err != nil {
+		return View{}, err
+	}
+	if status != statusDraft && status != statusReady && status != statusFailed {
+		return View{}, ErrNotEditable
+	}
+	stored, err := s.loadFrom(ctx, tx, id)
+	if err != nil {
+		return View{}, err
+	}
+	// A draft from before languages were kept has one version nobody can tell apart.
+	if stored.Content != nil && stored.Content.Language != "" {
+		kept := stored.Content.without(chosen)
+		var encoded []byte
+		if kept != nil {
+			if encoded, err = json.Marshal(kept); err != nil {
+				return View{}, fmt.Errorf("encode content: %w", err)
+			}
+		} else {
+			status = statusDraft
+		}
+		if _, err := tx.Exec(ctx, `UPDATE campaign_versions SET content = $3 WHERE campaign_id = $1 AND version = $2`, id, stored.Version, encoded); err != nil {
+			return View{}, fmt.Errorf("remove language versions: %w", err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE campaigns SET excluded_languages = $2, status = $3, updated_at = now() WHERE id = $1`, id, chosen, status); err != nil {
+		return View{}, fmt.Errorf("set languages: %w", err)
+	}
+	if err := recordAudit(ctx, tx, id, eventLanguages, map[string]any{"excluded": chosen}); err != nil {
+		return View{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return View{}, fmt.Errorf("commit languages: %w", err)
 	}
 	return s.Get(ctx, id)
 }
@@ -798,12 +861,12 @@ func (s *Service) loadFrom(ctx context.Context, q segment.Querier, id string) (V
 		snapshot     []byte
 	)
 	err := q.QueryRow(ctx, `
-		SELECT c.name, c.name_source, c.brief, c.status, c.channels, c.tone, c.ab_test, c.variant_a_percent, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
+		SELECT c.name, c.name_source, c.brief, c.status, c.channels, c.excluded_languages, c.tone, c.ab_test, c.variant_a_percent, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.Channels, &view.Tone, &view.ABTest, &view.VariantAPercent, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt, &snapshot)
+		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.Channels, &view.ExcludedLanguages, &view.Tone, &view.ABTest, &view.VariantAPercent, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt, &snapshot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}
@@ -902,31 +965,49 @@ func versionLabel(version *StoredContent, translated bool) string {
 	return strings.Join(parts, ", ")
 }
 
-// writingLanguages is who needs a version: every language with someone reachable on
-// this campaign's channels, largest first. A language we cannot write in gets the main
-// version when it is sent.
+// writingLanguages is who needs a version: every language chosen with someone reachable
+// on this campaign's channels, largest first, and English if anyone reachable reads a
+// language that was not chosen or that we cannot write in.
 func (v *View) writingLanguages() []string {
 	languages := []string{}
-	for _, language := range v.Languages {
-		if language.SMS+language.Email > 0 && segment.LanguageName(language.Language) != "" {
-			languages = append(languages, language.Language)
+	needsFallback := false
+	for _, audience := range v.Languages {
+		if audience.SMS+audience.Email == 0 {
+			continue
+		}
+		if v.versionFor(audience.Language) == audience.Language {
+			languages = append(languages, audience.Language)
+		} else {
+			needsFallback = true
 		}
 	}
-	if len(languages) == 0 {
-		return []string{defaultLanguage}
+	if len(languages) == 0 || (needsFallback && !slices.Contains(languages, language.Fallback)) {
+		languages = append(languages, language.Fallback)
 	}
 	return languages
 }
 
-// limitsFor is the campaign's limits with the longest name among this language's
+// versionFor is the language a reader of this one gets their message in.
+func (v *View) versionFor(code string) string {
+	if language.Known(code) && !slices.Contains(v.ExcludedLanguages, code) {
+		return code
+	}
+	return language.Fallback
+}
+
+// limitsFor is the campaign's limits with the longest name among this version's
 // readers, or the word that stands in for a missing name if that is longer.
-func (v *View) limitsFor(language string) content.Limits {
+func (v *View) limitsFor(code string) content.Limits {
 	limits := v.ContentLimits
+	fallback := utf8.RuneCountInString(content.FallbackName(code))
+	sms, email, found := fallback, fallback, false
 	for _, audience := range v.Languages {
-		if audience.Language == language {
-			fallback := utf8.RuneCountInString(content.FallbackName(language))
-			limits.SMSName, limits.EmailName = max(audience.SMSName, fallback), max(audience.EmailName, fallback)
+		if v.versionFor(audience.Language) == code {
+			sms, email, found = max(sms, audience.SMSName), max(email, audience.EmailName), true
 		}
+	}
+	if found {
+		limits.SMSName, limits.EmailName = sms, email
 	}
 	return limits
 }

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/negativexq/smart-campaign-composer/internal/language"
 )
 
 var folder = strings.NewReplacer(
@@ -135,7 +137,6 @@ var (
 		"pazartesi", "sali", "carsamba", "persembe", "cuma", "cumartesi", "pazar", "ramazan", "bayram", "yilbasi",
 		"january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
 		"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
-		"english", "turkish", "ingilizce", "turkce",
 		"all", "our", "the", "these", "those", "any", "some", "my", "your", "tum", "butun", "her", "bazi", "bu", "su", "o", "degerli", "sevgili",
 		// A sentence starting with a command capitalises it: "Remind users".
 		"remind", "notify", "email", "message", "text", "send", "tell", "reach", "target", "contact", "alert", "invite", "thank", "ask", "inform", "help", "show", "offer", "give", "find", "welcome", "only",
@@ -148,7 +149,7 @@ var (
 // qualifier such as "Mobile users" reads the same way, and is equally something
 // a rule must not silently drop.
 func Places(text string, known []string) []string {
-	skip := slices.Concat(notPlaces, keysOf(known), keysOf(provinces))
+	skip := slices.Concat(notPlaces, language.Words(), keysOf(known), keysOf(provinces))
 	found := []string{}
 	for _, pattern := range []*regexp.Regexp{placeEndings, placeAfter, placeBefore} {
 		for _, match := range pattern.FindAllStringSubmatch(text, -1) {

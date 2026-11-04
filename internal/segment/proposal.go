@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/negativexq/smart-campaign-composer/internal/language"
 )
 
 const (
@@ -20,12 +22,9 @@ const (
 	maxEvidenceQuote = 200
 )
 
-// languageNames lists the languages present in user data.
-var languageNames = map[string]string{"tr": "Turkish", "en": "English"}
-
 // LanguageName names a language we can write in, or returns nothing.
 func LanguageName(code string) string {
-	return languageNames[code]
+	return language.Name(code)
 }
 
 // Spec is the allowlist of audience filters. Nil fields are not applied.
@@ -232,8 +231,8 @@ func (p *Proposal) validate(cities []string) *ValidationError {
 		}
 	}
 	if spec.Language != nil {
-		if _, ok := languageNames[*spec.Language]; !ok {
-			problems.add("unknown_language", fmt.Sprintf("language %q is not available; use tr or en", *spec.Language))
+		if !language.Known(*spec.Language) {
+			problems.add("unknown_language", fmt.Sprintf("language %q is not available; use one of: %s", *spec.Language, strings.Join(language.Codes(), ", ")))
 		}
 	}
 	for _, window := range []struct {
@@ -342,7 +341,7 @@ func Describe(spec Spec) []Condition {
 		conditions = append(conditions, Condition{"city", "City is", *spec.City})
 	}
 	if spec.Language != nil {
-		conditions = append(conditions, Condition{"language", "Language is", languageNames[*spec.Language]})
+		conditions = append(conditions, Condition{"language", "Language is", language.Name(*spec.Language)})
 	}
 	if spec.CartAddedWithinDays != nil {
 		conditions = append(conditions, Condition{"cart_added_within_days", "Added to cart in the last", days(*spec.CartAddedWithinDays)})
@@ -399,7 +398,7 @@ func JSONSchema() map[string]any {
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"city":                      map[string]any{"type": "string", "description": "One of the available cities"},
-					"language":                  map[string]any{"type": "string", "enum": []string{"tr", "en"}},
+					"language":                  map[string]any{"type": "string", "enum": language.Codes()},
 					"cart_added_within_days":    integer("Added a product to the cart within this many days, 1 to 365"),
 					"no_purchase_since_cart":    map[string]any{"type": "boolean", "description": "Did not purchase after that cart event; requires cart_added_within_days"},
 					"purchased_within_days":     integer("Purchased within this many days, 1 to 365"),

@@ -9,9 +9,11 @@ import {
   getActivity,
   getCampaign,
   getProgress,
+  getSampleRecipients,
   watchCampaign,
   type ActivityEntry,
   type Campaign,
+  type SampleRecipient,
   type MessageField,
   type MessageVersion,
   type LiveState,
@@ -30,7 +32,9 @@ import ValidationNotice from "../components/ValidationNotice.vue";
 import { firstMessagePath } from "../lib/campaignSteps";
 import { isDraftStatus } from "../lib/campaignStatus";
 import { formatDateTime } from "../lib/format";
-import { languageVersions } from "../lib/languages";
+import { languageName, languageVersions, recipientsFor } from "../lib/languages";
+import PhonePreview from "../components/PhonePreview.vue";
+import VersionTabs from "../components/VersionTabs.vue";
 import { navigate } from "../lib/navigation";
 import { sendingBlockers } from "../lib/systemHealth";
 import { campaignDiscount, reachHint, uniqueWarnings, warningTitle } from "../lib/message";
@@ -43,7 +47,9 @@ const campaign = ref<Campaign | null>(null);
 const activity = ref<ActivityEntry[] | null>(null);
 const error = ref("");
 const activityError = ref("");
-const tab = ref<Tab>("overview");
+// In the address, so a refresh stays on the same tab. What this campaign has no tab for falls back once it has loaded.
+const tab = ref<Tab>((new URLSearchParams(window.location.search).get("tab") as Tab | null) ?? "overview");
+const recipients = ref<SampleRecipient[]>([]);
 const progress = ref<Progress | null>(null);
 const refreshKey = ref(0);
 const acting = ref(false);
@@ -63,6 +69,12 @@ const tabs = computed(() => {
   return list;
 });
 
+function selectTab(id: Tab) {
+  tab.value = id;
+  const path = window.location.pathname;
+  window.history.replaceState({}, "", id === "overview" ? path : `${path}?tab=${id}`);
+}
+
 const isLive = computed(() => campaign.value?.status === "DISPATCHING");
 const isDraft = computed(() => (campaign.value ? isDraftStatus(campaign.value.status) : false));
 const editHref = computed(() => (campaign.value?.content ? firstMessagePath(props.campaignId, campaign.value.channels) : `/campaigns/${props.campaignId}/edit`));
@@ -79,9 +91,26 @@ const versions = computed(() => {
   return (test ? ["A", "B"] : ["A"]).flatMap((variant) => {
     const known = languageVersions(current, variant);
     const root = (variant === "B" ? current.content?.variant_b : current.content) as MessageVersion;
-    const list = known.length > 1 ? known : [{ language: root.language ?? "", name: "", version: root }];
+    const list = known.length > 1 ? known : [{ language: root.language ?? "", name: "", also: [] as string[], version: root }];
     return list.map((entry) => ({ ...entry, variant, name: [test && `Version ${variant}`, entry.name].filter(Boolean).join(" · ") }));
   });
+});
+
+const selectedVariant = ref("A");
+const selectedLanguage = ref("");
+const variantOptions = computed(() => [...new Set(versions.value.map((entry) => entry.variant))].map((variant) => ({ id: variant, name: `Version ${variant}` })));
+const languageOptions = computed(() =>
+  versions.value
+    .filter((entry) => entry.variant === selectedVariant.value && entry.language)
+    .map((entry) => ({ id: entry.language, name: languageName(entry.language) })),
+);
+const shownVersion = computed(() => {
+  const side = versions.value.filter((entry) => entry.variant === selectedVariant.value);
+  return side.find((entry) => entry.language === selectedLanguage.value) ?? side[0];
+});
+const shownRecipients = computed(() => {
+  const entry = shownVersion.value;
+  return entry ? recipientsFor(recipients.value, entry.language, entry.also) : [];
 });
 
 async function refresh() {
@@ -151,6 +180,8 @@ function onRenamed(updated: Campaign) {
 }
 
 onMounted(async () => {
+  // Without samples the previews use the fallback greeting.
+  getSampleRecipients(props.campaignId).then((people) => (recipients.value = people), () => {});
   try {
     campaign.value = await getCampaign(props.campaignId);
   } catch (failure) {
@@ -167,6 +198,7 @@ onMounted(async () => {
   } catch {
     // The rest of the page is still useful without the counts.
   }
+  if (!tabs.value.some((item) => item.id === tab.value)) selectTab("overview");
   watchIfChanging();
 });
 
@@ -215,7 +247,7 @@ onBeforeUnmount(() => stopWatching?.());
         :class="{ 'tab--active': tab === item.id }"
         :aria-selected="tab === item.id"
         :aria-controls="`panel-${item.id}`"
-        @click="tab = item.id"
+        @click="selectTab(item.id)"
       >
         {{ item.label }}
       </button>
@@ -281,14 +313,16 @@ onBeforeUnmount(() => stopWatching?.());
         {{ warning.message }}
       </ValidationNotice>
       <p v-if="campaignDiscount(campaign)" class="muted small" data-testid="content-discount">Discount in these messages: <strong>{{ campaignDiscount(campaign) }}</strong></p>
-      <template v-for="entry in versions" :key="entry.variant + entry.language">
+      <VersionTabs v-if="variantOptions.length > 1" v-model="selectedVariant" label="Message version" :options="variantOptions" test-prefix="content-variant" />
+      <VersionTabs v-if="languageOptions.length > 1" :model-value="shownVersion?.language ?? ''" label="Message language" @update:model-value="selectedLanguage = $event" :options="languageOptions" test-prefix="content-language" />
+      <template v-if="shownVersion">
         <article v-if="campaign.channels.includes('sms')" class="message card" data-testid="content-sms">
-          <div class="message-head"><h2>SMS<template v-if="entry.name"> · {{ entry.name }}</template></h2><OriginTag :origin="originOf('sms', entry.version)" /></div>
-          <p class="message-text">{{ entry.version.sms }}</p>
+          <div class="message-head"><h2>SMS</h2><OriginTag :origin="originOf('sms', shownVersion.version)" /></div>
+          <PhonePreview :message="shownVersion.version.sms" :recipients="shownRecipients" :language="shownVersion.language" />
         </article>
         <article v-if="campaign.channels.includes('email')" class="message card" data-testid="content-email">
-          <div class="message-head"><h2>Email<template v-if="entry.name"> · {{ entry.name }}</template></h2><OriginTag :origin="originOf('email_body', entry.version)" /></div>
-          <EmailPreview :message="entry.version" :recipients="[]" :language="entry.language" />
+          <div class="message-head"><h2>Email</h2><OriginTag :origin="originOf('email_body', shownVersion.version)" /></div>
+          <EmailPreview :message="shownVersion.version" :recipients="shownRecipients" :language="shownVersion.language" />
         </article>
       </template>
     </section>

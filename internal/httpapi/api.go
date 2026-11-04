@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
@@ -45,6 +46,7 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 		"POST /api/campaigns":                                    a.create,
 		"GET /api/campaigns/{id}":                                a.get,
 		"PATCH /api/campaigns/{id}":                              a.rename,
+		"PUT /api/campaigns/{id}/languages":                      a.setLanguages,
 		"POST /api/campaigns/{id}/segment":                       a.proposeSegment,
 		"GET /api/campaigns/{id}/audience":                       a.audience,
 		"GET /api/campaigns/{id}/audience/breakdown":             a.audienceBreakdown,
@@ -164,6 +166,21 @@ func (a *api) rename(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
+func (a *api) setLanguages(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Excluded []string `json:"excluded"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	view, err := a.campaigns.SetExcludedLanguages(r.Context(), r.PathValue("id"), body.Excluded)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
 func (a *api) proposeSegment(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Brief      *string `json:"brief"`
@@ -211,11 +228,13 @@ func (a *api) generate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Instruction string `json:"instruction"`
 		Channel     string `json:"channel"`
+		// MissingLanguages writes only the languages with no version yet.
+		MissingLanguages bool `json:"missing_languages"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	generation, err := a.campaigns.StartGeneration(r.Context(), r.PathValue("id"), campaign.GenerateInput{Instruction: body.Instruction, Channel: body.Channel})
+	generation, err := a.campaigns.StartGeneration(r.Context(), r.PathValue("id"), campaign.GenerateInput{Instruction: body.Instruction, Channel: body.Channel, MissingLanguages: body.MissingLanguages})
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -232,6 +251,14 @@ func (a *api) generate(w http.ResponseWriter, r *http.Request) {
 		}
 		if event.Type == campaign.EventVariant {
 			stream.send("variant", map[string]string{"variant": event.Text})
+			return
+		}
+		if event.Type == campaign.EventPlan {
+			stream.send("plan", map[string][]string{"languages": strings.Split(event.Text, ",")})
+			return
+		}
+		if event.Type == campaign.EventLanguageDone {
+			stream.send("language_done", map[string]string{"language": event.Text})
 			return
 		}
 		if event.Type == campaign.EventLanguage {
@@ -529,6 +556,8 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusBadRequest, "Write a brief of up to 2000 characters."
 	case errors.Is(err, campaign.ErrInvalidChannels):
 		status, message = http.StatusBadRequest, "Choose SMS, email or both."
+	case errors.Is(err, campaign.ErrInvalidLanguages):
+		status, message = http.StatusBadRequest, "Only languages we write in, other than English, can be left out."
 	case errors.Is(err, campaign.ErrInvalidOptions):
 		status, message = http.StatusBadRequest, "Check the tone, the discount of 1 to 100 percent and the days to skip of 1 to 365."
 	case errors.Is(err, campaign.ErrChannelDiscount):

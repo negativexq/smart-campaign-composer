@@ -1188,8 +1188,18 @@ func TestAnOutageOfServerErrorsIsWaitedOut(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(300 * time.Millisecond) // long enough to have tripped on both channels
-	before := attempts()
+	// Attempts stop once both channels have tripped, however long that takes here.
+	before, settled := attempts(), time.Now().Add(10*time.Second)
+	for still := 0; still < 3 && time.Now().Before(settled); {
+		time.Sleep(100 * time.Millisecond)
+		now := attempts()
+		if now == before && now > 0 {
+			still++
+		} else {
+			still = 0
+		}
+		before = now
+	}
 	time.Sleep(500 * time.Millisecond) // several probes go out and fail
 	if got := attempts(); got != before {
 		t.Errorf("attempts went from %d to %d during the outage", before, got)

@@ -47,7 +47,7 @@ var (
 	quietPattern  = regexp.MustCompile(`(?:not messaged|no message)[^0-9]*(\d+)\s*days?|(\d+)\s*g[uü]n\S*\s*mesaj almayan`)
 	clearPattern  = regexp.MustCompile(`remove|drop|ignore|kaldir|çikar`)
 
-	languagePattern = regexp.MustCompile(`english|ingilizce|turkish|türkçe`)
+	languagePattern = regexp.MustCompile(`english|ingilizce|turkish|türkçe|german|deutsch|almanca|french|français|fransızca|spanish|español|ispanyolca`)
 )
 
 const mockQuoteWords = 8
@@ -162,7 +162,7 @@ func applyFilters(proposal *segment.Proposal, folded string, cities []string) {
 			break
 		}
 	}
-	for code, words := range map[string][]string{"en": {"english", "ingilizce"}, "tr": {"turkish", "türkçe"}} {
+	for code, words := range map[string][]string{"en": {"english", "ingilizce"}, "tr": {"turkish", "türkçe"}, "de": {"german", "deutsch", "almanca"}, "fr": {"french", "français", "fransızca"}, "es": {"spanish", "español", "ispanyolca"}} {
 		for _, word := range words {
 			if strings.Contains(folded, word) {
 				spec.Language = &code
@@ -296,23 +296,30 @@ var (
 func (m *Mock) StreamContent(ctx context.Context, request ContentRequest, handler StreamHandler) (Response, error) {
 	source := content.OfferSource(request.Brief, request.Instruction)
 	// The language tag holds a language's name, and older callers leave it empty.
-	turkish := request.Language == "Turkish" || (request.Language == "" && mockTurkish.MatchString(request.Brief))
+	name := request.Language
+	if name == "" {
+		name = "English"
+		if mockTurkish.MatchString(request.Brief) {
+			name = "Turkish"
+		}
+	}
+	copy, known := mockCopies[name]
+	if !known {
+		copy = mockCopies["English"]
+	}
 	avoid := string(request.Current)
 	if len(request.OtherVariant) > 0 {
 		avoid = string(request.OtherVariant)
 	}
-	second := strings.Contains(avoid, "seni unutmadık") || strings.Contains(avoid, "we saved your spot")
+	second := mockMentions(avoid, 0)
 	// Another language's version says what this one says, in the same wording.
 	if len(request.Reference) > 0 {
-		second = strings.Contains(string(request.Reference), "kaldığın yerden") || strings.Contains(string(request.Reference), "pick up where you left off")
+		second = mockMentions(string(request.Reference), 1)
 	}
-	draft := mockDraft(turkish, mockDiscount.FindString(source), second)
-	draft = mockTone(draft, request.Tone, turkish)
+	draft := mockDraft(copy, mockDiscount.FindString(source), second)
+	draft = mockTone(draft, request.Tone, copy)
 	if link := mockLink.FindString(request.Brief + " " + request.Instruction); link != "" {
-		draft.EmailCTAURL, draft.EmailCTALabel = link, "See the offer"
-		if turkish {
-			draft.EmailCTALabel = "Teklifi gör"
-		}
+		draft.EmailCTAURL, draft.EmailCTALabel = link, copy.ctaLabel
 	}
 	draft = request.Limits.Keep(draft)
 	output, err := json.Marshal(draft)
@@ -332,37 +339,28 @@ func (m *Mock) StreamContent(ctx context.Context, request ContentRequest, handle
 	return Response{Output: output}, nil
 }
 
-func mockDraft(turkish bool, offer string, second bool) content.Content {
+func mockDraft(copy mockCopy, offer string, second bool) content.Content {
 	offerSMS, offerEmail := "", ""
 	if offer != "" {
-		if turkish {
-			offerSMS, offerEmail = " "+offer+" indirimin hazır.", " Sana özel "+offer+" indirimin seni bekliyor."
-		} else {
-			offerSMS, offerEmail = " Your "+offer+" discount is ready.", " Your "+offer+" discount is waiting for you."
-		}
+		offerSMS, offerEmail = fmt.Sprintf(copy.offerSMS, offer), fmt.Sprintf(copy.offerEmail, offer)
 	}
+	wording := copy.wordings[0]
 	if second {
-		return mockWording(turkish, 1, offerSMS, offerEmail)
+		wording = copy.wordings[1]
 	}
-	return mockWording(turkish, 0, offerSMS, offerEmail)
+	wording.SMS += offerSMS
+	wording.EmailBody = strings.Replace(wording.EmailBody, mockOfferSlot, offerEmail, 1)
+	return wording
 }
 
 // mockTone makes the chosen tone visible, as a real model's wording would.
-func mockTone(draft content.Content, tone string, turkish bool) content.Content {
+func mockTone(draft content.Content, tone string, copy mockCopy) content.Content {
 	switch tone {
 	case "formal":
-		greeting := strings.NewReplacer("Hi {{", "Dear {{", "Hello {{", "Dear {{")
-		if turkish {
-			greeting = strings.NewReplacer("Merhaba {{", "Sayın {{", "Selam {{", "Sayın {{")
-		}
-		draft.SMS, draft.EmailBody = greeting.Replace(draft.SMS), greeting.Replace(draft.EmailBody)
+		draft.SMS, draft.EmailBody = copy.formal.Replace(draft.SMS), copy.formal.Replace(draft.EmailBody)
 	case "urgent":
-		hurry := " Hurry!"
-		if turkish {
-			hurry = " Acele et!"
-		}
-		draft.SMS += hurry
-		draft.EmailBody += hurry
+		draft.SMS += copy.hurry
+		draft.EmailBody += copy.hurry
 	}
 	return draft
 }
@@ -372,39 +370,124 @@ func mustJSON(text string) string {
 	return string(encoded)
 }
 
-func mockWording(turkish bool, variant int, offerSMS, offerEmail string) content.Content {
-	if turkish {
-		if variant == 0 {
-			return content.Content{
-				SMS:            "Merhaba {{first_name}}, seni unutmadık." + offerSMS,
-				EmailSubject:   "{{first_name}}, sana bir haberimiz var",
-				EmailPreheader: "Seçtiklerin seni bekliyor.",
-				EmailHeadline:  "Seni tekrar görmek güzel",
-				EmailBody:      "Merhaba {{first_name}},\n\nSeçtiklerin hâlâ burada." + offerEmail + "\n\nTekrar görüşmek üzere.",
-			}
-		}
-		return content.Content{
-			SMS:            "{{first_name}}, kaldığın yerden devam et." + offerSMS,
+// mockOfferSlot marks where an email's body names the discount.
+const mockOfferSlot = "{offer}"
+
+// mockCopy is what the mock writes in one language: two wordings, so regenerating and
+// a test's second version read differently.
+type mockCopy struct {
+	wordings             [2]content.Content
+	markers              [2]string
+	offerSMS, offerEmail string
+	formal               *strings.Replacer
+	hurry, ctaLabel      string
+}
+
+var mockCopies = map[string]mockCopy{
+	"Turkish": {
+		wordings: [2]content.Content{{
+			SMS:            "Merhaba {{first_name}}, seni unutmadık.",
+			EmailSubject:   "{{first_name}}, sana bir haberimiz var",
+			EmailPreheader: "Seçtiklerin seni bekliyor.",
+			EmailHeadline:  "Seni tekrar görmek güzel",
+			EmailBody:      "Merhaba {{first_name}},\n\nSeçtiklerin hâlâ burada.{offer}\n\nTekrar görüşmek üzere.",
+		}, {
+			SMS:            "{{first_name}}, kaldığın yerden devam et.",
 			EmailSubject:   "Kaldığın yerden devam et, {{first_name}}",
 			EmailPreheader: "Kısa bir hatırlatma.",
 			EmailHeadline:  "Bıraktığın yerde duruyor",
-			EmailBody:      "Selam {{first_name}},\n\nKısa bir hatırlatma yapmak istedik." + offerEmail + "\n\nGörüşmek üzere.",
-		}
-	}
-	if variant == 0 {
-		return content.Content{
-			SMS:            "Hi {{first_name}}, we saved your spot." + offerSMS,
+			EmailBody:      "Selam {{first_name}},\n\nKısa bir hatırlatma yapmak istedik.{offer}\n\nGörüşmek üzere.",
+		}},
+		markers:  [2]string{"seni unutmadık", "kaldığın yerden"},
+		offerSMS: " %s indirimin hazır.", offerEmail: " Sana özel %s indirimin seni bekliyor.",
+		formal: strings.NewReplacer("Merhaba {{", "Sayın {{", "Selam {{", "Sayın {{"),
+		hurry:  " Acele et!", ctaLabel: "Teklifi gör",
+	},
+	"English": {
+		wordings: [2]content.Content{{
+			SMS:            "Hi {{first_name}}, we saved your spot.",
 			EmailSubject:   "{{first_name}}, we have news for you",
 			EmailPreheader: "What you picked is waiting for you.",
 			EmailHeadline:  "Good to see you again",
-			EmailBody:      "Hi {{first_name}},\n\nWhat you picked is still here." + offerEmail + "\n\nSee you soon.",
+			EmailBody:      "Hi {{first_name}},\n\nWhat you picked is still here.{offer}\n\nSee you soon.",
+		}, {
+			SMS:            "{{first_name}}, pick up where you left off.",
+			EmailSubject:   "Pick up where you left off, {{first_name}}",
+			EmailPreheader: "A quick reminder from us.",
+			EmailHeadline:  "Still where you left it",
+			EmailBody:      "Hello {{first_name}},\n\nA quick reminder from us.{offer}\n\nThanks for reading.",
+		}},
+		markers:  [2]string{"we saved your spot", "pick up where"},
+		offerSMS: " Your %s discount is ready.", offerEmail: " Your %s discount is waiting for you.",
+		formal: strings.NewReplacer("Hi {{", "Dear {{", "Hello {{", "Dear {{"),
+		hurry:  " Hurry!", ctaLabel: "See the offer",
+	},
+	"German": {
+		wordings: [2]content.Content{{
+			SMS:            "Hallo {{first_name}}, wir haben an dich gedacht.",
+			EmailSubject:   "{{first_name}}, wir haben Neuigkeiten für dich",
+			EmailPreheader: "Deine Auswahl wartet auf dich.",
+			EmailHeadline:  "Schön, dich wiederzusehen",
+			EmailBody:      "Hallo {{first_name}},\n\ndeine Auswahl ist noch da.{offer}\n\nBis bald.",
+		}, {
+			SMS:            "{{first_name}}, mach dort weiter, wo du aufgehört hast.",
+			EmailSubject:   "Mach dort weiter, wo du aufgehört hast, {{first_name}}",
+			EmailPreheader: "Eine kurze Erinnerung von uns.",
+			EmailHeadline:  "Noch genau dort, wo du es gelassen hast",
+			EmailBody:      "Hallo {{first_name}},\n\neine kurze Erinnerung von uns.{offer}\n\nDanke fürs Lesen.",
+		}},
+		markers:  [2]string{"an dich gedacht", "aufgehört hast"},
+		offerSMS: " Dein Rabatt von %s ist bereit.", offerEmail: " Dein Rabatt von %s wartet auf dich.",
+		formal: strings.NewReplacer("Hallo {{", "Guten Tag {{"),
+		hurry:  " Schnell!", ctaLabel: "Angebot ansehen",
+	},
+	"French": {
+		wordings: [2]content.Content{{
+			SMS:            "Bonjour {{first_name}}, nous pensons à vous.",
+			EmailSubject:   "{{first_name}}, nous avons du nouveau pour vous",
+			EmailPreheader: "Votre sélection vous attend.",
+			EmailHeadline:  "Heureux de vous revoir",
+			EmailBody:      "Bonjour {{first_name}},\n\nVotre sélection est toujours là.{offer}\n\nÀ bientôt.",
+		}, {
+			SMS:            "{{first_name}}, reprenez là où vous en étiez.",
+			EmailSubject:   "Reprenez là où vous en étiez, {{first_name}}",
+			EmailPreheader: "Un petit rappel de notre part.",
+			EmailHeadline:  "Toujours là où vous l'avez laissé",
+			EmailBody:      "Bonjour {{first_name}},\n\nUn petit rappel de notre part.{offer}\n\nMerci de votre lecture.",
+		}},
+		markers:  [2]string{"nous pensons à vous", "reprenez là"},
+		offerSMS: " Votre réduction de %s est prête.", offerEmail: " Votre réduction de %s vous attend.",
+		formal: strings.NewReplacer("Bonjour {{", "Madame, Monsieur {{"),
+		hurry:  " Vite !", ctaLabel: "Voir l'offre",
+	},
+	"Spanish": {
+		wordings: [2]content.Content{{
+			SMS:            "Hola {{first_name}}, pensamos en ti.",
+			EmailSubject:   "{{first_name}}, tenemos novedades para ti",
+			EmailPreheader: "Lo que elegiste te está esperando.",
+			EmailHeadline:  "Qué bueno verte de nuevo",
+			EmailBody:      "Hola {{first_name}},\n\nLo que elegiste sigue aquí.{offer}\n\nHasta pronto.",
+		}, {
+			SMS:            "{{first_name}}, sigue donde lo dejaste.",
+			EmailSubject:   "Sigue donde lo dejaste, {{first_name}}",
+			EmailPreheader: "Un breve recordatorio.",
+			EmailHeadline:  "Sigue donde lo dejaste",
+			EmailBody:      "Hola {{first_name}},\n\nUn breve recordatorio de nuestra parte.{offer}\n\nGracias por leer.",
+		}},
+		markers:  [2]string{"pensamos en ti", "donde lo dejaste"},
+		offerSMS: " Tu descuento del %s está listo.", offerEmail: " Tu descuento del %s te espera.",
+		formal: strings.NewReplacer("Hola {{", "Estimado {{"),
+		hurry:  " ¡Date prisa!", ctaLabel: "Ver la oferta",
+	},
+}
+
+// mockMentions says whether text uses one of a language's wordings, in any language.
+func mockMentions(text string, wording int) bool {
+	lowered := strings.ToLower(text)
+	for _, copy := range mockCopies {
+		if strings.Contains(lowered, copy.markers[wording]) {
+			return true
 		}
 	}
-	return content.Content{
-		SMS:            "{{first_name}}, pick up where you left off." + offerSMS,
-		EmailSubject:   "Pick up where you left off, {{first_name}}",
-		EmailPreheader: "A quick reminder from us.",
-		EmailHeadline:  "Still where you left it",
-		EmailBody:      "Hello {{first_name}},\n\nA quick reminder from us." + offerEmail + "\n\nThanks for reading.",
-	}
+	return false
 }

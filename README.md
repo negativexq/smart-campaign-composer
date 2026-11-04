@@ -14,6 +14,10 @@ The brief becomes conditions the backend checks and counts itself. Anything no f
 
 ![Audience step: a brief with an unsupported age condition, the audience funnel and the approval blocker](docs/screenshots/audience.png)
 
+### Choose the languages
+
+The audience step lists the languages its people read, with counts. Choosing them changes who gets their own version, never who receives the campaign: anyone whose language is left out gets English.
+
 ### Approve what goes out
 
 Review shows the final audience, each language's messages and a last set of checks. After approval the rules and messages cannot change.
@@ -55,7 +59,7 @@ docker compose up --build
 | Test inbox | http://localhost:8083 |
 | Mock provider health | http://localhost:8083/healthz |
 
-Setup applies migrations and loads 5,000 fake users on first start. Event times are relative to that moment. To reseed, remove the volume with `docker compose down -v`.
+Setup applies migrations and loads 6,000 fake users reading Turkish, English, German, French or Spanish on first start. Event times are relative to that moment. To reseed, remove the volume with `docker compose down -v`.
 
 The test inbox shows each SMS and email the mock provider accepted, with names filled in. Opening one there sends a signed event back to the app, and the campaign's Deliveries report counts it as opened or read. The inbox is in memory, so restarting the provider empties it, while the opens already reported stay in the database.
 

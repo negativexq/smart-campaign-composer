@@ -15,6 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/negativexq/smart-campaign-composer/internal/language"
 	"github.com/negativexq/smart-campaign-composer/internal/matching"
 )
 
@@ -68,14 +69,10 @@ type Content struct {
 	Variant string `json:"variant,omitempty"`
 }
 
-// firstNameFallbacks is what stands in for a missing name in each language, because
-// "Merhaba there" reads as a mistake.
-var firstNameFallbacks = map[string]string{"tr": "müşterimiz", "en": FirstNameFallback}
-
 // FallbackName is the word used for a person with no name in this language.
-func FallbackName(language string) string {
-	if fallback, ok := firstNameFallbacks[language]; ok {
-		return fallback
+func FallbackName(code string) string {
+	if known, ok := language.Get(code); ok {
+		return known.MissingName
 	}
 	return FirstNameFallback
 }
@@ -88,13 +85,18 @@ func NameFor(language, firstName string) string {
 	return firstName
 }
 
-// ForLanguage picks the version a person reads. Someone in a language with no version
-// gets the main one rather than nothing, which is only possible if their language
-// changed after approval.
-func ForLanguage(main Content, translations []Content, language string) Content {
-	for _, translation := range translations {
-		if translation.Language == language {
-			return translation
+// ForLanguage picks the version a person reads: their own, or English when a campaign
+// does not write in theirs. A campaign from before that rule may have neither, and
+// then it is the main version rather than nothing.
+func ForLanguage(main Content, translations []Content, wanted string) Content {
+	for _, code := range []string{wanted, language.Fallback} {
+		if main.Language == code {
+			return main
+		}
+		for _, translation := range translations {
+			if translation.Language == code {
+				return translation
+			}
 		}
 	}
 	return main

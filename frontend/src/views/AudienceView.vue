@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 
-import { errorMessage, getCampaign, proposeSegment, type Campaign } from "../api/campaigns";
+import { errorMessage, getCampaign, proposeSegment, setExcludedLanguages, type Campaign } from "../api/campaigns";
 import AudienceFunnel from "../components/AudienceFunnel.vue";
 import AudienceLoading from "../components/AudienceLoading.vue";
 import AudienceSteps from "../components/AudienceSteps.vue";
 import BriefReading from "../components/BriefReading.vue";
 import SegmentRules from "../components/SegmentRules.vue";
 import CampaignName from "../components/CampaignName.vue";
+import LanguagePicker from "../components/LanguagePicker.vue";
 import MetricCard from "../components/MetricCard.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { briefSegments } from "../lib/audience";
@@ -24,6 +25,7 @@ const loadError = ref("");
 const actionError = ref("");
 const busyMessage = ref("");
 const refinement = ref("");
+const savingLanguages = ref(false);
 const briefUpdatedBy = ref("");
 const editingBrief = ref(false);
 const editedBrief = ref("");
@@ -68,6 +70,18 @@ async function refine() {
   if (!(await propose({ refinement: asked }, "Updating the segment rule..."))) return;
   refinement.value = "";
   if (campaign.value?.brief !== before) briefUpdatedBy.value = asked;
+}
+
+async function chooseLanguages(excluded: string[]) {
+  savingLanguages.value = true;
+  actionError.value = "";
+  try {
+    campaign.value = await setExcludedLanguages(props.campaignId, excluded);
+  } catch (failure) {
+    actionError.value = errorMessage(failure);
+  } finally {
+    savingLanguages.value = false;
+  }
 }
 
 function startEditingBrief() {
@@ -165,6 +179,8 @@ onMounted(async () => {
         </div>
         <p v-if="asOf" class="muted small" data-testid="as-of">Counted on {{ asOf }}. Customers without consent are never messaged.</p>
       </section>
+
+      <LanguagePicker :campaign="campaign" :disabled="savingLanguages || Boolean(busyMessage)" @update="chooseLanguages" />
 
       <details class="card calculation" data-testid="calculation-details">
         <summary class="calculation-toggle">Show calculation details</summary>

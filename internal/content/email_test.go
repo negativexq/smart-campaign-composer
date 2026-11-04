@@ -441,14 +441,18 @@ func TestEmailSpeaksThePersonsLanguageAroundTheMessage(t *testing.T) {
 	}
 }
 
-func TestPeopleGetTheVersionForTheirLanguageOrTheMainOne(t *testing.T) {
+func TestPeopleGetTheirLanguageOrEnglish(t *testing.T) {
 	t.Parallel()
 	main := content.Content{Language: "tr", SMS: "Merhaba"}
 	translations := []content.Content{{Language: "en", SMS: "Hello"}}
-	for language, want := range map[string]string{"tr": "Merhaba", "en": "Hello", "de": "Merhaba"} {
+	for language, want := range map[string]string{"tr": "Merhaba", "en": "Hello", "de": "Hello", "xx": "Hello"} {
 		if got := content.ForLanguage(main, translations, language); got.SMS != want {
 			t.Fatalf("%s: %q", language, got.SMS)
 		}
+	}
+	// A campaign from before English was the rule may not have it.
+	if got := content.ForLanguage(main, nil, "de"); got.SMS != "Merhaba" {
+		t.Fatalf("without English: %q", got.SMS)
 	}
 	if content.NameFor("tr", "") != "müşterimiz" || content.NameFor("en", "") != "there" || content.NameFor("tr", "Ayşe") != "Ayşe" {
 		t.Fatal("names")

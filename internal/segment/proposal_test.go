@@ -70,7 +70,7 @@ func TestParseRejectsUntrustedOutput(t *testing.T) {
 		{"unknown top-level field", `{"segment": {"city": "Ankara"}, "sql": "SELECT 1"` + tail, "sql"},
 		{"sql in city", `{"segment": {"city": "Ankara' OR '1'='1"}` + tail, "city"},
 		{"unknown city", `{"segment": {"city": "Atlantis"}` + tail, "Atlantis"},
-		{"unknown language", `{"segment": {"city": "Ankara", "language": "de"}` + tail, "language"},
+		{"unknown language", `{"segment": {"city": "Ankara", "language": "ar"}` + tail, "language"},
 		{"zero days", `{"segment": {"cart_added_within_days": 0}` + tail, "cart_added_within_days"},
 		{"negative days", `{"segment": {"purchased_within_days": -5}` + tail, "purchased_within_days"},
 		{"too many days", `{"segment": {"not_purchased_within_days": 366}` + tail, "not_purchased_within_days"},

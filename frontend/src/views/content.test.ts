@@ -480,7 +480,7 @@ describe("content on the campaign page", () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => ({
       ok: true,
       status: 200,
-      json: async () => (url.endsWith("/activity") ? { activity: [] } : { ...ready, content: { ...stored, edited: ["sms"] } }),
+      json: async () => (url.endsWith("/activity") ? { activity: [] } : url.endsWith("/sample-recipients") ? { recipients: [] } : { ...ready, content: { ...stored, edited: ["sms"] } }),
     })));
     const wrapper = mount(CampaignDetailView, { props: { campaignId: "c1" } });
     await flushPromises();

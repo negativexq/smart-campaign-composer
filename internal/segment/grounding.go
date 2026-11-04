@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/negativexq/smart-campaign-composer/internal/language"
 	"github.com/negativexq/smart-campaign-composer/internal/matching"
 )
 
@@ -31,10 +32,7 @@ var (
 	genderWord  = regexp.MustCompile(`^(kadin|kadinlar|kadinlara|erkek|erkekler|erkeklere|gender|cinsiyet|female|females|male|males|women|men)$`)
 	loyaltyWord = regexp.MustCompile(`^(vip|gold|premium|sadik|loyal|loyalty)$`)
 
-	languageWords = map[string]*regexp.Regexp{
-		"tr": regexp.MustCompile(`^(turkce|turkish)$`),
-		"en": regexp.MustCompile(`^(ingilizce|english)$`),
-	}
+	languageWords = compileLanguageWords()
 )
 
 // CheckAgainstBrief compares a valid rule with the brief it should express, using
@@ -435,4 +433,13 @@ func noteUnsure(proposal *Proposal, field string) {
 		}
 	}
 	proposal.Unsure = append(proposal.Unsure, text)
+}
+
+// compileLanguageWords gives each language a pattern for how a brief names it.
+func compileLanguageWords() map[string]*regexp.Regexp {
+	patterns := map[string]*regexp.Regexp{}
+	for _, known := range language.All() {
+		patterns[known.Code] = regexp.MustCompile(`^(` + strings.Join(known.Words, "|") + `)$`)
+	}
+	return patterns
 }

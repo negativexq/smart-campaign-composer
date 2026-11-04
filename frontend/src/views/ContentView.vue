@@ -17,13 +17,14 @@ import {
 } from "../api/campaigns";
 import EmailPreview from "../components/EmailPreview.vue";
 import EmailTemplatePicker from "../components/EmailTemplatePicker.vue";
+import GenerationProgress from "../components/GenerationProgress.vue";
 import MessageEditor from "../components/MessageEditor.vue";
 import OriginTag from "../components/OriginTag.vue";
 import PhonePreview from "../components/PhonePreview.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { channelLabel, firstMessagePath } from "../lib/campaignSteps";
 import { isDraftStatus } from "../lib/campaignStatus";
-import { audienceLanguages, languageName, longestNameFor, missingLanguages, missingSecondVersion, variantCount, variantPeople, variantShare, versionFor } from "../lib/languages";
+import { audienceLanguages, recipientsFor, listNames, languageName, longestNameFor, missingLanguages, missingSecondVersion, variantCount, variantPeople, variantShare, versionFor } from "../lib/languages";
 import { EMAIL_TEMPLATES } from "../lib/emailTemplates";
 import { navigate } from "../lib/navigation";
 
@@ -45,6 +46,22 @@ const instruction = ref("");
 const messages = reactive<Messages>({ sms: "", email_subject: "", email_preheader: "", email_headline: "", email_body: "", email_cta_label: "", email_cta_url: "", email_template: "" });
 const selectedLanguage = ref("");
 const writingLanguage = ref("");
+// Every language this run writes, what is being written now and what has finished.
+const planned = ref<string[]>([]);
+const writingNow = ref<string[]>([]);
+const finished = ref<string[]>([]);
+// One channel when only it is being written again, otherwise all the campaign uses.
+const wholeCampaign = ref(false);
+const writes = computed(() =>
+  wholeCampaign.value ? (campaign.value?.channels ?? []).map(channelLabel).join(" and ") : channelLabel(props.channel),
+);
+const progress = computed(() =>
+  planned.value.map((language) => ({
+    language,
+    name: languageName(language),
+    state: finished.value.includes(language) ? ("done" as const) : writingNow.value.includes(language) ? ("writing" as const) : ("waiting" as const),
+  })),
+);
 const selectedVariant = ref("A");
 const writingVariant = ref("");
 let controller: AbortController | null = null;
@@ -69,10 +86,7 @@ const languageTabs = computed(() => {
     }));
 });
 const missing = computed(() => (campaign.value ? missingLanguages(campaign.value, props.channel).map(languageName) : []));
-const shownRecipients = computed(() => {
-  const own = recipients.value.filter((recipient) => recipient.language === selectedLanguage.value);
-  return own.length ? own : recipients.value;
-});
+const shownRecipients = computed(() => recipientsFor(recipients.value, selectedLanguage.value));
 const dirty = computed(() =>
   stored.value ? (Object.keys(messages) as MessageField[]).some((field) => messages[field] !== (stored.value?.[field] ?? "")) : false,
 );
@@ -100,7 +114,9 @@ const template = computed({
 const buttonHasProblem = computed(() => Boolean(issueFor("email_cta_label") || issueFor("email_cta_url")));
 
 const writingText = computed(() => {
-  const language = writingLanguage.value && languageName(writingLanguage.value);
+  const languages = writingLanguage.value ? writingLanguage.value.split(",").map(languageName) : [];
+  const language = listNames(languages);
+  if (languages.length > 1) return writingVariant.value ? `Writing version ${writingVariant.value} in ${language}` : `Writing the ${language} versions`;
   if (writingVariant.value) return language ? `Writing version ${writingVariant.value} in ${language}` : `Writing version ${writingVariant.value}`;
   return language ? `Writing the ${language} version` : "Writing";
 });
@@ -161,7 +177,7 @@ function editorState(field: MessageField) {
   return issueFor(field) ? "invalid" : "draft";
 }
 
-async function generate(input: { instruction?: string } = {}) {
+async function generate(input: { instruction?: string; missing_languages?: boolean } = {}) {
   controller = new AbortController();
   // The first version written is the one that shows as it comes.
   selectedVariant.value = "A";
@@ -175,9 +191,14 @@ async function generate(input: { instruction?: string } = {}) {
   stopped.value = false;
   writingLanguage.value = "";
   writingVariant.value = "";
+  wholeCampaign.value = !before || Boolean(input.missing_languages);
+  planned.value = [];
+  writingNow.value = [];
+  finished.value = [];
   issues.value = [];
   fill(before);
-  clearOwnFields();
+  // Adding a language leaves what is on screen as it is.
+  if (!input.missing_languages) clearOwnFields();
   try {
     campaign.value = await generateContent(
       props.campaignId,
@@ -187,7 +208,16 @@ async function generate(input: { instruction?: string } = {}) {
           if (field in messages) messages[field] += text;
         },
         onReset: clearOwnFields,
-        onLanguage: (language) => (writingLanguage.value = language),
+        onLanguage: (language) => {
+          writingLanguage.value = language;
+          writingNow.value = language.split(",");
+        },
+        onPlan: (languages) => {
+          planned.value = languages;
+          writingNow.value = languages.slice(0, 1);
+          finished.value = [];
+        },
+        onLanguageDone: (language) => finished.value.push(language),
         onVariant: (variant) => {
           writingVariant.value = variant;
           writingLanguage.value = "";
@@ -307,8 +337,11 @@ onBeforeUnmount(() => controller?.abort());
       </ValidationNotice>
     </template>
 
+    <GenerationProgress v-if="generating && progress.length" :languages="progress" :variant="writingVariant" :writes="writes" />
+
     <ValidationNotice v-if="!generating && missing.length" tone="warning" title="A language has no messages">
-      Part of this audience reads {{ missing.join(" and ") }}. Regenerate to write for them.
+      {{ listNames(missing) }} has no messages yet, and what is already written stays as it is.
+      <button class="button button--secondary missing-write" type="button" data-testid="write-missing" @click="generate({ missing_languages: true })">Write {{ listNames(missing) }}</button>
     </ValidationNotice>
 
     <ValidationNotice v-if="!generating && noSecondVersion" tone="warning" title="This test has one version">
@@ -448,6 +481,11 @@ onBeforeUnmount(() => controller?.abort());
   max-width: 720px;
 }
 
+.missing-write {
+  display: block;
+  margin-top: var(--space-2);
+}
+
 .languages {
   display: flex;
   flex-wrap: wrap;
@@ -467,8 +505,15 @@ onBeforeUnmount(() => controller?.abort());
 }
 
 .language--active {
-  font-weight: 500;
+  color: var(--color-on-primary);
+  font-weight: 600;
+  background: var(--color-primary);
   border-bottom-color: var(--color-primary);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.language--active .muted {
+  color: inherit;
 }
 
 .language:disabled {

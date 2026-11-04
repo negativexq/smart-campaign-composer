@@ -15,7 +15,7 @@ import (
 
 const (
 	// DefaultUserCount is the size of the demo dataset.
-	DefaultUserCount = 5000
+	DefaultUserCount = 6000
 
 	// CityIstanbul is the canonical spelling segments must resolve to.
 	CityIstanbul = "İstanbul"
@@ -42,12 +42,23 @@ const (
 	lastFixture = FixtureTurkishName
 )
 
+var languageShares = []struct {
+	code string
+	upTo float64
+}{{"en", 0.14}, {"de", 0.21}, {"fr", 0.26}, {"es", 0.30}}
+
 // Cities lists every city in the dataset using its canonical spelling.
 var Cities = []string{CityIstanbul, "Ankara", "İzmir", "Bursa", "Antalya", "Adana"}
 
-var firstNames = []string{
-	"Ayşe", "Mehmet", "Fatma", "Ahmet", "Zeynep", "Mustafa", "Elif", "Can",
-	"Deniz", "Ece", "Emre", "Selin", "Burak", "Merve", "Ömer", "Gül",
+var namesByLanguage = map[string][]string{
+	"tr": {
+		"Ayşe", "Mehmet", "Fatma", "Ahmet", "Zeynep", "Mustafa", "Elif", "Can",
+		"Deniz", "Ece", "Emre", "Selin", "Burak", "Merve", "Ömer", "Gül",
+	},
+	"en": {"James", "Emily", "Oliver", "Grace", "Thomas", "Sophie", "Daniel", "Hannah"},
+	"de": {"Lukas", "Anna", "Jonas", "Lena", "Felix", "Greta", "Matthias", "Jürgen"},
+	"fr": {"Louis", "Camille", "Hugo", "Chloé", "Mathieu", "Élodie", "François", "Inès"},
+	"es": {"Diego", "Lucía", "Javier", "María", "Pablo", "Carmen", "Andrés", "Sofía"},
 }
 
 // User is a fake recipient with per-channel consent.
@@ -162,16 +173,24 @@ func (b *builder) addFixtures() {
 	b.cart(FixtureTurkishName, 5)
 }
 
+// pickLanguage spreads people over languages, most of them reading Turkish.
+func pickLanguage(draw float64) string {
+	for _, share := range languageShares {
+		if draw < share.upTo {
+			return share.code
+		}
+	}
+	return "tr"
+}
+
 func (b *builder) addGeneratedUser(rng *rand.Rand, id int64) {
 	city := Cities[1+rng.IntN(len(Cities)-1)]
 	if rng.Float64() < 0.35 {
 		city = CityIstanbul
 	}
-	language := "tr"
-	if rng.Float64() < 0.15 {
-		language = "en"
-	}
-	name := firstNames[rng.IntN(len(firstNames))]
+	language := pickLanguage(rng.Float64())
+	names := namesByLanguage[language]
+	name := names[rng.IntN(len(names))]
 	b.addUser(id, name, city, rng.Float64() < 0.7, rng.Float64() < 0.8, language)
 
 	if rng.Float64() < 0.4 {

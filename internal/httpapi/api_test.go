@@ -239,6 +239,24 @@ func TestRenameThroughTheAPI(t *testing.T) {
 	}
 }
 
+func TestLanguagesThroughTheAPI(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, ai.NewMock())
+	id := createCampaign(t, api, exampleBrief)
+
+	status, response := call(t, api, http.MethodPut, "/api/campaigns/"+id+"/languages", `{"excluded":["de"]}`)
+	excluded, _ := response["excluded_languages"].([]any)
+	if status != http.StatusOK || len(excluded) != 1 || excluded[0] != "de" {
+		t.Fatalf("languages: %d %v", status, response)
+	}
+	if status, _ := call(t, api, http.MethodPut, "/api/campaigns/"+id+"/languages", `{"excluded":["en"]}`); status != http.StatusBadRequest {
+		t.Fatalf("leaving out English: %d", status)
+	}
+	if status, _ := call(t, api, http.MethodPut, "/api/campaigns/nope/languages", `{"excluded":[]}`); status != http.StatusNotFound {
+		t.Fatalf("unknown campaign: %d", status)
+	}
+}
+
 func TestConfigNamesTheProviderForTheBadge(t *testing.T) {
 	t.Parallel()
 	status, response := call(t, newAPI(t, ai.NewMock()), http.MethodGet, "/api/config", "")

@@ -3,7 +3,7 @@ export const SUPPORTED_VARIABLES = ["first_name"] as const;
 export type MessageValues = Record<(typeof SUPPORTED_VARIABLES)[number], string>;
 
 const FALLBACKS: MessageValues = { first_name: "there" };
-const NAME_FALLBACKS: Record<string, string> = { tr: "müşterimiz", en: "there" };
+const NAME_FALLBACKS: Record<string, string> = { tr: "müşterimiz", en: "there", de: "Kundschaft", fr: "cher client", es: "cliente" };
 const VARIABLE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
 
 // Counts Unicode code points. The backend counts the same way, so a message

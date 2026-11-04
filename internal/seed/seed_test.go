@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/negativexq/smart-campaign-composer/internal/language"
 	"github.com/negativexq/smart-campaign-composer/internal/seed"
 	"github.com/negativexq/smart-campaign-composer/internal/testsupport"
 )
@@ -54,8 +55,8 @@ func TestGenerateProducesRequestedUserCountWithUniqueContacts(t *testing.T) {
 	t.Parallel()
 	ds := seed.Generate(referenceTime, seed.DefaultUserCount)
 
-	if len(ds.Users) != 5000 {
-		t.Fatalf("want 5000 users, got %d", len(ds.Users))
+	if len(ds.Users) != seed.DefaultUserCount {
+		t.Fatalf("want %d users, got %d", seed.DefaultUserCount, len(ds.Users))
 	}
 	ids, emails, phones := map[int64]bool{}, map[string]bool{}, map[string]bool{}
 	for _, u := range ds.Users {
@@ -230,5 +231,21 @@ func TestLoadedDataAnswersExampleBriefLikeTheDataset(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("sql audience (%d users) differs from dataset audience (%d users)", len(got), len(want))
+	}
+}
+
+func TestPeopleReadEveryLanguageWeWriteIn(t *testing.T) {
+	t.Parallel()
+	counts := map[string]int{}
+	for _, user := range seed.Generate(referenceTime, seed.DefaultUserCount).Users {
+		counts[user.Language]++
+	}
+	for _, code := range language.Codes() {
+		if counts[code] < 100 {
+			t.Fatalf("%s has %d readers: %v", code, counts[code], counts)
+		}
+	}
+	if len(counts) != len(language.Codes()) {
+		t.Fatalf("readers of a language we cannot write in: %v", counts)
 	}
 }

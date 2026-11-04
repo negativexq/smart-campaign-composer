@@ -98,7 +98,7 @@ describe("review", () => {
   it("shows who receives what before anything is approved", async () => {
     const { wrapper, fetchMock } = await open();
     expect(wrapper.find("[data-testid=review-conditions]").text()).toContain("İstanbul");
-    expect(wrapper.find("[data-testid=review-sms]").text()).toContain("Hi {{first_name}}");
+    expect(wrapper.find("[data-testid=review-sms]").text()).toContain("Hi there");
     expect(wrapper.find("[data-testid=review-email]").text()).toContain("Subject");
     expect(wrapper.find("[data-testid=approve]").text()).toBe("Approve and send 13 messages");
     expect(called(fetchMock, "POST", "/api/campaigns/c1/approve")).toHaveLength(0);
@@ -116,8 +116,46 @@ describe("review", () => {
     });
     expect(wrapper.find("[data-testid=review-tr]").text()).toContain("Merhaba");
     expect(wrapper.find("[data-testid=review-tr]").text()).toContain("10 messages");
+    expect(wrapper.find("[data-testid=review-en]").exists()).toBe(false);
+    expect(wrapper.find("[data-testid=approve]").attributes("disabled")).toBeDefined();
+    expect(wrapper.find("[data-testid=review-checks]").text()).toContain("Open English before approving");
+    await wrapper.find("[data-testid=review-language-en]").trigger("click");
     expect(wrapper.find("[data-testid=review-en]").text()).toContain("Hello");
+    expect(wrapper.find("[data-testid=approve]").attributes("disabled")).toBeUndefined();
     expect(wrapper.find("[data-testid=review-checks]").text()).toContain("Each person gets Turkish or English");
+  });
+
+  const twoLanguages: Campaign = {
+    ...ready,
+    content: { ...ready.content!, language: "tr", sms: "Merhaba {{first_name}}", translations: [{ ...ready.content!, language: "en", sms: "Hello {{first_name}}" }] },
+    languages: [
+      { language: "tr", total: 7, sms: 6, email: 4, sms_name_length: 7, email_name_length: 7 },
+      { language: "en", total: 2, sms: 1, email: 2, sms_name_length: 21, email_name_length: 21 },
+    ],
+  };
+  const samples = {
+    "GET /api/campaigns/c1/sample-recipients": {
+      body: {
+        recipients: [
+          { id: 1, label: "Can", first_name: "Can", language: "tr" },
+          { id: 2, label: "Emily", first_name: "Emily", language: "en" },
+        ],
+      },
+    },
+  };
+
+  it("marks the language it opens with as selected", async () => {
+    const { wrapper } = await open(twoLanguages);
+    expect(wrapper.find("[data-testid=review-language-tr]").classes()).toContain("tab--active");
+    expect(wrapper.find("[data-testid=review-language-en]").classes()).not.toContain("tab--active");
+  });
+
+  it("previews each language with the name of someone who reads it", async () => {
+    const { wrapper } = await open(twoLanguages, samples);
+    expect(wrapper.find("[data-testid=phone-message]").text()).toBe("Merhaba Can");
+    await wrapper.find("[data-testid=review-language-en]").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=phone-message]").text()).toBe("Hello Emily");
   });
 
   it("cannot be approved while a language has no messages", async () => {
@@ -130,7 +168,7 @@ describe("review", () => {
       ],
     });
     expect(wrapper.find("[data-testid=approve]").attributes("disabled")).toBeDefined();
-    expect(wrapper.find("[data-testid=review-checks]").text()).toContain("reads English");
+    expect(wrapper.find("[data-testid=review-checks]").text()).toContain("English has no messages");
   });
 
   it("shows a note about several fields once, under its own title", async () => {
@@ -222,7 +260,8 @@ describe("review of a test", () => {
     const wrapper = mount(ReviewView, { props: { campaignId: "c1" } });
     await flushPromises();
     expect(wrapper.find("[data-testid=review-variant-A]").exists()).toBe(true);
-    expect(wrapper.find("[data-testid=review-variant-B]").text()).toContain("Second {{first_name}}");
+    await wrapper.find("[data-testid=review-version-B]").trigger("click");
+    expect(wrapper.find("[data-testid=review-variant-B]").text()).toContain("Second");
     expect(wrapper.find("[data-testid=people-B]").text()).toBe("70% · 96 people");
     expect(wrapper.find("[data-testid=review-checks]").text()).toContain("names no winner");
     expect(wrapper.find("[data-testid=approve]").attributes("disabled")).toBeUndefined();
@@ -232,6 +271,7 @@ describe("review of a test", () => {
     stub({ "GET /api/campaigns/c1": { body: { ...test, variant_a_percent: 1, variant_audience: [{ variant: "B", language: "tr", total: 96, sms: 80, email: 90 }] } } });
     const wrapper = mount(ReviewView, { props: { campaignId: "c1" } });
     await flushPromises();
+    await wrapper.find("[data-testid=review-version-B]").trigger("click");
     expect(wrapper.find("[data-testid=review-checks]").text()).toContain("Nobody in this audience lands on version A");
     expect(wrapper.find("[data-testid=approve]").attributes("disabled")).toBeUndefined();
   });
@@ -260,6 +300,44 @@ describe("campaign page after approval", () => {
     await flushPromises();
     return { wrapper, fetchMock };
   }
+
+  it("stays on the open tab after a refresh", async () => {
+    const all = routes(ready);
+    const first = await open(all);
+    await first.wrapper.find("#tab-content").trigger("click");
+    expect(window.location.search).toBe("?tab=content");
+    first.wrapper.unmount();
+
+    const { wrapper } = await open(all);
+    expect(wrapper.find("#panel-content").exists()).toBe(true);
+    await wrapper.find("#tab-overview").trigger("click");
+    expect(window.location.search).toBe("");
+  });
+
+  it("opens the overview when the address names a tab this campaign does not have", async () => {
+    window.history.replaceState({}, "", "/campaigns/c1?tab=deliveries");
+    const { wrapper } = await open(routes(ready));
+    expect(wrapper.find("#panel-overview").exists()).toBe(true);
+    expect(window.location.search).toBe("");
+  });
+
+  it("marks the language it opens with and previews it with a reader's name", async () => {
+    const content = ready.content!;
+    const { wrapper } = await open({
+      ...routes({
+        ...ready,
+        content: { ...content, language: "tr", sms: "Merhaba {{first_name}}", translations: [{ ...content, language: "en", sms: "Hello {{first_name}}" }] },
+        languages: [
+          { language: "tr", total: 7, sms: 6, email: 4, sms_name_length: 7, email_name_length: 7 },
+          { language: "en", total: 2, sms: 1, email: 2, sms_name_length: 21, email_name_length: 21 },
+        ],
+      }),
+      "GET /api/campaigns/c1/sample-recipients": { body: { recipients: [{ id: 1, label: "Can", first_name: "Can", language: "tr" }] } },
+    });
+    await wrapper.find("#tab-content").trigger("click");
+    expect(wrapper.find("[data-testid=content-language-tr]").classes()).toContain("tab--active");
+    expect(wrapper.find("[data-testid=phone-message]").text()).toBe("Merhaba Can");
+  });
 
   it("offers sending or scheduling an approved campaign", async () => {
     const { wrapper, fetchMock } = await open({

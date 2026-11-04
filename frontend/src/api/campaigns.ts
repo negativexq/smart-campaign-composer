@@ -105,6 +105,7 @@ export type Campaign = {
   variant_a_percent?: number;
   variant_audience?: { variant: string; language: string; total: number; sms: number; email: number }[];
   languages?: LanguageAudience[] | null;
+  excluded_languages?: string[];
   content_limits: { sms_name_length: number; email_name_length: number };
   content_warnings: ContentIssue[];
   approved_at?: string;
@@ -198,6 +199,14 @@ export async function createCampaign(brief: string, channels: string[], options:
 
 export function proposeSegment(id: string, input: { brief?: string; refinement?: string } = {}): Promise<Campaign> {
   return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/segment`, input);
+}
+
+export function setExcludedLanguages(id: string, excluded: string[]): Promise<Campaign> {
+  return request<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/languages`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ excluded }),
+  });
 }
 
 export function renameCampaign(id: string, name: string): Promise<Campaign> {
@@ -386,6 +395,8 @@ export type GenerationHandlers = {
   onDelta: (field: MessageField, text: string) => void;
   onReset: () => void;
   onLanguage?: (language: string) => void;
+  onPlan?: (languages: string[]) => void;
+  onLanguageDone?: (language: string) => void;
   onVariant?: (variant: string) => void;
 };
 
@@ -393,7 +404,7 @@ export type GenerationHandlers = {
 // text is only a preview: what counts is the campaign in the final event.
 export async function generateContent(
   id: string,
-  input: { instruction?: string; channel?: string },
+  input: { instruction?: string; channel?: string; missing_languages?: boolean },
   handlers: GenerationHandlers,
   signal: AbortSignal,
 ): Promise<Campaign> {
@@ -426,6 +437,8 @@ export async function generateContent(
         if (event === "delta") handlers.onDelta(payload.field, payload.text);
         if (event === "reset") handlers.onReset();
         if (event === "language") handlers.onLanguage?.(payload.language);
+        if (event === "plan") handlers.onPlan?.(payload.languages);
+        if (event === "language_done") handlers.onLanguageDone?.(payload.language);
         if (event === "variant") handlers.onVariant?.(payload.variant);
         if (event === "done") return payload as Campaign;
         if (event === "error") throw new ApiError(payload.error, 0);

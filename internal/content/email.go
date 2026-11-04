@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/negativexq/smart-campaign-composer/internal/language"
 )
 
 //go:embed email.html
@@ -79,11 +81,12 @@ func RenderEmail(c Content, firstName, unsubscribeURL string) (Email, error) {
 
 type emailFooter struct{ lang, received, unsubscribe, linkLater string }
 
-func footerFor(language string) emailFooter {
-	if language == "tr" {
-		return emailFooter{"tr", "Kampanya e-postalarına izin verdiğiniz için bu e-postayı aldınız.", "Abonelikten çık", "bağlantı gönderimde eklenir"}
+func footerFor(code string) emailFooter {
+	known, ok := language.Get(code)
+	if !ok {
+		known, _ = language.Get(language.Fallback)
 	}
-	return emailFooter{"en", "You received this because you agreed to campaign emails.", "Unsubscribe", "the link is added when this is sent"}
+	return emailFooter{known.Code, known.Received, known.Unsubscribe, known.LinkLater}
 }
 
 // templateName falls back to the default, so older drafts and anything already

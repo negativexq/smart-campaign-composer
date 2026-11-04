@@ -7,16 +7,20 @@ import {
   dispatchCampaign,
   errorMessage,
   getCampaign,
+  getSampleRecipients,
   scheduleCampaign,
   type Campaign,
   type MessageVersion,
+  type SampleRecipient,
 } from "../api/campaigns";
+import PhonePreview from "../components/PhonePreview.vue";
+import VersionTabs from "../components/VersionTabs.vue";
 import EmailPreview from "../components/EmailPreview.vue";
 import MetricCard from "../components/MetricCard.vue";
 import SchedulePicker from "../components/SchedulePicker.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { channelLabel, lastChannel, lastMessagePath } from "../lib/campaignSteps";
-import { languageVersions, missingLanguages, emptySide, missingSecondVersion, languageName, variantCount, variantPeople, variantShare } from "../lib/languages";
+import { listNames, recipientsFor, languageVersions, missingLanguages, emptySide, missingSecondVersion, languageName, variantCount, variantPeople, variantShare } from "../lib/languages";
 import { uniqueWarnings, warningTitle } from "../lib/message";
 import { navigate } from "../lib/navigation";
 import { buildSchedule, emptyScheduleForm, scheduleProblem } from "../lib/schedule";
@@ -29,24 +33,26 @@ const loadError = ref("");
 const actionError = ref("");
 const submitting = ref(false);
 const form = ref(emptyScheduleForm());
+const recipients = ref<SampleRecipient[]>([]);
 
 const reviewable = computed(() => ["READY_FOR_REVIEW", "APPROVED"].includes(campaign.value?.status ?? ""));
 const messageCount = computed(() => (campaign.value ? campaign.value.audience.sms + campaign.value.audience.email : 0));
 const problem = computed(() => scheduleProblem(form.value));
-// Every version is on the page, so nobody approves a language they did not see.
+// One version shows at a time, and approval waits until each has been opened, so
+// nobody approves a language they did not see.
 const versions = computed(() => {
   const current = campaign.value;
   if (!current?.content) return [];
   const known = languageVersions(current);
-  return known.length ? known : [{ language: "", name: "", sms: current.audience.sms, email: current.audience.email, version: current.content }];
+  return known.length ? known : [{ language: "", name: "", sms: current.audience.sms, email: current.audience.email, also: [] as string[], version: current.content }];
 });
-// A test puts its second version on the page the same way.
+// A test has its second version to read the same way.
 const secondVersions = computed(() => {
   const current = campaign.value;
   const second = current?.content?.variant_b;
   if (!current || !second) return [];
   const known = languageVersions(current, "B");
-  return known.length ? known : [{ language: "", name: "", sms: current.audience.sms, email: current.audience.email, version: second as MessageVersion }];
+  return known.length ? known : [{ language: "", name: "", sms: current.audience.sms, email: current.audience.email, also: [] as string[], version: second as MessageVersion }];
 });
 const groups = computed(() =>
   secondVersions.value.length
@@ -66,6 +72,36 @@ function peopleIn(variant: string, entry: { language: string; sms: number; email
     email: variantCount(current, variant, { language: entry.language, channel: "email" }),
   };
 }
+// Those whose language was left out stay in the audience and read English.
+const fallbackNote = computed(() => {
+  const also = versions.value.flatMap((entry) => ("also" in entry ? entry.also : []));
+  return also.length ? ` ${listNames(also.map(languageName))} readers get English.` : "";
+});
+const selectedVariant = ref("");
+const selectedLanguage = ref("");
+const seen = ref(new Set<string>());
+const shownGroup = computed(() => groups.value.find((group) => group.variant === selectedVariant.value) ?? groups.value[0]);
+const shownEntry = computed(() => shownGroup.value.entries.find((entry) => entry.language === selectedLanguage.value) ?? shownGroup.value.entries[0]);
+const shownRecipients = computed(() => (shownEntry.value ? recipientsFor(recipients.value, shownEntry.value.language, shownEntry.value.also) : []));
+const versionKey = (variant: string, language: string) => `${variant}:${language}`;
+function sideSeen(group: { variant: string; entries: { language: string }[] }) {
+  return group.entries.every((entry) => seen.value.has(versionKey(group.variant, entry.language)));
+}
+const languageTabs = computed(() =>
+  shownGroup.value.entries.map((entry) => ({
+    id: entry.language,
+    name: entry.name,
+    seen: seen.value.has(versionKey(shownGroup.value.variant, entry.language)),
+  })),
+);
+const unread = computed(() => groups.value.flatMap((group) => group.entries.filter((entry) => !seen.value.has(versionKey(group.variant, entry.language))).map((entry) => [group.label, entry.name].filter(Boolean).join(" "))));
+watch(
+  () => (shownEntry.value ? versionKey(shownGroup.value.variant, shownEntry.value.language) : ""),
+  (key) => {
+    if (key) seen.value = new Set(seen.value).add(key);
+  },
+  { immediate: true },
+);
 const missing = computed(() => (campaign.value ? missingLanguages(campaign.value).map(languageName) : []));
 type Check = { label: string; detail: string; ok: boolean };
 const checks = computed<Check[]>(() => {
@@ -95,10 +131,13 @@ const checks = computed<Check[]>(() => {
     list.push({
       label: "Languages",
       detail: missing.value.length
-        ? `Part of this audience reads ${missing.value.join(" and ")} and has no messages yet.`
-        : `Each person gets ${versions.value.map((entry) => entry.name).join(" or ")}, with the same offer.`,
+        ? `${listNames(missing.value)} has no messages yet.`
+        : `Each person gets ${listNames(versions.value.map((entry) => entry.name), "or")}, with the same offer.${fallbackNote.value}`,
       ok: !missing.value.length,
     });
+  }
+  if (current.content && unread.value.length) {
+    list.push({ label: "Read", detail: `Open ${listNames(unread.value)} before approving.`, ok: false });
   }
   if (current.ab_test && current.content) {
     const empty = emptySide(current);
@@ -123,7 +162,7 @@ const checks = computed<Check[]>(() => {
   list.push({ label: "When", detail: problem.value || (form.value.mode === "now" ? "Sends as soon as you approve." : "Sends on the schedule below."), ok: !problem.value });
   return list;
 });
-const blocked = computed(() => Boolean(campaign.value?.blockers.length) || messageCount.value === 0 || missing.value.length > 0 || noSecondVersion.value);
+const blocked = computed(() => unread.value.length > 0 || Boolean(campaign.value?.blockers.length) || messageCount.value === 0 || missing.value.length > 0 || noSecondVersion.value);
 const actionLabel = computed(() => {
   if (submitting.value) return "Working...";
   if (form.value.mode !== "now") return "Approve and schedule";
@@ -151,6 +190,8 @@ watch(() => campaign.value?.status, (status) => status && emit("status", status)
 watch(() => campaign.value?.channels, (channels) => channels && emit("channels", channels));
 
 onMounted(async () => {
+  // Without samples the previews use the fallback greeting, and approval still works.
+  getSampleRecipients(props.campaignId).then((people) => (recipients.value = people), () => {});
   try {
     campaign.value = await getCampaign(props.campaignId);
   } catch (failure) {
@@ -194,23 +235,20 @@ onMounted(async () => {
 
     <section v-if="campaign.content" class="section">
       <h2>What they read</h2>
-      <div v-for="group in groups" :key="group.variant" class="group" :data-testid="group.variant ? `review-variant-${group.variant}` : undefined">
-        <h3 v-if="group.label" class="group-head">
-          {{ group.label }}
-          <span class="muted small" :data-testid="`people-${group.variant}`">{{ variantShare(campaign, group.variant) }}% · {{ variantPeople(campaign, group.variant) }}</span>
-        </h3>
-        <div v-for="entry in group.entries" :key="entry.language" class="version" :data-testid="entry.language ? `review-${entry.language}` : undefined">
-          <h3 v-if="group.entries.length > 1" class="version-head">
-            {{ entry.name }}
-            <span class="muted small">{{ (peopleIn(group.variant, entry).sms + peopleIn(group.variant, entry).email).toLocaleString("en-US") }} messages</span>
-          </h3>
-          <article v-if="campaign.channels.includes('sms') && (entry.sms || group.entries.length === 1)" class="message card" data-testid="review-sms">
+      <VersionTabs v-if="groups.length > 1" :model-value="shownGroup.variant" label="Message version" @update:model-value="selectedVariant = $event" :options="groups.map((group) => ({ id: group.variant, name: group.label, seen: sideSeen(group) }))" test-prefix="review-version" />
+      <VersionTabs v-if="shownGroup.entries.length > 1" :model-value="shownEntry?.language ?? ''" label="Message language" @update:model-value="selectedLanguage = $event" :options="languageTabs" test-prefix="review-language" />
+      <div v-if="shownEntry" class="group" :data-testid="shownGroup.variant ? `review-variant-${shownGroup.variant}` : undefined">
+        <p v-if="shownGroup.label" class="muted small" :data-testid="`people-${shownGroup.variant}`">{{ variantShare(campaign, shownGroup.variant) }}% · {{ variantPeople(campaign, shownGroup.variant) }}</p>
+        <div class="version" :data-testid="shownEntry.language ? `review-${shownEntry.language}` : undefined">
+          <p v-if="shownGroup.entries.length > 1" class="muted small">{{ (peopleIn(shownGroup.variant, shownEntry).sms + peopleIn(shownGroup.variant, shownEntry).email).toLocaleString("en-US") }} messages</p>
+          <p v-if="'also' in shownEntry && shownEntry.also.length" class="muted small" :data-testid="`review-also-${shownEntry.language}`">Also read by those who read {{ listNames(shownEntry.also.map(languageName)) }}.</p>
+          <article v-if="campaign.channels.includes('sms') && (shownEntry.sms || shownGroup.entries.length === 1)" class="message card" data-testid="review-sms">
             <h3 class="muted small">SMS</h3>
-            <p class="text">{{ entry.version.sms }}</p>
+            <PhonePreview :message="shownEntry.version.sms" :recipients="shownRecipients" :language="shownEntry.language" />
           </article>
-          <article v-if="campaign.channels.includes('email') && (entry.email || group.entries.length === 1)" class="message card" data-testid="review-email">
+          <article v-if="campaign.channels.includes('email') && (shownEntry.email || shownGroup.entries.length === 1)" class="message card" data-testid="review-email">
             <h3 class="muted small">Email</h3>
-            <EmailPreview :message="entry.version" :recipients="[]" :language="entry.language" />
+            <EmailPreview :message="shownEntry.version" :recipients="shownRecipients" :language="shownEntry.language" />
           </article>
         </div>
       </div>

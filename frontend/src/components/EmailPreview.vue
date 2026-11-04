@@ -19,6 +19,13 @@ const PREVIEW_DELAY_MS = 250;
 
 const id = useId();
 const selectedId = ref(String(props.recipients[0]?.id ?? ""));
+// The people change with the language shown and can arrive after the first render.
+watch(
+  () => props.recipients,
+  (people) => {
+    if (!people.some((person) => String(person.id) === selectedId.value)) selectedId.value = String(people[0]?.id ?? "");
+  },
+);
 const firstName = computed(() => props.recipients.find((recipient) => String(recipient.id) === selectedId.value)?.first_name ?? "");
 const values = computed(() => ({ first_name: firstName.value }));
 
@@ -45,6 +52,14 @@ watch(
     timer = setTimeout(load, PREVIEW_DELAY_MS);
   },
   { deep: true },
+);
+// Another language has nothing to wait for, and its subject must not sit above the last body.
+watch(
+  () => props.language,
+  () => {
+    clearTimeout(timer);
+    void load();
+  },
 );
 
 // A design wider than the column is scaled down instead of reflowing into its

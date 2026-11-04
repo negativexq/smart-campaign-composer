@@ -300,17 +300,17 @@ Where it blocks without need, by choice: words the lists know used in another se
 
 ## Each person reads their own language
 
-`users.language` decides what a person receives. The audience is split by language and one version is written for each language it contains, largest first, so a Turkish reader gets Turkish SMS and email, and an English reader gets English. Only Turkish and English are written; anyone else gets the main version.
+`users.language` decides what a person receives. One version is written for each language the audience contains and the campaign has not left out, largest first, so a Turkish reader gets Turkish SMS and email, and a German reader gets German. Anyone else gets English.
 
 - The stored person's preference wins over a brief. "Write it in English" still reaches Turkish readers in Turkish, and the marketer sees that as a "Not done" note. A brief is one sentence about many people; the preference is what each of them told us.
 - Each version is checked on its own: the 160 and 80 limits use the longest name among that language's readers, or the word for a missing name if that is longer ("müşterimiz" is longer than "there"). Discounts and facts are compared with the same brief.
 - Versions must promise the same discount, or approval is closed. A person's language must not change what they are offered.
 - Generation is all or none. If one language fails, nothing is saved, so an audience is never left with some messages out of date.
-- All versions sit on the approval page one under another, not behind tabs, so nobody approves a language they did not see. The message screens use tabs because there a person works on one version at a time.
+- Approval and the campaign's content show one version at a time, with the languages as tabs above it, so the page stays readable with many of them. Nobody approves a language they did not see: approval stays closed until each version has been opened, and the unread ones are named. The SMS shows on a phone screen, as the person will read it.
 - What surrounds the message follows the person too: the missing-name word, the email footer and the unsubscribe label.
 - A draft or approved campaign from before this keeps its one version. A draft with more than one language in its audience has to be written again before it can be approved.
 
-This costs one extra model call per language. Translation quality is checked only on numbers, cities, discounts and links; the wording is for the person approving to read.
+This costs one extra model call per language, made together once the first version is written. Translation quality is checked only on numbers, cities, discounts and links; the wording is for the person approving to read.
 
 ## Accepted, delivered and bounced are different answers
 
@@ -374,3 +374,11 @@ A call with no answer may have gone through, so a retry is only safe if the prov
 ## A transaction never asks the pool for a second connection
 
 Approving and dispatching once read the campaign through the pool while holding its row lock in a transaction. Concurrent requests for one campaign could then hold every connection between them: one owned the lock and waited for a free connection, the others waited for the lock. Nothing ended the wait. The pool holds at least four connections or one per CPU, so this appeared on a 4-CPU CI runner with five requests and not on an 8-CPU laptop. Reads inside a transaction now go through it, and they also see the state the lock protects. The campaign tests give the service a single connection, so this mistake hangs them on any machine.
+
+## Choosing languages does not change the audience
+
+Who receives a campaign and how we talk to them are separate decisions. After the audience is counted, the marketer sees the languages in it with their counts and can leave any out except English. Their readers stay in the audience, every count stays the same, and they get English, which is written whenever anyone needs it, including when nobody in the audience prefers it. A brief that selects people by language ("only German speakers") is still an audience condition, which is a different thing.
+
+The choice is stored as what is left out, so a language that enters the audience after a refinement gets its own version unless someone decides otherwise. Leaving a language out removes its versions, because nobody would read them. Adding one writes only that language and leaves approved-looking text elsewhere untouched. English limits count the longest name among everyone falling back to it. The worker needs no new rule: the stored versions already say what exists, and a person whose language is not among them gets English.
+
+Later languages depend only on the first, so they are written at once. Sequential writing would have grown by a model call's wait per language.
