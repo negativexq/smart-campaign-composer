@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Progress } from "../api/campaigns";
-import { bucketQuery, channelBars, describeQuery, formatBucketWidth, matches, niceMax, noFilter } from "./report";
+import { arrivalOf, bucketQuery, channelBars, describeQuery, formatBucketWidth, matches, niceMax, noFilter } from "./report";
 
 describe("channelBars", () => {
   const progress = (byChannel: Progress["by_channel"]) => ({ by_channel: byChannel }) as unknown as Progress;
@@ -48,5 +48,18 @@ describe("filters", () => {
     expect(describeQuery({ ...noFilter(), channel: "email", reason: "timeout", retried: true })).toBe(
       "Email · Ended as: No response from the provider · Called more than once",
     );
+  });
+});
+
+describe("arrivalOf", () => {
+  it("reads what the provider reported", () => {
+    expect(arrivalOf({ status: "SENT", delivered_at: "2026-11-03T10:00:00Z" })).toEqual({ label: "Delivered", at: "2026-11-03T10:00:00Z" });
+    expect(arrivalOf({ status: "SENT", bounced_at: "2026-11-03T10:00:00Z" })?.label).toBe("Bounced");
+    expect(arrivalOf({ status: "UNKNOWN", delivered_at: "2026-11-03T10:00:00Z" })?.label).toBe("Delivered");
+  });
+
+  it("only accepted messages wait for a report", () => {
+    expect(arrivalOf({ status: "SENT" })).toEqual({ label: "Waiting for a report", at: null });
+    expect(arrivalOf({ status: "FAILED" })).toBeNull();
   });
 });

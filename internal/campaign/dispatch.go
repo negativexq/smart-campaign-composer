@@ -323,9 +323,14 @@ type DeliveryFilter struct {
 	Retried bool
 	// Opened is "yes" or "no" to keep those a provider did or did not report opened.
 	Opened string
-	Limit  int
-	Offset int
+	// Arrival keeps those a provider reported "delivered" or "bounced", or "waiting"
+	// for accepted messages with no report yet.
+	Arrival string
+	Limit   int
+	Offset  int
 }
+
+var arrivals = []string{"delivered", "bounced", "waiting"}
 
 // Delivery is one person on one channel. Contact details stay out of it, since
 // reading the report does not require them.
@@ -341,6 +346,8 @@ type Delivery struct {
 	ProviderMessageID string     `json:"provider_message_id"`
 	NextAttemptAt     time.Time  `json:"next_attempt_at"`
 	SentAt            *time.Time `json:"sent_at"`
+	DeliveredAt       *time.Time `json:"delivered_at"`
+	BouncedAt         *time.Time `json:"bounced_at"`
 	OpenedAt          *time.Time `json:"opened_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 }
@@ -359,6 +366,9 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 	if filter.Opened != "" && filter.Opened != "yes" && filter.Opened != "no" {
 		return nil, ErrUnknownFilter
 	}
+	if filter.Arrival != "" && !slices.Contains(arrivals, filter.Arrival) {
+		return nil, ErrUnknownFilter
+	}
 	if _, err := s.load(ctx, id); err != nil {
 		return nil, err
 	}
@@ -370,16 +380,19 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 
 	rows, err := s.db.Query(ctx, `
 		SELECT d.id::text, d.user_id, u.first_name, d.channel, d.status, d.attempts, last.response_code,
-		       COALESCE(d.last_error, ''), COALESCE(d.provider_message_id, ''), d.next_attempt_at, d.sent_at, opened.occurred_at, d.updated_at
+		       COALESCE(d.last_error, ''), COALESCE(d.provider_message_id, ''), d.next_attempt_at, d.sent_at, arrival.delivered_at, arrival.bounced_at, opened.occurred_at, d.updated_at
 		FROM campaign_deliveries d
 		JOIN users u ON u.id = d.user_id
 		LEFT JOIN delivery_events opened ON opened.delivery_id = d.id AND opened.event_type = 'opened'
+		`+arrivalLateral+`
 		LEFT JOIN LATERAL (
 			SELECT response_code FROM delivery_attempts WHERE delivery_id = d.id ORDER BY id DESC LIMIT 1
 		) last ON true
 		WHERE d.campaign_id = $1 AND ($2 = '' OR d.status = $2) AND ($3 = '' OR d.channel = $3)
 		  AND ($6 = '' OR d.last_error = $6)
 		  AND ($11 = '' OR ($11 = 'yes') = (opened.delivery_id IS NOT NULL))
+		  AND ($12 = '' OR ($12 = 'delivered' AND arrival.delivered_at IS NOT NULL) OR ($12 = 'bounced' AND arrival.bounced_at IS NOT NULL)
+		       OR ($12 = 'waiting' AND d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL))
 		  AND (NOT $7 OR (SELECT count(*) FROM delivery_attempts a WHERE a.delivery_id = d.id) > 1)
 		  AND (($8 = '' AND $9::timestamptz IS NULL AND $10::timestamptz IS NULL) OR EXISTS (
 			SELECT 1 FROM delivery_attempts a
@@ -388,14 +401,14 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 		  ))
 		ORDER BY d.user_id, d.channel
 		LIMIT $4 OFFSET $5`, id, filter.Status, filter.Channel, limit, max(filter.Offset, 0),
-		filter.Reason, filter.Retried, filter.Outcome, filter.From, filter.To, filter.Opened)
+		filter.Reason, filter.Retried, filter.Outcome, filter.From, filter.To, filter.Opened, filter.Arrival)
 	if err != nil {
 		return nil, fmt.Errorf("list deliveries: %w", err)
 	}
 	deliveries, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Delivery, error) {
 		var d Delivery
 		err := row.Scan(&d.ID, &d.UserID, &d.FirstName, &d.Channel, &d.Status, &d.Attempts, &d.ResponseCode,
-			&d.Reason, &d.ProviderMessageID, &d.NextAttemptAt, &d.SentAt, &d.OpenedAt, &d.UpdatedAt)
+			&d.Reason, &d.ProviderMessageID, &d.NextAttemptAt, &d.SentAt, &d.DeliveredAt, &d.BouncedAt, &d.OpenedAt, &d.UpdatedAt)
 		return d, err
 	})
 	if err != nil {

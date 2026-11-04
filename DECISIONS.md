@@ -312,6 +312,17 @@ Where it blocks without need, by choice: words the lists know used in another se
 
 This costs one extra model call per language. Translation quality is checked only on numbers, cities, discounts and links; the wording is for the person approving to read.
 
+## Accepted, delivered and bounced are different answers
+
+A delivery attempt is our call to the provider. An event is the provider telling us later what became of the message. A delivery's status only ever comes from our calls, so `SENT` still means accepted, and arrival is read from `delivery_events`.
+
+- The mock provider reports each accepted message once, a few seconds later, as delivered or bounced. A bounced message never appears in the test inbox, because it reached nobody. `MOCK_BOUNCE_RATE` sets how often.
+- These reports are simulated, and the screens say so. The report shows measured steps (planned, can receive, called, accepted) next to simulated ones (delivered, bounced), and only the second kind depends on the mock. The label is written in the screen rather than read from the event, since the mock is the only sender there is.
+- A bounce wins over a delivered report, as the more specific news. An open proves arrival even if the delivered report was lost.
+- A message whose calls got no answer stays `UNKNOWN` even if the provider later reports it arrived, because our calls did get no answer. It is counted on its own line rather than added to delivered, so each step of the funnel stays part of the one before.
+- A report that never comes leaves the message waiting, and the screen says waiting. The report page stops asking after a minute with no change. The mock loses unsent reports when it restarts, so waiting can be the final answer.
+- A bounce is not retried and does not stop later campaigns from trying that person. A real product would suppress hard bounces; the mock has no hard and soft bounces to tell apart.
+
 ## What was asked and not done is shown
 
 A model can pass over part of a request without breaking any rule, and the screen then looks as if the work was done. Asking the model to admit it is not enough, so there are two sources. The model reports in `not_applied`, and the backend compares the result with the request itself: a refinement that changed neither the rule nor the brief says so, and a number or city named in a request but missing from the result is listed. These are notes, not blockers, because only the person knows whether the outcome is acceptable. Writing or editing that channel again clears its note.

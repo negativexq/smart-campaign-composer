@@ -198,7 +198,11 @@ func TestOpeningAMessageReportsOnceWithItsKey(t *testing.T) {
 	t.Parallel()
 	behavior := rolling(0.9)
 	var events []mockprovider.Event
-	behavior.OnEvent = func(event mockprovider.Event) { events = append(events, event) }
+	behavior.OnEvent = func(event mockprovider.Event) {
+		if event.Event == "opened" {
+			events = append(events, event)
+		}
+	}
 	provider, sender := start(t, behavior)
 	if _, err := sender.Send(context.Background(), mail); err != nil {
 		t.Fatalf("send: %v", err)
@@ -325,5 +329,76 @@ func getJSON(t *testing.T, url string, into any) {
 	defer response.Body.Close()
 	if err := json.NewDecoder(response.Body).Decode(into); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// reports collects arrival reports, which come from their own goroutines.
+func reports(behavior *mockprovider.Behavior) <-chan mockprovider.Event {
+	events := make(chan mockprovider.Event, 8)
+	behavior.OnEvent = func(event mockprovider.Event) { events <- event }
+	return events
+}
+
+func nextReport(t *testing.T, events <-chan mockprovider.Event) mockprovider.Event {
+	t.Helper()
+	select {
+	case event := <-events:
+		return event
+	case <-time.After(5 * time.Second):
+		t.Fatal("no report")
+		return mockprovider.Event{}
+	}
+}
+
+func TestAnAcceptedMessageIsReportedDeliveredOnce(t *testing.T) {
+	t.Parallel()
+	behavior := rolling(0.9)
+	events := reports(&behavior)
+	_, sender := start(t, behavior)
+	for range 2 {
+		if _, err := sender.Send(context.Background(), mail); err != nil {
+			t.Fatalf("send: %v", err)
+		}
+	}
+	event := nextReport(t, events)
+	if event.Event != "delivered" || event.IdempotencyKey != mail.IdempotencyKey || event.OccurredAt.IsZero() {
+		t.Fatalf("event: %+v", event)
+	}
+	select {
+	case extra := <-events:
+		t.Fatalf("a repeated send was reported again: %+v", extra)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestABouncedMessageIsReportedAndNeverReachesTheInbox(t *testing.T) {
+	t.Parallel()
+	behavior := rolling(0.9)
+	behavior.BounceRate = 1
+	events := reports(&behavior)
+	provider, sender := start(t, behavior)
+	if _, err := sender.Send(context.Background(), mail); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if event := nextReport(t, events); event.Event != "bounced" || event.IdempotencyKey != mail.IdempotencyKey {
+		t.Fatalf("event: %+v", event)
+	}
+	if got := provider.Inbox("", "", 10).Messages; len(got) != 0 {
+		t.Fatalf("inbox: %+v", got)
+	}
+}
+
+func TestALostResponseIsStillReported(t *testing.T) {
+	t.Parallel()
+	behavior := rolling(0.25)
+	events := reports(&behavior)
+	_, sender := start(t, behavior)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := sender.Send(ctx, mail); err == nil {
+		t.Fatal("the response should be lost")
+	}
+	if event := nextReport(t, events); event.Event != "delivered" {
+		t.Fatalf("event: %+v", event)
 	}
 }

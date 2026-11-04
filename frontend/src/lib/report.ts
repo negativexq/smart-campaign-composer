@@ -32,9 +32,24 @@ export type DeliveryQuery = {
   to: string;
   retried: boolean;
   opened: "" | "yes" | "no";
+  arrival: "" | "delivered" | "bounced" | "waiting";
 };
 
-export const noFilter = (): DeliveryQuery => ({ status: "", channel: "", reason: "", outcome: "", from: "", to: "", retried: false, opened: "" });
+export const noFilter = (): DeliveryQuery => ({ status: "", channel: "", reason: "", outcome: "", from: "", to: "", retried: false, opened: "", arrival: "" });
+
+export const ARRIVALS: Record<DeliveryQuery["arrival"] & string, string> = {
+  "": "",
+  delivered: "Delivered",
+  bounced: "Bounced",
+  waiting: "Waiting for a report",
+};
+
+/** What the provider says became of an accepted message, if anything yet. */
+export function arrivalOf(row: { status: string; delivered_at?: string | null; bounced_at?: string | null }): { label: string; at: string | null } | null {
+  if (row.bounced_at) return { label: ARRIVALS.bounced, at: row.bounced_at };
+  if (row.delivered_at) return { label: ARRIVALS.delivered, at: row.delivered_at };
+  return row.status === "SENT" ? { label: ARRIVALS.waiting, at: null } : null;
+}
 
 export function isFiltered(query: DeliveryQuery): boolean {
   return Object.values(query).some(Boolean);
@@ -110,6 +125,7 @@ export function describeQuery(query: DeliveryQuery): string {
   if (query.reason) parts.push(`Ended as: ${REASONS[query.reason] ?? query.reason}`);
   if (query.outcome) parts.push(`Had a call: ${OUTCOMES[query.outcome] ?? query.outcome}`);
   if (query.retried) parts.push("Called more than once");
+  if (query.arrival) parts.push(ARRIVALS[query.arrival]);
   if (query.opened) parts.push(query.opened === "yes" ? "Opened or read" : "Not opened yet");
   if (query.from && query.to) parts.push(`Called between ${formatBucket(query.from, 1)} and ${formatBucket(query.to, 1)}`);
   return parts.join(" · ");

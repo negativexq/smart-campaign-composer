@@ -14,6 +14,8 @@ import (
 
 const (
 	eventOpened     = "opened"
+	eventDelivered  = "delivered"
+	eventBounced    = "bounced"
 	webhookAttempts = 5
 	webhookTimeout  = 5 * time.Second
 )

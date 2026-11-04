@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
-import { errorMessage, getReport, type Progress, type Report, type TimelineBucket } from "../api/campaigns";
+import { errorMessage, getReport, type Progress, type Report, type ReportLifecycle, type TimelineBucket } from "../api/campaigns";
 import {
   OUTCOMES,
   REASONS,
@@ -22,24 +22,42 @@ import ValidationNotice from "./ValidationNotice.vue";
 
 // Live updates arrive every second, and this read is heavier than the counters.
 const REFRESH_MS = 5000;
+// Reports come after sending ends, and some may never come, so asking stops in time.
+const MAX_QUIET_CHECKS = 12;
 
 const props = defineProps<{ campaignId: string; progress: Progress; query: DeliveryQuery; refreshKey?: number }>();
-const emit = defineEmits<{ select: [selection: Partial<DeliveryQuery>] }>();
+const emit = defineEmits<{ select: [selection: Partial<DeliveryQuery>]; reported: [] }>();
 
 const report = ref<Report | null>(null);
 const error = ref("");
 const hovered = ref<number | null>(null);
 let lastLoad = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
+let lastReported = -1;
+let quietChecks = 0;
 
 async function load() {
   lastLoad = Date.now();
   try {
     report.value = await getReport(props.campaignId);
     error.value = "";
+    followReports();
   } catch (failure) {
     error.value = errorMessage(failure);
   }
+}
+
+function followReports() {
+  const rows = lifecycle.value;
+  const reported = rows.reduce((sum, row) => sum + row.delivered + row.bounced + row.arrived_unknown, 0);
+  if (reported === lastReported) {
+    quietChecks += 1;
+  } else {
+    if (lastReported >= 0) emit("reported");
+    lastReported = reported;
+    quietChecks = 0;
+  }
+  if (rows.some((row) => row.waiting) && quietChecks < MAX_QUIET_CHECKS) scheduleLoad();
 }
 
 function scheduleLoad() {
@@ -50,6 +68,16 @@ function scheduleLoad() {
 watch(() => props.refreshKey, scheduleLoad);
 onMounted(load);
 onBeforeUnmount(() => clearTimeout(timer));
+
+const lifecycle = computed(() => report.value?.lifecycle ?? []);
+const arrivedUnknown = computed(() => lifecycle.value.reduce((sum, row) => sum + row.arrived_unknown, 0));
+const stepsOf = (row: ReportLifecycle): { key: string; count: number; selection: Partial<DeliveryQuery> }[] => [
+  { key: "accepted", count: row.accepted, selection: { channel: row.channel, status: "SENT" } },
+  { key: "delivered", count: row.delivered, selection: { channel: row.channel, status: "SENT", arrival: "delivered" } },
+  { key: "bounced", count: row.bounced, selection: { channel: row.channel, status: "SENT", arrival: "bounced" } },
+  { key: "waiting", count: row.waiting, selection: { channel: row.channel, arrival: "waiting" } },
+];
+const shareOf = (part: number, whole: number) => (whole ? `${Math.round((part / whole) * 100)}%` : "");
 
 const bars = computed(() => channelBars(props.progress));
 const legend = computed(() => {
@@ -94,6 +122,57 @@ const isPicked = (selection: Partial<DeliveryQuery> | null) => Boolean(selection
 <template>
   <section class="report" aria-label="Delivery report">
     <ValidationNotice v-if="error" tone="error" title="We could not load the report">{{ error }}</ValidationNotice>
+
+    <article v-if="lifecycle.length" class="card chart" data-testid="lifecycle">
+      <header class="chart-head">
+        <div>
+          <h3 class="title">From plan to arrival</h3>
+          <p class="small muted">Up to accepted is what our calls recorded. Delivered and bounced are what the mock provider reports afterwards. They are simulated: nothing reached a real person.</p>
+        </div>
+        <span class="simulated small" data-testid="simulated">Simulated arrival</span>
+      </header>
+      <div class="lifecycle-wrap">
+        <table class="table lifecycle-table">
+          <thead>
+            <tr>
+              <th scope="col">Channel</th>
+              <th scope="col" class="num">Planned</th>
+              <th scope="col" class="num">Can receive</th>
+              <th scope="col" class="num">Called</th>
+              <th scope="col" class="num">Accepted</th>
+              <th scope="col" class="num">Delivered</th>
+              <th scope="col" class="num">Bounced</th>
+              <th scope="col" class="num">Waiting</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in lifecycle" :key="row.channel" :data-testid="`lifecycle-${row.channel}`">
+              <th scope="row">{{ formatChannel(row.channel) }}</th>
+              <td class="num mono">{{ row.planned.toLocaleString("en-US") }}</td>
+              <td class="num mono">{{ row.eligible.toLocaleString("en-US") }}</td>
+              <td class="num mono">{{ row.called.toLocaleString("en-US") }}</td>
+              <td v-for="step in stepsOf(row)" :key="step.key" class="num">
+                <button
+                  class="step mono"
+                  :class="{ 'is-picked': isPicked(step.selection) }"
+                  type="button"
+                  :disabled="!step.count"
+                  :aria-label="`${formatChannel(row.channel)}: ${step.count} ${step.key}. Show these deliveries.`"
+                  :aria-pressed="isPicked(step.selection)"
+                  :data-testid="`step-${row.channel}-${step.key}`"
+                  @click="pick(step.selection)"
+                >{{ step.count.toLocaleString("en-US") }}</button>
+                <span v-if="step.key === 'delivered' && row.accepted" class="muted small share">{{ shareOf(row.delivered, row.accepted) }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-if="arrivedUnknown" class="small muted" data-testid="arrived-unknown">
+        {{ arrivedUnknown.toLocaleString("en-US") }} {{ arrivedUnknown === 1 ? "message" : "messages" }} with no answer to our calls {{ arrivedUnknown === 1 ? "was" : "were" }} reported delivered later.
+        <button class="link small" type="button" data-testid="show-arrived-unknown" @click="pick({ status: 'UNKNOWN', arrival: 'delivered' })">Show them</button>
+      </p>
+    </article>
 
     <article class="card chart" data-testid="channel-chart">
       <header class="chart-head">
@@ -303,6 +382,77 @@ const isPicked = (selection: Partial<DeliveryQuery> | null) => Boolean(selection
 </template>
 
 <style scoped>
+.lifecycle-wrap {
+  overflow-x: auto;
+}
+
+.lifecycle-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.lifecycle-table th,
+.lifecycle-table td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  border-top: 1px solid var(--color-border);
+}
+
+.lifecycle-table thead th {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  border-top: 0;
+}
+
+.lifecycle-table tbody th {
+  font-weight: 500;
+}
+
+.lifecycle-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.simulated {
+  flex: none;
+  padding: 2px var(--space-2);
+  color: var(--color-text-muted);
+  background: var(--color-surface-subtle);
+  border-radius: 6px;
+}
+
+.step {
+  padding: 2px var(--space-1);
+  color: var(--color-primary);
+  font-size: inherit;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.step:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+.step.is-picked {
+  outline: 2px solid var(--color-primary);
+}
+
+.share {
+  margin-left: var(--space-1);
+}
+
+.link {
+  padding: 0;
+  color: var(--color-primary);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
 .report,
 .chart {
   display: grid;

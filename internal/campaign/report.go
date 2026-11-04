@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -54,19 +55,39 @@ type ReportEngagement struct {
 	Opened   int    `json:"opened"`
 }
 
+// ReportLifecycle follows one channel's messages from who was planned to what the
+// provider says became of them. Each step is part of the one before it, except that
+// bounced and waiting together with delivered make up accepted.
+type ReportLifecycle struct {
+	Channel   string `json:"channel"`
+	Planned   int    `json:"planned"`
+	Eligible  int    `json:"eligible"`
+	Called    int    `json:"called"`
+	Accepted  int    `json:"accepted"`
+	Delivered int    `json:"delivered"`
+	Bounced   int    `json:"bounced"`
+	Waiting   int    `json:"waiting"`
+	// ArrivedUnknown had no answer to any call, and the provider later reported them
+	// arrived. Their status stays UNKNOWN because our calls did get no answer.
+	ArrivedUnknown int `json:"arrived_unknown"`
+}
+
 // Report is what the delivery records say about a campaign, beyond its counts.
 type Report struct {
 	Reasons    []ReportReason     `json:"reasons"`
 	Problems   []ReportProblem    `json:"problems"`
 	Timeline   Timeline           `json:"timeline"`
 	Engagement []ReportEngagement `json:"engagement"`
+	Lifecycle  []ReportLifecycle  `json:"lifecycle"`
 }
+
+var deliveryEvents = []string{"delivered", "bounced", "opened"}
 
 // RecordDeliveryEvent stores what a provider reported about a delivery, found by
 // its idempotency key because a delivery with a lost response has no message ID.
 // Only the first report counts, since webhooks repeat.
 func (s *Service) RecordDeliveryEvent(ctx context.Context, key, event string, occurredAt time.Time) error {
-	if event != "opened" {
+	if !slices.Contains(deliveryEvents, event) {
 		return ErrUnknownEvent
 	}
 	var deliveryID, campaignID string
@@ -107,7 +128,45 @@ func (s *Service) Report(ctx context.Context, id string) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	return Report{Reasons: reasons, Problems: problems, Timeline: timeline, Engagement: engagement}, nil
+	lifecycle, err := s.reportLifecycle(ctx, id)
+	if err != nil {
+		return Report{}, err
+	}
+	return Report{Reasons: reasons, Problems: problems, Timeline: timeline, Engagement: engagement, Lifecycle: lifecycle}, nil
+}
+
+// arrivalLateral reads one delivery's arrival. An open proves arrival even if the
+// delivered report was lost, and a bounce is the more specific news, so it wins.
+const arrivalLateral = `LEFT JOIN LATERAL (
+		SELECT max(occurred_at) FILTER (WHERE event_type = 'bounced') AS bounced_at,
+		       CASE WHEN count(*) FILTER (WHERE event_type = 'bounced') = 0
+		            THEN min(occurred_at) FILTER (WHERE event_type IN ('delivered', 'opened')) END AS delivered_at
+		FROM delivery_events WHERE delivery_id = d.id
+	) arrival ON true`
+
+func (s *Service) reportLifecycle(ctx context.Context, id string) ([]ReportLifecycle, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT d.channel, count(*),
+		       count(*) FILTER (WHERE d.status <> 'SKIPPED'),
+		       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM delivery_attempts a WHERE a.delivery_id = d.id)),
+		       count(*) FILTER (WHERE d.status = 'SENT'),
+		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NOT NULL),
+		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.bounced_at IS NOT NULL),
+		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL),
+		       count(*) FILTER (WHERE d.status = 'UNKNOWN' AND arrival.delivered_at IS NOT NULL)
+		FROM campaign_deliveries d
+		`+arrivalLateral+`
+		WHERE d.campaign_id = $1
+		GROUP BY d.channel
+		ORDER BY d.channel DESC`, id)
+	if err != nil {
+		return nil, fmt.Errorf("read report lifecycle: %w", err)
+	}
+	lifecycle, err := pgx.CollectRows(rows, pgx.RowToStructByPos[ReportLifecycle])
+	if err != nil {
+		return nil, fmt.Errorf("read report lifecycle: %w", err)
+	}
+	return lifecycle, nil
 }
 
 func (s *Service) reportEngagement(ctx context.Context, id string) ([]ReportEngagement, error) {

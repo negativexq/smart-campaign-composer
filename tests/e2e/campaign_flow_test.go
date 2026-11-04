@@ -91,12 +91,44 @@ func TestBriefToDeliveredCampaign(t *testing.T) {
 			Status string `json:"status"`
 		}](t, call(t, http.MethodGet, campaign, nil, http.StatusOK))
 		if state.Status == "COMPLETED" || state.Status == "COMPLETED_WITH_FAILURES" {
+			checkEveryAcceptedMessageGetsAReport(t, campaign)
 			checkOpeningAMessageReachesTheReport(t, campaign)
 			return
 		}
 		time.Sleep(time.Second)
 	}
 	t.Fatal("campaign did not finish in time")
+}
+
+// checkEveryAcceptedMessageGetsAReport follows the provider's arrival reports through
+// the signed webhook to the campaign's report, where nothing should stay waiting.
+func checkEveryAcceptedMessageGetsAReport(t *testing.T, campaign string) {
+	t.Helper()
+	var waiting, reported int
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		report := decode[struct {
+			Lifecycle []struct {
+				Accepted  int `json:"accepted"`
+				Delivered int `json:"delivered"`
+				Bounced   int `json:"bounced"`
+				Waiting   int `json:"waiting"`
+			} `json:"lifecycle"`
+		}](t, call(t, http.MethodGet, campaign+"/report", nil, http.StatusOK))
+		waiting, reported = 0, 0
+		for _, channel := range report.Lifecycle {
+			if channel.Delivered+channel.Bounced+channel.Waiting != channel.Accepted {
+				t.Fatalf("the steps do not add up: %+v", channel)
+			}
+			waiting += channel.Waiting
+			reported += channel.Delivered + channel.Bounced
+		}
+		if waiting == 0 && reported > 0 {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("still waiting for %d reports, %d arrived", waiting, reported)
 }
 
 // checkOpeningAMessageReachesTheReport follows a message through the test inbox,

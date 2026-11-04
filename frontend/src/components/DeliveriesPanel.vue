@@ -4,7 +4,7 @@ import { onMounted, ref, watch } from "vue";
 import { errorMessage, getDeliveries, getDeliveryAttempts, type Delivery, type DeliveryAttempt, type Progress } from "../api/campaigns";
 import { DELIVERY_STATUSES, deliveryStatusMeta, type DeliveryStatus } from "../lib/deliveryStatus";
 import { formatDateTime } from "../lib/format";
-import { OUTCOMES, REASONS, describeQuery, isFiltered, matches, noFilter, type DeliveryQuery } from "../lib/report";
+import { ARRIVALS, OUTCOMES, REASONS, arrivalOf, describeQuery, isFiltered, matches, noFilter, type DeliveryQuery } from "../lib/report";
 import DeliveryReport from "./DeliveryReport.vue";
 import StatusBadge from "./StatusBadge.vue";
 import ValidationNotice from "./ValidationNotice.vue";
@@ -83,6 +83,7 @@ onMounted(() => load(PAGE));
       :query="query"
       :refresh-key="refreshKey"
       @select="selectFromChart"
+      @reported="load(Math.max(rows?.length ?? 0, PAGE))"
     />
 
     <div ref="tableStart" class="filters">
@@ -113,6 +114,15 @@ onMounted(() => load(PAGE));
         <select v-model="query.outcome" class="field select" data-testid="filter-outcome" @change="changeFilter">
           <option value="">Any</option>
           <option v-for="item in PROBLEM_OPTIONS" :key="item" :value="item">{{ OUTCOMES[item] }}</option>
+        </select>
+      </label>
+      <label class="filter">
+        <span class="small muted">Arrival</span>
+        <select v-model="query.arrival" class="field select" data-testid="filter-arrival" @change="changeFilter">
+          <option value="">Any</option>
+          <option value="delivered">{{ ARRIVALS.delivered }}</option>
+          <option value="bounced">{{ ARRIVALS.bounced }}</option>
+          <option value="waiting">{{ ARRIVALS.waiting }}</option>
         </select>
       </label>
       <label class="filter">
@@ -147,6 +157,7 @@ onMounted(() => load(PAGE));
             <th scope="col">Status</th>
             <th scope="col" class="num">Attempts</th>
             <th scope="col" class="num">Response</th>
+            <th scope="col">Arrival</th>
             <th scope="col">Opened</th>
             <th scope="col">Note</th>
             <th scope="col"><span class="visually-hidden">History</span></th>
@@ -160,6 +171,7 @@ onMounted(() => load(PAGE));
               <td><StatusBadge :status="row.status as DeliveryStatus" /></td>
               <td class="num mono">{{ row.attempts }}</td>
               <td class="num mono">{{ row.response_code ?? "—" }}</td>
+              <td class="small" data-testid="delivery-arrival">{{ arrivalOf(row)?.label ?? "—" }}</td>
               <td class="small" data-testid="delivery-opened">{{ row.opened_at ? formatDateTime(row.opened_at) : "—" }}</td>
               <td class="small muted note">{{ REASONS[row.reason] ?? "" }}</td>
               <td>
@@ -169,7 +181,7 @@ onMounted(() => load(PAGE));
               </td>
             </tr>
             <tr v-if="openId === row.id" class="history">
-              <td colspan="8">
+              <td colspan="9">
                 <p v-if="!attempts[row.id]" class="muted small">Loading...</p>
                 <p v-else-if="!attempts[row.id].length" class="muted small">No calls to the provider yet.</p>
                 <ol v-else class="attempts" data-testid="attempt-list">
@@ -177,6 +189,11 @@ onMounted(() => load(PAGE));
                     <span class="mono">{{ attempt.response_code ?? "—" }}</span>
                     <span>{{ OUTCOMES[attempt.outcome] ?? attempt.outcome }}</span>
                     <span class="muted">{{ formatDateTime(attempt.occurred_at) }}</span>
+                  </li>
+                  <li v-if="arrivalOf(row)?.at" class="small" data-testid="attempt-arrival">
+                    <span class="mono">—</span>
+                    <span>{{ arrivalOf(row)?.label }} (simulated report)</span>
+                    <span class="muted">{{ formatDateTime(arrivalOf(row)?.at ?? "") }}</span>
                   </li>
                 </ol>
               </td>

@@ -63,6 +63,8 @@ export type Delivery = {
   next_attempt_at: string;
   sent_at: string | null;
   updated_at: string;
+  delivered_at?: string | null;
+  bounced_at?: string | null;
   opened_at?: string | null;
 };
 
@@ -278,11 +280,24 @@ export type TimelineBucket = {
   timeout: number;
 };
 
+export type ReportLifecycle = {
+  channel: string;
+  planned: number;
+  eligible: number;
+  called: number;
+  accepted: number;
+  delivered: number;
+  bounced: number;
+  waiting: number;
+  arrived_unknown: number;
+};
+
 export type Report = {
   reasons: { reason: string; deliveries: number }[];
   problems: { outcome: string; deliveries: number; attempts: number }[];
   timeline: { bucket_seconds: number; buckets: TimelineBucket[] };
   engagement: { channel: string; accepted: number; opened: number }[];
+  lifecycle?: ReportLifecycle[];
 };
 
 export async function getReport(id: string): Promise<Report> {

@@ -43,6 +43,7 @@ func behaviorFromEnv() mockprovider.Behavior {
 		"MOCK_RATE_LIMIT_RATE":    &behavior.RateLimitRate,
 		"MOCK_SERVER_ERROR_RATE":  &behavior.ServerErrorRate,
 		"MOCK_LOST_RESPONSE_RATE": &behavior.LostResponseRate,
+		"MOCK_BOUNCE_RATE":        &behavior.BounceRate,
 	} {
 		value := os.Getenv(name)
 		if value == "" {

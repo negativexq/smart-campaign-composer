@@ -388,6 +388,7 @@ describe("campaign page after approval", () => {
         "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [row] } },
         "GET /api/campaigns/c1/deliveries?limit=100&status=SENT&channel=sms": { body: { deliveries: [row] } },
         "GET /api/campaigns/c1/deliveries?limit=100&outcome=rate_limited": { body: { deliveries: [] } },
+        "GET /api/campaigns/c1/deliveries?limit=100&status=SENT&channel=sms&arrival=bounced": { body: { deliveries: [{ ...row, bounced_at: "2026-11-03T12:00:05Z" }] } },
         "GET /api/campaigns/c1/deliveries?limit=100&reason=server_error": { body: { deliveries: [] } },
         "GET /api/campaigns/c1/deliveries?limit=100&channel=sms&opened=yes": { body: { deliveries: [{ ...row, opened_at: "2026-11-03T12:05:00Z" }] } },
         "GET /api/campaigns/c1/deliveries?limit=100&status=SENT&channel=email&opened=no": { body: { deliveries: [row] } },
@@ -465,6 +466,20 @@ describe("campaign page after approval", () => {
       await flushPromises();
       expect(asked(fetchMock, "status=SENT&channel=email&opened=no")).toBe(1);
       expect(wrapper.find("[data-testid=delivery-opened]").text()).toBe("—");
+    });
+
+    it("follows messages to arrival, calls it simulated and lists who bounced", async () => {
+      const lifecycle = [{ channel: "sms", planned: 20, eligible: 15, called: 15, accepted: 10, delivered: 8, bounced: 2, waiting: 0, arrived_unknown: 1 }];
+      const { wrapper, fetchMock } = await openReport({ ...report, lifecycle });
+      expect(wrapper.find("[data-testid=simulated]").text()).toBe("Simulated arrival");
+      expect(wrapper.find("[data-testid=lifecycle-sms]").text()).toContain("80%");
+      expect(wrapper.find("[data-testid=arrived-unknown]").text()).toContain("1 message");
+      expect(wrapper.find("[data-testid=step-sms-waiting]").attributes("disabled")).toBeDefined();
+
+      await wrapper.find("[data-testid=step-sms-bounced]").trigger("click");
+      await flushPromises();
+      expect(asked(fetchMock, "status=SENT&channel=sms&arrival=bounced")).toBe(1);
+      expect(wrapper.find("[data-testid=active-filter]").text()).toContain("Bounced");
     });
 
     it("offers the time chart as a table of the periods with calls", async () => {

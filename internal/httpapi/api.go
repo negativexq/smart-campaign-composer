@@ -430,7 +430,7 @@ func (a *api) deliveries(w http.ResponseWriter, r *http.Request) {
 	}
 	deliveries, err := a.campaigns.Deliveries(r.Context(), r.PathValue("id"), campaign.DeliveryFilter{
 		Status: query.Get("status"), Channel: query.Get("channel"), Reason: query.Get("reason"), Outcome: query.Get("outcome"),
-		From: from, To: to, Retried: query.Get("retried") == "true", Opened: query.Get("opened"), Limit: limit, Offset: offset,
+		From: from, To: to, Retried: query.Get("retried") == "true", Opened: query.Get("opened"), Arrival: query.Get("arrival"), Limit: limit, Offset: offset,
 	})
 	if err != nil {
 		writeError(w, r, err)

@@ -28,9 +28,15 @@ type Behavior struct {
 	RateLimitRate    float64
 	ServerErrorRate  float64
 	LostResponseRate float64
-	RetryAfterSecs   int
-	MinDelay         time.Duration
-	MaxDelay         time.Duration
+	// BounceRate is the share of accepted messages that later fail to arrive. It only
+	// applies with OnEvent set, since a bounce nobody hears about means nothing.
+	BounceRate     float64
+	RetryAfterSecs int
+	MinDelay       time.Duration
+	MaxDelay       time.Duration
+	// ReportMinDelay and ReportMaxDelay are how long an arrival report takes.
+	ReportMinDelay time.Duration
+	ReportMaxDelay time.Duration
 	// InboxSize is how many messages the test inbox keeps; the default is 5,000.
 	InboxSize int
 	// OnEvent receives what the provider reports after accepting a message.
@@ -45,9 +51,12 @@ func DefaultBehavior() Behavior {
 		RateLimitRate:    0.02,
 		ServerErrorRate:  0.03,
 		LostResponseRate: 0.002,
+		BounceRate:       0.03,
 		RetryAfterSecs:   1,
 		MinDelay:         10 * time.Millisecond,
 		MaxDelay:         60 * time.Millisecond,
+		ReportMinDelay:   time.Second,
+		ReportMaxDelay:   5 * time.Second,
 	}
 }
 
@@ -199,7 +208,12 @@ func (s *Server) accept(message request, key string) (string, bool) {
 	id := "mock_" + cryptorand.Text()
 	s.accepted[key] = id
 	stats.Accepted++
-	s.inbox.add(key, id, message)
+	// A bounced message reached nobody, so there is nothing to find in the inbox.
+	bounced := s.behavior.OnEvent != nil && s.behavior.Roll() < s.behavior.BounceRate
+	if !bounced {
+		s.inbox.add(key, id, message)
+	}
+	s.reportArrival(Event{Event: arrivalEvent(bounced), Channel: channel, MessageID: id, IdempotencyKey: key})
 
 	now := time.Now()
 	recent := append(s.recent[channel], now)
@@ -210,6 +224,30 @@ func (s *Server) accept(message request, key string) (string, bool) {
 	s.recent[channel] = recent[first:]
 	stats.PeakPerSecond = max(stats.PeakPerSecond, len(s.recent[channel]))
 	return id, false
+}
+
+func arrivalEvent(bounced bool) string {
+	if bounced {
+		return eventBounced
+	}
+	return eventDelivered
+}
+
+// reportArrival tells the sender what became of a message some time after accepting
+// it, as a real gateway does. A lost response does not stop it, because the message
+// got through whether or not the caller heard.
+func (s *Server) reportArrival(event Event) {
+	if s.behavior.OnEvent == nil {
+		return
+	}
+	delay := s.behavior.ReportMinDelay
+	if spread := s.behavior.ReportMaxDelay - s.behavior.ReportMinDelay; spread > 0 {
+		delay += rand.N(spread)
+	}
+	time.AfterFunc(delay, func() {
+		event.OccurredAt = time.Now().UTC()
+		s.behavior.OnEvent(event)
+	})
 }
 
 func (s *Server) count(channel string, change func(*ChannelStats)) {
