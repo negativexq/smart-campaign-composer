@@ -642,7 +642,8 @@ func (g *Generation) validate(ctx context.Context, output []byte, offerSource st
 			err = &content.ValidationError{Issues: issues}
 		}
 	}
-	if err == nil {
+	// Only an instruction can go undone. Without one, a note answers nothing anyone asked.
+	if err == nil && g.instruction != "" {
 		g.reported = content.ReportedNotApplied(output)
 	}
 	var invalid *content.ValidationError

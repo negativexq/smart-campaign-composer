@@ -878,6 +878,29 @@ func TestAnInstructionTheModelSkippedIsShown(t *testing.T) {
 	}
 }
 
+func TestAModelNoteIsNotShownWhenNothingWasAskedOfIt(t *testing.T) {
+	t.Parallel()
+	const note = `"not_applied":["A Turkish version was not provided"],`
+	h, _, id := newContentHarness(t,
+		step{output: strings.Replace(validContent, "{", "{"+note, 1)},
+		step{output: `{` + note + `"sms":"Hello {{first_name}}"}`})
+	view, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	notDone := func(w content.Issue) bool { return w.Reason == "not_applied" }
+	if slices.ContainsFunc(view.ContentWarnings, notDone) {
+		t.Fatalf("first generation: %+v", view.ContentWarnings)
+	}
+	view, _, err = run(t, h, id, campaign.GenerateInput{Channel: "sms"})
+	if err != nil {
+		t.Fatalf("again: %v", err)
+	}
+	if slices.ContainsFunc(view.ContentWarnings, notDone) {
+		t.Fatalf("second generation: %+v", view.ContentWarnings)
+	}
+}
+
 func TestEachLanguageInTheAudienceGetsItsOwnVersion(t *testing.T) {
 	t.Parallel()
 	h, provider, id := newContentHarness(t, step{output: validContent})
