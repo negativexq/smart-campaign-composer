@@ -2,7 +2,6 @@ package delivery_test
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"sync"
 	"testing"
@@ -27,53 +26,78 @@ func TestLimiterHoldsTheRateAcrossWorkers(t *testing.T) {
 	)
 	for range 3 { // three workers sharing one limit
 		limiter := delivery.NewRedisLimiter(client, limit, prefix)
-		for range limit {
-			wg.Go(func() {
-				if _, err := limiter.Wait(context.Background(), "sms"); err != nil {
-					t.Errorf("wait: %v", err)
+		wg.Go(func() {
+			for got := 0; got < limit; {
+				permits, err := limiter.Reserve(context.Background(), "sms", 3)
+				if err != nil {
+					t.Errorf("reserve: %v", err)
 					return
 				}
+				now := time.Now()
 				mu.Lock()
-				grants = append(grants, time.Now())
+				for range permits.Granted {
+					grants = append(grants, now)
+				}
 				mu.Unlock()
-			})
-		}
+				got += permits.Granted
+				time.Sleep(permits.Retry)
+			}
+		})
 	}
 	wg.Wait()
 
 	slices.SortFunc(grants, func(a, b time.Time) int { return a.Compare(b) })
-	// Times are taken after the grant returns, so allow for some scheduling noise.
+	// Times are taken after the grant returns, so this leaves room for scheduling
+	// noise, and the margin above a full second is what keeps the limit at the provider.
 	for i := limit; i < len(grants); i++ {
-		if span := grants[i].Sub(grants[i-limit]); span < 900*time.Millisecond {
+		if span := grants[i].Sub(grants[i-limit]); span < time.Second {
 			t.Fatalf("%d sends in %v", limit+1, span)
 		}
+	}
+}
+
+func TestLimiterGrantsOnlyWhatFits(t *testing.T) {
+	t.Parallel()
+	limiter := delivery.NewRedisLimiter(testsupport.NewRedis(t), 5, testsupport.Unique(t))
+	ctx := context.Background()
+	first, err := limiter.Reserve(ctx, "sms", 3)
+	if err != nil || first.Granted != 3 {
+		t.Fatalf("first: %+v, %v", first, err)
+	}
+	second, err := limiter.Reserve(ctx, "sms", 3)
+	if err != nil || second.Granted != 2 {
+		t.Fatalf("second: %+v, %v", second, err)
+	}
+	third, err := limiter.Reserve(ctx, "sms", 3)
+	if err != nil || third.Granted != 0 || third.Retry <= 0 || third.Paused {
+		t.Fatalf("third: %+v, %v", third, err)
+	}
+}
+
+func TestReleasedPermitsCanBeGrantedAgain(t *testing.T) {
+	t.Parallel()
+	limiter := delivery.NewRedisLimiter(testsupport.NewRedis(t), 5, testsupport.Unique(t))
+	ctx := context.Background()
+	if _, err := limiter.Reserve(ctx, "sms", 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := limiter.Release(ctx, "sms", 2); err != nil {
+		t.Fatal(err)
+	}
+	permits, err := limiter.Reserve(ctx, "sms", 5)
+	if err != nil || permits.Granted != 2 {
+		t.Fatalf("permits: %+v, %v", permits, err)
 	}
 }
 
 func TestLimiterKeepsChannelsApart(t *testing.T) {
 	t.Parallel()
 	limiter := delivery.NewRedisLimiter(testsupport.NewRedis(t), 1, testsupport.Unique(t))
-	start := time.Now()
 	for _, channel := range []string{"sms", "email"} {
-		if _, err := limiter.Wait(context.Background(), channel); err != nil {
-			t.Fatalf("wait: %v", err)
+		permits, err := limiter.Reserve(context.Background(), channel, 1)
+		if err != nil || permits.Granted != 1 {
+			t.Fatalf("%s: %+v, %v", channel, permits, err)
 		}
-	}
-	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
-		t.Fatalf("email waited for SMS: %v", elapsed)
-	}
-}
-
-func TestLimiterStopsWhenCancelled(t *testing.T) {
-	t.Parallel()
-	limiter := delivery.NewRedisLimiter(testsupport.NewRedis(t), 1, testsupport.Unique(t))
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	if _, err := limiter.Wait(ctx, "sms"); err != nil {
-		t.Fatalf("first: %v", err)
-	}
-	if _, err := limiter.Wait(ctx, "sms"); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("got %v", err)
 	}
 }
 
@@ -81,7 +105,7 @@ func TestLimiterFailsWhenRedisIsDown(t *testing.T) {
 	t.Parallel()
 	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", MaxRetries: -1})
 	defer client.Close()
-	if _, err := delivery.NewRedisLimiter(client, 10, "x").Wait(context.Background(), "sms"); err == nil {
+	if _, err := delivery.NewRedisLimiter(client, 10, "x").Reserve(context.Background(), "sms", 1); err == nil {
 		t.Fatal("no limiter must mean no permission to send")
 	}
 }
@@ -96,22 +120,15 @@ func TestPauseHoldsEveryWorkerOnThatChannelOnly(t *testing.T) {
 	if err := first.Pause(ctx, "sms", 300*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	waited, err := second.Wait(ctx, "sms")
+	permits, err := second.Reserve(ctx, "sms", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if waited < 200*time.Millisecond {
-		t.Fatalf("another worker waited only %v", waited)
+	if permits.Granted != 0 || !permits.Paused || permits.Retry < 200*time.Millisecond {
+		t.Fatalf("another worker got %+v", permits)
 	}
-	start := time.Now()
-	if err := first.Pause(ctx, "sms", 300*time.Millisecond); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := second.Wait(ctx, "email"); err != nil {
-		t.Fatal(err)
-	}
-	if elapsed := time.Since(start); elapsed > 150*time.Millisecond {
-		t.Fatalf("email was held for %v", elapsed)
+	if permits, err := second.Reserve(ctx, "email", 1); err != nil || permits.Granted != 1 {
+		t.Fatalf("email: %+v, %v", permits, err)
 	}
 }
 
@@ -128,8 +145,8 @@ func TestAPauseIsNotShortenedAndHasACeiling(t *testing.T) {
 	if err := limiter.Pause(ctx, "sms", time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	if waited, err := limiter.Wait(ctx, "sms"); err != nil || waited < 300*time.Millisecond {
-		t.Fatalf("waited %v, err %v", waited, err)
+	if permits, err := limiter.Reserve(ctx, "sms", 1); err != nil || permits.Retry < 300*time.Millisecond {
+		t.Fatalf("permits %+v, err %v", permits, err)
 	}
 
 	// A provider asking for a day must not stop every campaign for a day.

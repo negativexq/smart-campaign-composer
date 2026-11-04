@@ -13,7 +13,13 @@ import (
 	"time"
 )
 
-const defaultRetryAfter = time.Second
+const (
+	defaultRetryAfter = time.Second
+	// idleConnections keeps a connection for every call a worker makes at once. Go's
+	// default of 2 opens a new one for nearly every call, whose delay varies enough
+	// to bunch calls up on the way to the provider.
+	idleConnections = 64
+)
 
 // HTTPSender calls the provider over HTTP.
 type HTTPSender struct {
@@ -23,7 +29,10 @@ type HTTPSender struct {
 
 // NewHTTPSender builds a sender for the provider at baseURL.
 func NewHTTPSender(baseURL string) *HTTPSender {
-	return &HTTPSender{strings.TrimRight(baseURL, "/"), &http.Client{}}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConns = idleConnections
+	transport.MaxIdleConnsPerHost = idleConnections
+	return &HTTPSender{strings.TrimRight(baseURL, "/"), &http.Client{Transport: transport}}
 }
 
 // Send makes one call. A non-2xx response is a result, not an error; an error

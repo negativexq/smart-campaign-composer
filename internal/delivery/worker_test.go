@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,8 +50,11 @@ func always(result delivery.Result, err error) func(int, delivery.Message) (deli
 }
 
 type fakeLimiter struct {
-	mu       sync.Mutex
-	waits    map[string]int
+	mu sync.Mutex
+	// permits is how many were granted and not given back, per channel.
+	permits map[string]int
+	// answer overrides granting everything asked for.
+	answer   func(channel string, want int) delivery.Permits
 	err      error
 	pauses   map[string]time.Duration
 	pauseErr error
@@ -66,14 +70,28 @@ func (f *fakeLimiter) Pause(_ context.Context, channel string, length time.Durat
 	return f.pauseErr
 }
 
-func (f *fakeLimiter) Wait(_ context.Context, channel string) (time.Duration, error) {
+func (f *fakeLimiter) Reserve(_ context.Context, channel string, want int) (delivery.Permits, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.waits == nil {
-		f.waits = map[string]int{}
+	if f.err != nil {
+		return delivery.Permits{}, f.err
 	}
-	f.waits[channel]++
-	return 0, f.err
+	answer := delivery.Permits{Granted: want}
+	if f.answer != nil {
+		answer = f.answer(channel, want)
+	}
+	if f.permits == nil {
+		f.permits = map[string]int{}
+	}
+	f.permits[channel] += answer.Granted
+	return answer, nil
+}
+
+func (f *fakeLimiter) Release(_ context.Context, channel string, count int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.permits[channel] -= count
+	return nil
 }
 
 type rig struct {
@@ -496,8 +514,8 @@ func TestEverySendPassesTheLimiter(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.drain(t)
-	if r.limiter.waits["sms"] != view.Audience.SMS || r.limiter.waits["email"] != view.Audience.Email {
-		t.Fatalf("waits: %v, audience: %+v", r.limiter.waits, view.Audience)
+	if r.limiter.permits["sms"] != view.Audience.SMS || r.limiter.permits["email"] != view.Audience.Email {
+		t.Fatalf("permits: %v, audience: %+v", r.limiter.permits, view.Audience)
 	}
 }
 
@@ -510,14 +528,14 @@ func TestNoLimiterMeansNoSending(t *testing.T) {
 		BatchSize: 100, Concurrency: 8, Lease: time.Minute, MaxAttempts: 3, SendTimeout: time.Second,
 		Backoff: func(int) time.Duration { return 0 },
 	})
-	if _, err := r.worker.ProcessBatch(context.Background()); err != nil {
-		t.Fatal(err)
+	if _, err := r.worker.ProcessBatch(context.Background()); err == nil {
+		t.Fatal("the limiter being down must be reported")
 	}
 	if len(r.sender.calls) != 0 {
 		t.Fatalf("calls: %d", len(r.sender.calls))
 	}
-	if got := r.statuses(t); got["RETRYING"] != queued || got["SENDING"] != 0 {
-		t.Fatalf("statuses: %v", got)
+	if got := r.statuses(t); got["QUEUED"] != queued || got["SENDING"] != 0 {
+		t.Fatalf("nothing should have been claimed: %v", got)
 	}
 	var attempts int
 	if err := r.pool.QueryRow(context.Background(), `SELECT COALESCE(sum(attempts), 0) FROM campaign_deliveries`).Scan(&attempts); err != nil {
@@ -915,5 +933,245 @@ func TestEachPersonReadsTheirSideOfATest(t *testing.T) {
 		if texts["B"][body] {
 			t.Fatalf("both sides read: %s", body)
 		}
+	}
+}
+
+// A call that gets no answer takes up one slot until it times out. Everything else
+// must keep going around it, or one lost response stops the whole queue.
+func TestACallThatGetsNoAnswerDoesNotHoldUpTheOthers(t *testing.T) {
+	t.Parallel()
+	release := make(chan struct{})
+	var once sync.Once
+	r := newRig(t, func(int, delivery.Message) (delivery.Result, error) {
+		blocked := false
+		once.Do(func() { blocked = true })
+		if blocked {
+			<-release
+		}
+		return accepted, nil
+	})
+	queued := r.queuedCount(t)
+	if queued <= 8 {
+		t.Fatalf("need more deliveries than one round holds, have %d", queued)
+	}
+	worker := delivery.New(r.pool, r.sender, r.limiter, r.metrics, noop.NewTracerProvider().Tracer("test"), delivery.Config{
+		BatchSize: 4, Concurrency: 4, Lease: time.Minute, MaxAttempts: 3, SendTimeout: time.Minute,
+		Backoff: func(int) time.Duration { return 0 },
+	})
+
+	ctx, stop := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() { stopped <- worker.Run(ctx) }()
+	defer func() {
+		stop()
+		close(release)
+		if err := <-stopped; err != nil {
+			t.Errorf("run: %v", err)
+		}
+		if got := r.statuses(t); got["SENDING"] != 0 {
+			t.Errorf("left in flight: %v", got)
+		}
+	}()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if r.statuses(t)["SENT"] == queued-1 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("the others did not finish: %v", r.statuses(t))
+}
+
+func TestRunStaysWithinItsConcurrency(t *testing.T) {
+	t.Parallel()
+	const limit = 3
+	var (
+		mu      sync.Mutex
+		running = map[string]int{}
+		worst   int
+	)
+	r := newRig(t, func(_ int, message delivery.Message) (delivery.Result, error) {
+		mu.Lock()
+		running[message.Channel]++
+		worst = max(worst, running[message.Channel])
+		mu.Unlock()
+		time.Sleep(5 * time.Millisecond)
+		mu.Lock()
+		running[message.Channel]--
+		mu.Unlock()
+		return accepted, nil
+	})
+	queued := r.queuedCount(t)
+	worker := delivery.New(r.pool, r.sender, r.limiter, r.metrics, noop.NewTracerProvider().Tracer("test"), delivery.Config{
+		BatchSize: 50, Concurrency: limit, Lease: time.Minute, MaxAttempts: 3, SendTimeout: time.Minute,
+		Backoff: func(int) time.Duration { return 0 },
+	})
+
+	ctx, stop := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() { stopped <- worker.Run(ctx) }()
+	deadline := time.Now().Add(30 * time.Second)
+	for r.statuses(t)["SENT"] < queued && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	stop()
+	if err := <-stopped; err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := r.statuses(t)["SENT"]; got != queued {
+		t.Fatalf("sent %d of %d", got, queued)
+	}
+	if worst > limit {
+		t.Fatalf("%d calls at once on a channel, limit %d", worst, limit)
+	}
+}
+
+// Overview counts calls per channel from the attempts alone.
+func TestAttemptsCarryTheirDeliverysChannel(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.drain(t)
+	if _, err := r.pool.Exec(context.Background(), `
+		UPDATE campaign_deliveries SET status = 'SENDING', lease_expires_at = now() - interval '1 minute'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.worker.RecoverExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var total, wrong int
+	if err := r.pool.QueryRow(context.Background(), `
+		SELECT count(*), count(*) FILTER (WHERE a.channel <> d.channel)
+		FROM delivery_attempts a JOIN campaign_deliveries d ON d.id = a.delivery_id`).Scan(&total, &wrong); err != nil {
+		t.Fatal(err)
+	}
+	if total == 0 || wrong != 0 {
+		t.Fatalf("attempts %d, on the wrong channel %d", total, wrong)
+	}
+}
+
+// A channel with no permission claims nothing: its deliveries hold no slots and no
+// leases, and the other channel carries on as if it were not there.
+func TestAPausedChannelDoesNotHoldUpTheOther(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.limiter.answer = func(channel string, want int) delivery.Permits {
+		if channel == "email" {
+			return delivery.Permits{Retry: 10 * time.Millisecond, Paused: true}
+		}
+		return delivery.Permits{Granted: want}
+	}
+	count := func(channel, status string) int {
+		var n int
+		if err := r.pool.QueryRow(context.Background(), `SELECT count(*) FROM campaign_deliveries WHERE channel = $1 AND status = $2`, channel, status).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	sms, email := count("sms", "QUEUED"), count("email", "QUEUED")
+	if sms == 0 || email == 0 {
+		t.Fatalf("need both channels: sms %d, email %d", sms, email)
+	}
+
+	ctx, stop := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() { stopped <- r.worker.Run(ctx) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for count("sms", "SENT") < sms && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	stop()
+	if err := <-stopped; err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := count("sms", "SENT"); got != sms {
+		t.Fatalf("sms sent %d of %d", got, sms)
+	}
+	if got := count("email", "QUEUED"); got != email {
+		t.Fatalf("email should wait unclaimed: %d of %d queued", got, email)
+	}
+}
+
+func TestClaimsNoMoreThanItHasPermission(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.limiter.answer = func(string, int) delivery.Permits { return delivery.Permits{Granted: 2} }
+	claimed, err := r.worker.ProcessBatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed != 4 || len(r.sender.calls) != 4 {
+		t.Fatalf("claimed %d, calls %d, want 2 per channel", claimed, len(r.sender.calls))
+	}
+}
+
+func TestPermitsNotNeededAreGivenBack(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.drain(t)
+	calls := map[string]int{}
+	for _, message := range r.sender.calls {
+		calls[message.Channel]++
+	}
+	for _, channel := range []string{"sms", "email"} {
+		if r.limiter.permits[channel] != calls[channel] {
+			t.Fatalf("%s kept %d permits for %d calls", channel, r.limiter.permits[channel], calls[channel])
+		}
+	}
+}
+
+// A provider answering 5xx for a while says nothing about the messages, so they must
+// not use up their attempts on it, however long it lasts.
+func TestAnOutageOfServerErrorsIsWaitedOut(t *testing.T) {
+	t.Parallel()
+	var down atomic.Bool
+	down.Store(true)
+	r := newRig(t, func(int, delivery.Message) (delivery.Result, error) {
+		if down.Load() {
+			return delivery.Result{StatusCode: http.StatusBadGateway}, nil
+		}
+		return accepted, nil
+	})
+	queued := r.queuedCount(t)
+	worker := delivery.New(r.pool, r.sender, r.limiter, r.metrics, noop.NewTracerProvider().Tracer("test"), delivery.Config{
+		BatchSize: 50, Concurrency: 4, Lease: time.Minute, MaxAttempts: r.maxTries, SendTimeout: time.Second,
+		Backoff: func(int) time.Duration { return 0 },
+		Breaker: delivery.BreakerConfig{Window: 10 * time.Second, MinCalls: 3, FailureRatio: 0.5, FirstWait: 10 * time.Millisecond, MaxWait: 40 * time.Millisecond, Probes: 2},
+	})
+	attempts := func() int {
+		var n int
+		if err := r.pool.QueryRow(context.Background(), `SELECT COALESCE(sum(attempts), 0) FROM campaign_deliveries`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	ctx, stop := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() { stopped <- worker.Run(ctx) }()
+	defer func() {
+		stop()
+		if err := <-stopped; err != nil {
+			t.Errorf("run: %v", err)
+		}
+	}()
+
+	time.Sleep(300 * time.Millisecond) // long enough to have tripped on both channels
+	before := attempts()
+	time.Sleep(500 * time.Millisecond) // several probes go out and fail
+	if got := attempts(); got != before {
+		t.Errorf("attempts went from %d to %d during the outage", before, got)
+	}
+	if got := r.statuses(t); got["FAILED"] != 0 || got["UNKNOWN"] != 0 {
+		t.Fatalf("messages were given up on during an outage: %v", got)
+	}
+
+	down.Store(false)
+	deadline := time.Now().Add(10 * time.Second)
+	for r.statuses(t)["SENT"] < queued && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := r.statuses(t); got["SENT"] != queued {
+		t.Fatalf("after the outage: %v, want %d sent", got, queued)
 	}
 }

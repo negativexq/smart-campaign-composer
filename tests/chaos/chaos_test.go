@@ -18,6 +18,7 @@ import (
 )
 
 const (
+	rateLimit   = 100
 	apiURL      = "http://localhost:8081"
 	providerURL = "http://localhost:8083"
 	brief       = "Send a reminder to users in Istanbul who added a product to their cart in the last 30 days and did not buy."
@@ -163,20 +164,28 @@ func waitForEnd(t *testing.T, id string, within time.Duration) progress {
 	return progress{}
 }
 
-func accepted(t *testing.T) int {
+type channelStats struct {
+	Accepted      int `json:"accepted"`
+	PeakPerSecond int `json:"peak_per_second"`
+}
+
+func providerStats(t *testing.T) map[string]channelStats {
 	t.Helper()
 	status, data, err := request(http.MethodGet, providerURL+"/v1/stats", nil)
 	if err != nil || status != http.StatusOK {
 		t.Fatalf("provider stats: %d %v", status, err)
 	}
-	var stats map[string]struct {
-		Accepted int `json:"accepted"`
-	}
+	var stats map[string]channelStats
 	if err := json.Unmarshal(data, &stats); err != nil {
 		t.Fatalf("provider stats: %v: %s", err, data)
 	}
+	return stats
+}
+
+func accepted(t *testing.T) int {
+	t.Helper()
 	total := 0
-	for _, channel := range stats {
+	for _, channel := range providerStats(t) {
 		total += channel.Accepted
 	}
 	return total
@@ -199,6 +208,12 @@ func checkEveryMessageEnded(t *testing.T, result progress, before int) {
 	// An UNKNOWN may or may not have reached the provider. Nothing else may differ.
 	if got < sent || got > sent+unknown {
 		t.Errorf("provider accepted %d distinct messages, records say %d sent and %d unknown", got, sent, unknown)
+	}
+	// Restarts and retries must not push the rate past the limit, as the provider counts it.
+	for name, channel := range providerStats(t) {
+		if channel.PeakPerSecond > rateLimit {
+			t.Errorf("%s reached the provider at %d a second, limit %d", name, channel.PeakPerSecond, rateLimit)
+		}
 	}
 	t.Logf("result: %v, provider accepted %d", result.ByStatus, got)
 }

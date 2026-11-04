@@ -44,20 +44,35 @@ const (
 	reasonNotSent      = "provider_unreachable"
 
 	recoverBatch       = 500
-	limiterPause       = time.Second
 	notSentPause       = 5 * time.Second
 	recordTimeout      = 5 * time.Second
 	defaultSendTimeout = 5 * time.Second
 	finishInterval     = time.Second
 	idlePause          = 200 * time.Millisecond
-	errorPause         = 2 * time.Second
+	// claimGap lets a few slots free up before the next claim, so a busy worker
+	// takes several deliveries per query instead of running one per finished call.
+	claimGap   = 20 * time.Millisecond
+	errorPause = 2 * time.Second
 )
+
+// channels is every channel the worker sends on.
+var channels = []string{"sms", "email"}
 
 // MaxDrain is the longest a worker can take to stop once told to: a claim already
 // under way, then one provider call that gets no answer, pausing the channel and
 // recording the outcome. Whatever runs the worker must wait longer than this, or
 // messages stay in flight until their lease expires.
 const MaxDrain = recordTimeout + defaultSendTimeout + recordTimeout + recordTimeout
+
+// BreakerConfig says when a channel stops calling its provider.
+type BreakerConfig struct {
+	Window       time.Duration
+	MinCalls     int
+	FailureRatio float64
+	FirstWait    time.Duration
+	MaxWait      time.Duration
+	Probes       int
+}
 
 // Message is one rendered message for the provider.
 type Message struct {
@@ -83,9 +98,21 @@ type Sender interface {
 	Send(ctx context.Context, message Message) (Result, error)
 }
 
-// Limiter grants permission to send on a channel.
+// Permits is a limiter's answer. With none granted, Retry says when asking again
+// can help, and Paused says the channel is resting after a provider's answer rather
+// than at its limit.
+type Permits struct {
+	Granted int
+	Retry   time.Duration
+	Paused  bool
+}
+
+// Limiter hands out permission to send on a channel.
 type Limiter interface {
-	Wait(ctx context.Context, channel string) (time.Duration, error)
+	// Reserve grants up to want sends. An error means there is no permission to send.
+	Reserve(ctx context.Context, channel string, want int) (Permits, error)
+	// Release gives back permits that turned out not to be needed.
+	Release(ctx context.Context, channel string, count int) error
 	Pause(ctx context.Context, channel string, length time.Duration) error
 }
 
@@ -94,12 +121,15 @@ var ErrNotSent = errors.New("message was not sent")
 
 // Config tunes a worker.
 type Config struct {
-	BatchSize   int
+	BatchSize int
+	// Concurrency is how many calls each channel makes at once.
 	Concurrency int
 	Lease       time.Duration
 	MaxAttempts int
 	SendTimeout time.Duration
 	Backoff     func(attempt int) time.Duration
+	// Breaker stops calling a provider that is failing. Without MinCalls it is off.
+	Breaker BreakerConfig
 	// Unsubscribe gives the signed link for a person's emails.
 	Unsubscribe func(userID int64) string
 }
@@ -113,6 +143,9 @@ func DefaultConfig() Config {
 		MaxAttempts: 5,
 		SendTimeout: defaultSendTimeout,
 		Backoff:     ExponentialBackoff,
+		// Failures as usual stay far below half the calls, and twenty calls keep a
+		// short bad patch from stopping a channel.
+		Breaker: BreakerConfig{Window: 10 * time.Second, MinCalls: 20, FailureRatio: 0.5, FirstWait: 5 * time.Second, MaxWait: maxPause, Probes: 3},
 	}
 }
 
@@ -131,11 +164,17 @@ type Worker struct {
 	metrics *telemetry.Metrics
 	tracer  trace.Tracer
 	config  Config
+	// breakers holds one per channel, as their providers fail separately.
+	breakers map[string]*breaker
 }
 
 // New builds a worker.
 func New(db *pgxpool.Pool, sender Sender, limiter Limiter, metrics *telemetry.Metrics, tracer trace.Tracer, config Config) *Worker {
-	return &Worker{db, sender, limiter, metrics, tracer, config}
+	breakers := map[string]*breaker{}
+	for _, channel := range channels {
+		breakers[channel] = newBreaker(config.Breaker, time.Now)
+	}
+	return &Worker{db, sender, limiter, metrics, tracer, config, breakers}
 }
 
 // Run works until ctx ends, then lets calls in progress finish and be recorded.
@@ -144,22 +183,131 @@ func (w *Worker) Run(ctx context.Context) error {
 	housekeeping.Go(func() { w.runHousekeeping(ctx) })
 	defer housekeeping.Wait()
 
+	// Each channel has its own loop and slots, so one that is resting or slow costs
+	// the other nothing.
+	var channelLoops sync.WaitGroup
+	for _, channel := range channels {
+		channelLoops.Go(func() { w.runChannel(ctx, channel) })
+	}
+	channelLoops.Wait()
+	return nil
+}
+
+// runChannel refills each slot as soon as its call ends. Waiting for a whole round
+// instead would let one call with no answer stop the rest until it times out.
+func (w *Worker) runChannel(ctx context.Context, channel string) {
+	concurrency := max(w.config.Concurrency, 1)
+	slots := make(chan struct{}, concurrency)
+	for range concurrency {
+		slots <- struct{}{}
+	}
+	var sending sync.WaitGroup
+	defer sending.Wait()
+
 	for ctx.Err() == nil {
-		claimed, err := w.ProcessBatch(ctx)
-		pause := time.Duration(0)
-		switch {
-		case err != nil && ctx.Err() == nil:
-			slog.ErrorContext(ctx, "process deliveries", "error", err)
-			pause = errorPause
-		case claimed == 0:
-			pause = idlePause
+		free := takeFreeSlots(ctx, slots)
+		if free == 0 {
+			return
+		}
+		claims, pause, err := w.takeDue(ctx, channel, min(free, max(w.config.BatchSize, 1)))
+		if err != nil && ctx.Err() == nil {
+			slog.ErrorContext(ctx, "process deliveries", "channel", channel, "error", err)
+		}
+		for range free - len(claims) {
+			slots <- struct{}{}
+		}
+		for _, item := range claims {
+			sending.Go(func() {
+				defer func() { slots <- struct{}{} }()
+				w.handleLogged(ctx, item)
+			})
 		}
 		select {
 		case <-ctx.Done():
 		case <-time.After(pause):
 		}
 	}
-	return nil
+}
+
+// takeDue claims deliveries only after getting permission to send them. Claiming
+// first would leave them waiting for the limiter, holding slots and running down
+// their leases, until another worker could take them and send them a second time.
+// The duration says how long to wait before trying again.
+func (w *Worker) takeDue(ctx context.Context, channel string, want int) ([]claim, time.Duration, error) {
+	breaker := w.breakers[channel]
+	allowed, retry, probing := breaker.allow(want)
+	if allowed == 0 {
+		return nil, retry, nil
+	}
+	permits, err := w.limiter.Reserve(ctx, channel, allowed)
+	if err != nil {
+		breaker.giveBack(allowed)
+		return nil, errorPause, err
+	}
+	if permits.Granted == 0 {
+		breaker.giveBack(allowed)
+		w.recordHold(ctx, channel, permits)
+		return nil, permits.Retry, nil
+	}
+	claims, err := w.claim(ctx, channel, permits.Granted)
+	breaker.giveBack(allowed - len(claims))
+	w.giveBack(ctx, channel, permits.Granted-len(claims))
+	for i := range claims {
+		claims[i].probe = probing
+	}
+	switch {
+	case err != nil:
+		return nil, errorPause, err
+	case len(claims) == 0:
+		return nil, idlePause, nil
+	}
+	return claims, 0, nil
+}
+
+// giveBack keeps an idle queue from using up the channel's rate. Failing to only
+// delays the next sends slightly, so it stops nothing.
+func (w *Worker) giveBack(ctx context.Context, channel string, count int) {
+	if count <= 0 {
+		return
+	}
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+	defer cancel()
+	if err := w.limiter.Release(releaseCtx, channel, count); err != nil {
+		slog.WarnContext(ctx, "release permits", "channel", channel, "error", err)
+	}
+}
+
+func (w *Worker) recordHold(ctx context.Context, channel string, permits Permits) {
+	w.metrics.DeliveryRateLimitWait.WithLabelValues(channel).Observe(permits.Retry.Seconds())
+	now := time.Now()
+	_, span := w.tracer.Start(ctx, "delivery.limit", trace.WithTimestamp(now), trace.WithAttributes(
+		attribute.String("delivery.channel", channel),
+		attribute.Bool("delivery.limit.paused", permits.Paused),
+	))
+	span.End(trace.WithTimestamp(now.Add(permits.Retry)))
+}
+
+// takeFreeSlots waits for a free slot, gives others a moment to free up and takes
+// them all. It returns 0 only when ctx ends.
+func takeFreeSlots(ctx context.Context, slots chan struct{}) int {
+	select {
+	case <-ctx.Done():
+		return 0
+	case <-slots:
+	}
+	free := 1
+	select {
+	case <-ctx.Done():
+	case <-time.After(claimGap):
+	}
+	for {
+		select {
+		case <-slots:
+			free++
+		default:
+			return free
+		}
+	}
 }
 
 func (w *Worker) runHousekeeping(ctx context.Context) {
@@ -190,14 +338,22 @@ type claim struct {
 	traceContext                        *string
 	firstName, email, phone             string
 	consented                           bool
-	content                             content.Content
+	// probe marks a call testing whether a failing provider is back.
+	probe   bool
+	content content.Content
 }
 
-// ProcessBatch claims what is due and handles it, returning how many it claimed.
+// ProcessBatch takes one batch per channel and waits for all of it, returning how
+// many it claimed. Run does not work this way; this is for stepping through a queue.
 func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
-	claims, err := w.claim(ctx)
-	if err != nil {
-		return 0, err
+	var (
+		claims []claim
+		failed error
+	)
+	for _, channel := range channels {
+		taken, _, err := w.takeDue(ctx, channel, w.config.BatchSize)
+		claims = append(claims, taken...)
+		failed = errors.Join(failed, err)
 	}
 	var (
 		wg    sync.WaitGroup
@@ -207,18 +363,23 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 		slots <- struct{}{}
 		wg.Go(func() {
 			defer func() { <-slots }()
-			if err := w.handle(ctx, item); err != nil {
-				slog.ErrorContext(ctx, "record delivery", "delivery_id", item.id, "error", err)
-			}
+			w.handleLogged(ctx, item)
 		})
 	}
 	wg.Wait()
-	return len(claims), nil
+	return len(claims), failed
+}
+
+func (w *Worker) handleLogged(ctx context.Context, item claim) {
+	if err := w.handle(ctx, item); err != nil {
+		slog.ErrorContext(ctx, "record delivery", "delivery_id", item.id, "error", err)
+	}
 }
 
 // claim outlives a shutdown: giving up on a claim the database has already
 // committed would strand those rows as SENDING until their lease expires.
-func (w *Worker) claim(ctx context.Context) ([]claim, error) {
+func (w *Worker) claim(ctx context.Context, channel string, limit int) ([]claim, error) {
+	started := time.Now()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
 	defer cancel()
 	rows, err := w.db.Query(ctx, `
@@ -228,7 +389,7 @@ func (w *Worker) claim(ctx context.Context) ([]claim, error) {
 			-- A subquery rather than a join: with one campaign sending, a join makes the
 			-- planner fetch and sort its whole queue to take a few rows, which took 700 ms
 			-- with a million waiting. This way it reads the claimable index in order.
-			WHERE d.status IN ('QUEUED', 'RETRYING') AND d.next_attempt_at <= now()
+			WHERE d.channel = $3 AND d.status IN ('QUEUED', 'RETRYING') AND d.next_attempt_at <= now()
 			  AND (SELECT c.status FROM campaigns c WHERE c.id = d.campaign_id) = 'DISPATCHING'
 			ORDER BY d.next_attempt_at
 			LIMIT $1
@@ -241,7 +402,7 @@ func (w *Worker) claim(ctx context.Context) ([]claim, error) {
 		RETURNING d.id::text, d.claim_token::text, d.campaign_id::text, d.channel, d.idempotency_key, d.user_id, d.attempts, d.trace_context,
 		          u.first_name, u.email, u.phone, u.language, COALESCE(d.variant, ''),
 		          COALESCE((SELECT allowed FROM consents WHERE user_id = d.user_id AND channel = d.channel), false),
-		          v.content`, w.config.BatchSize, w.config.Lease.Seconds())
+		          v.content`, limit, w.config.Lease.Seconds(), channel)
 	if err != nil {
 		return nil, fmt.Errorf("claim deliveries: %w", err)
 	}
@@ -265,6 +426,11 @@ func (w *Worker) claim(ctx context.Context) ([]claim, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claim deliveries: %w", err)
+	}
+	// Only claims that found work: an idle worker polls several times a second.
+	if len(claims) > 0 {
+		_, span := w.tracer.Start(ctx, "delivery.claim", trace.WithTimestamp(started), trace.WithAttributes(attribute.Int("delivery.claimed", len(claims))))
+		span.End()
 	}
 	return claims, nil
 }
@@ -296,34 +462,33 @@ func (w *Worker) handle(ctx context.Context, item claim) (err error) {
 	}()
 
 	if !item.consented {
+		w.breakers[item.channel].giveBack(1)
 		span.SetAttributes(attribute.String("delivery.outcome", "consent_withdrawn"))
 		return w.record(ctx, item, update{status: statusSkipped, attempts: item.attempts, reason: "consent_withdrawn"}, nil)
 	}
 
-	limitCtx, limitSpan := w.tracer.Start(ctx, "delivery.limit")
-	waited, err := w.limiter.Wait(limitCtx, item.channel)
-	limitSpan.End()
-	w.metrics.DeliveryRateLimitWait.WithLabelValues(item.channel).Observe(waited.Seconds())
+	message, err := item.message(w.unsubscribeURL(item))
 	if err != nil {
-		// Nothing was sent, so this costs no attempt.
-		if ctx.Err() == nil {
-			slog.WarnContext(ctx, "no permission to send", "channel", item.channel, "error", err)
-		}
-		return w.record(ctx, item, update{status: statusRetrying, attempts: item.attempts, retryIn: limiterPause, reason: "rate_limiter_unavailable"}, nil)
+		w.breakers[item.channel].giveBack(1)
+		slog.ErrorContext(ctx, "render message", "delivery_id", item.id, "error", err)
+		return w.recordNotSent(ctx, span, item)
 	}
 
-	result, sendErr := w.send(ctx, item)
+	result, sendErr := w.send(ctx, item, message)
 	if errors.Is(sendErr, ErrNotSent) {
-		// Certain that nothing went out, so this costs no attempt and the campaign
-		// can wait out a provider outage instead of using up its retries.
-		span.SetAttributes(attribute.String("delivery.outcome", reasonNotSent))
-		w.metrics.DeliveryAttempts.WithLabelValues(item.channel, reasonNotSent).Inc()
-		w.pause(ctx, item.channel, notSentPause)
-		return w.record(ctx, item, update{status: statusRetrying, attempts: item.attempts, retryIn: notSentPause, reason: reasonNotSent}, nil)
+		w.noteBreaker(ctx, item.channel, true)
+		return w.recordNotSent(ctx, span, item)
 	}
 	outcome, code := classify(result, sendErr)
 	span.SetAttributes(attribute.String("delivery.outcome", outcome))
 	w.metrics.DeliveryAttempts.WithLabelValues(item.channel, outcome).Inc()
+	switch outcome {
+	case outcomeRateLimited:
+		// "Not now" says nothing about whether the provider is healthy.
+		w.breakers[item.channel].giveBack(1)
+	default:
+		w.noteBreaker(ctx, item.channel, outcome == outcomeServerError || outcome == outcomeTimeout)
+	}
 	if result.Duplicate {
 		w.metrics.DeliveryDuplicates.WithLabelValues(item.channel).Inc()
 	}
@@ -349,6 +514,31 @@ func (w *Worker) handle(ctx context.Context, item claim) (err error) {
 	return w.record(ctx, item, next, &attemptRow{number, code, outcome, attemptError})
 }
 
+// noteBreaker gives the breaker a call's result and acts on what it decides.
+func (w *Worker) noteBreaker(ctx context.Context, channel string, failed bool) {
+	hold, closed := w.breakers[channel].record(failed)
+	switch {
+	case hold > 0:
+		w.metrics.DeliveryCircuitOpen.WithLabelValues(channel).Set(1)
+		w.metrics.DeliveryCircuitTrips.WithLabelValues(channel).Inc()
+		slog.WarnContext(ctx, "provider is failing, holding the channel", "channel", channel, "hold", hold)
+		// This tells other workers; this one is held by its breaker either way.
+		w.pause(ctx, channel, hold)
+	case closed:
+		w.metrics.DeliveryCircuitOpen.WithLabelValues(channel).Set(0)
+		slog.InfoContext(ctx, "provider is back, channel resumes", "channel", channel)
+	}
+}
+
+// recordNotSent is for when nothing went out for certain, so it costs no attempt
+// and the campaign can wait out a provider outage instead of using up its retries.
+func (w *Worker) recordNotSent(ctx context.Context, span trace.Span, item claim) error {
+	span.SetAttributes(attribute.String("delivery.outcome", reasonNotSent))
+	w.metrics.DeliveryAttempts.WithLabelValues(item.channel, reasonNotSent).Inc()
+	w.pause(ctx, item.channel, notSentPause)
+	return w.record(ctx, item, update{status: statusRetrying, attempts: item.attempts, retryIn: notSentPause, reason: reasonNotSent}, nil)
+}
+
 // pause tells every worker to hold a channel. Failing to do so only means more
 // calls get a 429, so it must not stop the outcome from being recorded.
 func (w *Worker) pause(ctx context.Context, channel string, length time.Duration) {
@@ -365,6 +555,7 @@ func (w *Worker) startSpan(ctx context.Context, item claim) (context.Context, tr
 		attribute.String("delivery.id", item.id),
 		attribute.String("delivery.channel", item.channel),
 		attribute.Int("delivery.attempt", item.attempts+1),
+		attribute.Bool("delivery.probe", item.probe),
 	)}
 	if item.traceContext != nil {
 		parent := propagation.TraceContext{}.Extract(context.Background(), propagation.MapCarrier{"traceparent": *item.traceContext})
@@ -374,16 +565,12 @@ func (w *Worker) startSpan(ctx context.Context, item claim) (context.Context, tr
 }
 
 // send outlives a shutdown: stopping halfway would leave the outcome unknown.
-func (w *Worker) send(ctx context.Context, item claim) (Result, error) {
+func (w *Worker) send(ctx context.Context, item claim, message Message) (Result, error) {
 	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.config.SendTimeout)
 	defer cancel()
 	callCtx, span := w.tracer.Start(callCtx, "delivery.provider")
 	defer span.End()
 
-	message, err := item.message(w.unsubscribeURL(item))
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrNotSent, err)
-	}
 	start := time.Now()
 	result, err := w.sender.Send(callCtx, message)
 	w.metrics.DeliveryDuration.WithLabelValues(item.channel).Observe(time.Since(start).Seconds())
@@ -441,6 +628,10 @@ func (w *Worker) nextStep(ctx context.Context, item claim, outcome string, resul
 	case outcomeRejected:
 		return update{status: statusFailed, attempts: used, reason: outcome}, nil
 	}
+	if item.probe {
+		// A failed probe says the provider is still down, nothing about this message.
+		return update{status: statusRetrying, attempts: item.attempts, retryIn: w.config.Backoff(used), reason: outcome}, nil
+	}
 	if used < w.config.MaxAttempts {
 		return update{status: statusRetrying, attempts: used, retryIn: w.config.Backoff(used), reason: outcome}, nil
 	}
@@ -465,6 +656,8 @@ func (w *Worker) nextStep(ctx context.Context, item claim, outcome string, resul
 func (w *Worker) record(ctx context.Context, item claim, next update, attempt *attemptRow) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
 	defer cancel()
+	ctx, span := w.tracer.Start(ctx, "delivery.record")
+	defer span.End()
 	tx, err := w.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin record: %w", err)
@@ -487,8 +680,8 @@ func (w *Worker) record(ctx context.Context, item claim, next update, attempt *a
 		return nil
 	}
 	if attempt != nil {
-		if _, err := tx.Exec(ctx, `INSERT INTO delivery_attempts (delivery_id, campaign_id, attempt, response_code, outcome, error) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))`,
-			item.id, item.campaignID, attempt.number, attempt.code, attempt.outcome, attempt.err); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO delivery_attempts (delivery_id, campaign_id, channel, attempt, response_code, outcome, error) VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''))`,
+			item.id, item.campaignID, item.channel, attempt.number, attempt.code, attempt.outcome, attempt.err); err != nil {
 			return fmt.Errorf("record attempt: %w", err)
 		}
 	}
@@ -520,8 +713,8 @@ func (w *Worker) RecoverExpired(ctx context.Context) (int, error) {
 			WHERE d.id = expired.id
 			RETURNING d.id, d.campaign_id, d.attempts, d.channel
 		), recorded AS (
-			INSERT INTO delivery_attempts (delivery_id, campaign_id, attempt, outcome, error)
-			SELECT id, campaign_id, attempts, $4, 'worker stopped before recording an outcome' FROM recovered
+			INSERT INTO delivery_attempts (delivery_id, campaign_id, channel, attempt, outcome, error)
+			SELECT id, campaign_id, channel, attempts, $4, 'worker stopped before recording an outcome' FROM recovered
 		)
 		SELECT channel, count(*) FROM recovered GROUP BY channel`,
 		recoverBatch, w.config.MaxAttempts, reasonLeaseExpired, outcomeTimeout)

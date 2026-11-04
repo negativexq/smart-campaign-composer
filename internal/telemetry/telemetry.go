@@ -44,6 +44,8 @@ type Metrics struct {
 	DeliveryRetries       *prometheus.CounterVec
 	DeliveryRecovered     *prometheus.CounterVec
 	DeliveryRateLimitWait *prometheus.HistogramVec
+	DeliveryCircuitOpen   *prometheus.GaugeVec
+	DeliveryCircuitTrips  *prometheus.CounterVec
 }
 
 // NewMetrics registers the series on registerer.
@@ -108,8 +110,16 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 		}, []string{"channel", "reason"}),
 		DeliveryRateLimitWait: factory.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "campaign_delivery_rate_limit_wait_seconds",
-			Help:    "Time spent waiting for the shared rate limit before a send.",
+			Help:    "How long a channel was told to wait each time the shared rate limit had nothing to grant.",
 			Buckets: []float64{0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5},
+		}, []string{"channel"}),
+		DeliveryCircuitOpen: factory.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "campaign_delivery_circuit_open",
+			Help: "1 while a channel has stopped calling a failing provider.",
+		}, []string{"channel"}),
+		DeliveryCircuitTrips: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "campaign_delivery_circuit_trips_total",
+			Help: "Times a channel stopped calling a failing provider.",
 		}, []string{"channel"}),
 	}
 }

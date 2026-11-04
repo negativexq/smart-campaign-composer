@@ -45,8 +45,8 @@ func sentCampaign(t *testing.T) (*harness, string, map[string]string) {
 			t.Fatal(err)
 		}
 		if _, err := h.pool.Exec(ctx, `
-			INSERT INTO delivery_attempts (delivery_id, campaign_id, attempt, outcome, occurred_at)
-			VALUES ($1, $2, $3, $4, $5)`, named[key], id, number, outcome, start.Add(offset)); err != nil {
+			INSERT INTO delivery_attempts (delivery_id, campaign_id, channel, attempt, outcome, occurred_at)
+			SELECT $1, $2, channel, $3, $4, $5 FROM campaign_deliveries WHERE id = $1`, named[key], id, number, outcome, start.Add(offset)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -120,8 +120,8 @@ func TestReportTimelineWidensBucketsForALongSend(t *testing.T) {
 	h, id, named := sentCampaign(t)
 	// A repeating campaign can run for weeks; the chart must stay readable.
 	if _, err := h.pool.Exec(context.Background(), `
-		INSERT INTO delivery_attempts (delivery_id, campaign_id, attempt, outcome, occurred_at)
-		VALUES ($1, $2, 9, 'accepted', $3::timestamptz + interval '30 days')`, named["accepted"], id, reportStart); err != nil {
+		INSERT INTO delivery_attempts (delivery_id, campaign_id, channel, attempt, outcome, occurred_at)
+		SELECT $1, $2, channel, 9, 'accepted', $3::timestamptz + interval '30 days' FROM campaign_deliveries WHERE id = $1`, named["accepted"], id, reportStart); err != nil {
 		t.Fatal(err)
 	}
 	report, err := h.service.Report(context.Background(), id)

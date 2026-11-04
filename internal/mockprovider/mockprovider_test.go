@@ -111,3 +111,19 @@ func TestMeasuresThePeakRate(t *testing.T) {
 		t.Fatalf("peak: %d", got)
 	}
 }
+
+func TestThePeakRateCountsCallsThatWereNotAccepted(t *testing.T) {
+	t.Parallel()
+	provider, sender := start(t, rolling(0))
+	for i := range 3 {
+		message := sms
+		message.IdempotencyKey = string(rune('a' + i))
+		if _, err := sender.Send(context.Background(), message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stats := provider.Stats()["sms"]
+	if stats.Accepted != 0 || stats.PeakPerSecond != 3 {
+		t.Fatalf("stats: %+v", stats)
+	}
+}

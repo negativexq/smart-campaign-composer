@@ -350,3 +350,19 @@ A model can pass over part of a request without breaking any rule, and the scree
 ## A stop has a budget
 
 A stopped worker finishes what it holds, and the slowest case is a provider call that never answers. Docker kills after 10 seconds by default, and `delivery.MaxDrain` is 20, so such a call could be killed mid-way. Nothing was lost, since the lease recovers it, but a graceful stop was not graceful. The budget is now a named constant, the worker service waits 30 seconds, and a test fails if the two drift apart. A platform that waits less falls back on the lease, which stays the guarantee for real kills.
+
+## Permission comes before a claim
+
+The worker asks the rate limiter how many sends it may make, then claims exactly that many, one loop and one set of slots per channel. It used to claim first and wait for the limiter with the claim in hand. A channel paused by a 429 then filled the shared slots and blocked the other channel, and a long wait could outlast the lease, so another worker could take the same message. Now a channel with no permission holds nothing. A slot also refills as soon as its call ends, because waiting for a whole batch let one call with no answer stop every other message for 5 seconds.
+
+## The limit is enforced a little early
+
+A limit of 100 a second means 100 as the provider counts them. Calls granted exactly a second apart can land within one second, since each reaches the provider a varying few milliseconds later, and measured on arrival this let through up to 117. The limiter therefore counts over 1.1 seconds, which costs about 9% of the rate: at most 91 a second per channel. This holds while that delay stays under 100 ms, and needs measuring again against a real provider.
+
+## A failing provider costs messages nothing
+
+Five attempts last under 20 seconds, so a provider answering 5xx for a minute would use up the attempts of every message tried in that time, for a problem that is not theirs. Per channel, when at least 20 calls in 10 seconds include 50% failures, the breaker stops calling, and messages stay queued without being claimed. After 5 seconds, doubling up to 30, three probes go out. They cost no attempt, and if all three pass the channel resumes. Usual failures of a few percent stay far below the threshold, and each worker counts its own calls.
+
+## Retrying depends on the provider's idempotency
+
+A call with no answer may have gone through, so a retry is only safe if the provider recognises the repeat. The mock does, by idempotency key. Real ones may not: Twilio documents sending an SMS as not idempotent, and Amazon SES warns that a retry can produce a second email. Connecting one of those means choosing per provider: where repeats are not recognised, a timeout or 5xx ends as `UNKNOWN` rather than being retried, trading a possibly missed message for no double one. That is not built, since only the mock exists today.

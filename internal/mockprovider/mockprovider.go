@@ -137,6 +137,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown channel"})
 		return
 	}
+	s.arrived(message.Channel)
 	key := r.Header.Get("Idempotency-Key")
 	problem := message.problem()
 	if key == "" {
@@ -215,6 +216,14 @@ func (s *Server) accept(message request, key string) (string, bool) {
 	}
 	s.reportArrival(Event{Event: arrivalEvent(bounced), Channel: channel, MessageID: id, IdempotencyKey: key})
 
+	return id, false
+}
+
+// arrived measures the rate as a provider enforces it: every call counts, whatever
+// its answer, from the moment it comes in.
+func (s *Server) arrived(channel string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	now := time.Now()
 	recent := append(s.recent[channel], now)
 	first := 0
@@ -222,8 +231,8 @@ func (s *Server) accept(message request, key string) (string, bool) {
 		first++
 	}
 	s.recent[channel] = recent[first:]
+	stats := s.stats[channel]
 	stats.PeakPerSecond = max(stats.PeakPerSecond, len(s.recent[channel]))
-	return id, false
 }
 
 func arrivalEvent(bounced bool) string {

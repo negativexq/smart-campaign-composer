@@ -242,14 +242,14 @@ func (s *Service) queryActivity(ctx context.Context, id *pgtype.UUID, limit int)
 func (s *Service) channelUse(ctx context.Context) ([]ChannelUse, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT ch.channel, $2::text,
-		       (SELECT a.occurred_at FROM delivery_attempts a JOIN campaign_deliveries d ON d.id = a.delivery_id
-		        WHERE d.channel = ch.channel AND a.outcome = 'accepted' ORDER BY a.occurred_at DESC LIMIT 1),
+		       (SELECT a.occurred_at FROM delivery_attempts a
+		        WHERE a.channel = ch.channel AND a.outcome = 'accepted' ORDER BY a.occurred_at DESC LIMIT 1),
 		       recent.calls, recent.not_accepted
 		FROM unnest($1::text[]) AS ch (channel)
 		CROSS JOIN LATERAL (
 			SELECT count(*) AS calls, count(*) FILTER (WHERE a.outcome <> 'accepted') AS not_accepted
-			FROM delivery_attempts a JOIN campaign_deliveries d ON d.id = a.delivery_id
-			WHERE d.channel = ch.channel AND a.occurred_at >= $3
+			FROM delivery_attempts a
+			WHERE a.channel = ch.channel AND a.occurred_at >= $3
 		) recent`, channels, mockProviderName, s.now().Add(-time.Hour))
 	if err != nil {
 		return nil, fmt.Errorf("channel use: %w", err)
