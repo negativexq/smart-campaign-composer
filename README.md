@@ -32,8 +32,8 @@ The report follows each message from plan to arrival, separates provider accepta
 
 ## How sending behaves
 
-- **Rate:** each channel stays at or below 100 messages per second. A Redis sliding window gives permission before a message is claimed from the PostgreSQL queue, and one channel's backlog or outage does not hold up the other.
-- **No duplicates:** there is one delivery per campaign, recipient and channel, and retries reuse one idempotency key, so the provider accepts a message only once.
+- **Rate:** each channel stays at or below 100 messages per second across all workers. A Redis sliding window gives permission before a message is claimed from the PostgreSQL queue, and each send counts from when it goes out. One channel's backlog or outage does not hold up the other.
+- **No duplicates:** there is one delivery per campaign, recipient and channel, and every retry reuses its idempotency key. Rejecting a repeat is then up to the provider remembering that key. The mock keeps its keys in memory, so a provider restart between a lost response and its retry could accept a message twice. The chaos tests do not cover that case.
 - **Retries:** failed calls back off with jitter. A 429 pauses the channel without using up an attempt. A call with no answer may have gone through, so a message that runs out of attempts after one ends as `UNKNOWN` instead of failed.
 - **Outages:** a circuit breaker holds a failing channel and tests it with a few probes, which cost messages no attempts. Messages left in flight by a crashed worker are taken back through their leases.
 

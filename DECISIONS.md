@@ -359,6 +359,10 @@ The worker asks the rate limiter how many sends it may make, then claims exactly
 
 A limit of 100 a second means 100 as the provider counts them. Calls granted exactly a second apart can land within one second, since each reaches the provider a varying few milliseconds later, and measured on arrival this let through up to 117. The limiter therefore counts over 1.1 seconds, which costs about 9% of the rate: at most 91 a second per channel. This holds while that delay stays under 100 ms, and needs measuring again against a real provider.
 
+## A permit counts from when it is used and belongs to its reservation
+
+A permit is granted before the claim, so a slow claim sends it late, where it can land in the same second as permits granted after it. Giving back unused permits by taking the newest also could not tell whose they were: a worker stalled past the window would erase sends another worker had made, and the limit would be exceeded by that many. So after claiming, a worker settles its own reservation in one Redis call: unused permits go back and used ones are counted from that moment. If a stall outlasted the window and others filled it, only what still fits is confirmed, and the rest of the claim returns to the queue without using an attempt. Settling costs one more call to Redis per batch.
+
 ## A failing provider costs messages nothing
 
 Five attempts last under 20 seconds, so a provider answering 5xx for a minute would use up the attempts of every message tried in that time, for a problem that is not theirs. Per channel, when at least 20 calls in 10 seconds include 50% failures, the breaker stops calling, and messages stay queued without being claimed. After 5 seconds, doubling up to 30, three probes go out. They cost no attempt, and if all three pass the channel resumes. Usual failures of a few percent stay far below the threshold, and each worker counts its own calls.

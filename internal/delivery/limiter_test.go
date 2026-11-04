@@ -2,6 +2,7 @@ package delivery_test
 
 import (
 	"context"
+	"math/rand/v2"
 	"slices"
 	"sync"
 	"testing"
@@ -74,19 +75,157 @@ func TestLimiterGrantsOnlyWhatFits(t *testing.T) {
 	}
 }
 
-func TestReleasedPermitsCanBeGrantedAgain(t *testing.T) {
+func TestUnusedPermitsCanBeGrantedAgain(t *testing.T) {
 	t.Parallel()
 	limiter := delivery.NewRedisLimiter(testsupport.NewRedis(t), 5, testsupport.Unique(t))
 	ctx := context.Background()
-	if _, err := limiter.Reserve(ctx, "sms", 5); err != nil {
+	reserved, err := limiter.Reserve(ctx, "sms", 5)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := limiter.Release(ctx, "sms", 2); err != nil {
-		t.Fatal(err)
+	if confirmed, err := limiter.Settle(ctx, "sms", reserved, 3); err != nil || confirmed != 3 {
+		t.Fatalf("confirmed: %d, %v", confirmed, err)
 	}
 	permits, err := limiter.Reserve(ctx, "sms", 5)
 	if err != nil || permits.Granted != 2 {
 		t.Fatalf("permits: %+v, %v", permits, err)
+	}
+}
+
+// A worker whose claim stalled past the window has nothing left to give back. Taking
+// the newest permits instead would erase sends another worker really made.
+func TestSettlingCannotEraseAnotherWorkersPermits(t *testing.T) {
+	t.Parallel()
+	const limit = 10
+	client := testsupport.NewRedis(t)
+	prefix := testsupport.Unique(t)
+	stalled := delivery.NewRedisLimiter(client, limit, prefix)
+	other := delivery.NewRedisLimiter(client, limit, prefix)
+	ctx := context.Background()
+
+	reserved, err := stalled.Reserve(ctx, "sms", limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1200 * time.Millisecond)
+	if permits, err := other.Reserve(ctx, "sms", limit); err != nil || permits.Granted != limit {
+		t.Fatalf("other worker: %+v, %v", permits, err)
+	}
+	if _, err := stalled.Settle(ctx, "sms", reserved, 0); err != nil {
+		t.Fatal(err)
+	}
+	if permits, err := other.Reserve(ctx, "sms", limit); err != nil || permits.Granted != 0 {
+		t.Fatalf("the other worker's sends were forgotten: %+v, %v", permits, err)
+	}
+}
+
+// A send counts from when it goes out, not from when its permit was granted, or a
+// slow claim lets it land in the same second as permits granted after it.
+func TestPermitsCountFromWhenTheyAreUsed(t *testing.T) {
+	t.Parallel()
+	const limit = 10
+	limiter := delivery.NewRedisLimiter(testsupport.NewRedis(t), limit, testsupport.Unique(t))
+	ctx := context.Background()
+	reserved, err := limiter.Reserve(ctx, "sms", limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(800 * time.Millisecond)
+	if _, err := limiter.Settle(ctx, "sms", reserved, limit); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if permits, err := limiter.Reserve(ctx, "sms", limit); err != nil || permits.Granted != 0 {
+		t.Fatalf("sends 500 ms old were not counted: %+v, %v", permits, err)
+	}
+}
+
+// A permit that expired during a claim is only good if the window still has room.
+func TestAnExpiredPermitIsNotConfirmedOverTheLimit(t *testing.T) {
+	t.Parallel()
+	const limit = 10
+	client := testsupport.NewRedis(t)
+	prefix := testsupport.Unique(t)
+	stalled := delivery.NewRedisLimiter(client, limit, prefix)
+	other := delivery.NewRedisLimiter(client, limit, prefix)
+	ctx := context.Background()
+
+	reserved, err := stalled.Reserve(ctx, "sms", limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1200 * time.Millisecond)
+	if _, err := other.Reserve(ctx, "sms", 7); err != nil {
+		t.Fatal(err)
+	}
+	if confirmed, err := stalled.Settle(ctx, "sms", reserved, limit); err != nil || confirmed != 3 {
+		t.Fatalf("confirmed: %d, %v", confirmed, err)
+	}
+}
+
+// Workers overlap and some claims stall, yet what the provider receives holds to the
+// limit in every second. Times are taken just before the simulated call.
+func TestProviderNeverSeesMoreThanTheLimitAcrossWorkers(t *testing.T) {
+	t.Parallel()
+	const (
+		limit    = 100
+		duration = 4 * time.Second
+	)
+	client := testsupport.NewRedis(t)
+	prefix := testsupport.Unique(t)
+	var (
+		mu    sync.Mutex
+		sends []time.Time
+		wg    sync.WaitGroup
+	)
+	deadline := time.Now().Add(duration)
+	for worker := range 4 {
+		limiter := delivery.NewRedisLimiter(client, limit, prefix)
+		random := rand.New(rand.NewPCG(uint64(worker), 42)) //nolint:gosec // test timing
+		wg.Go(func() {
+			for time.Now().Before(deadline) {
+				reserved, err := limiter.Reserve(context.Background(), "sms", 1+random.IntN(32))
+				if err != nil {
+					t.Errorf("reserve: %v", err)
+					return
+				}
+				if reserved.Granted == 0 {
+					time.Sleep(min(reserved.Retry, 50*time.Millisecond))
+					continue
+				}
+				claim := time.Duration(random.IntN(5)) * time.Millisecond
+				switch random.IntN(20) {
+				case 0:
+					claim = 150*time.Millisecond + time.Duration(random.IntN(250))*time.Millisecond
+				case 1:
+					claim = 1200 * time.Millisecond
+				}
+				time.Sleep(claim)
+				claimed := random.IntN(reserved.Granted + 1)
+				confirmed, err := limiter.Settle(context.Background(), "sms", reserved, claimed)
+				if err != nil {
+					t.Errorf("settle: %v", err)
+					return
+				}
+				now := time.Now()
+				mu.Lock()
+				for range confirmed {
+					sends = append(sends, now)
+				}
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+
+	slices.SortFunc(sends, func(a, b time.Time) int { return a.Compare(b) })
+	if len(sends) < limit {
+		t.Fatalf("only %d sends, the test proved nothing", len(sends))
+	}
+	for i := limit; i < len(sends); i++ {
+		if span := sends[i].Sub(sends[i-limit]); span < time.Second {
+			t.Fatalf("%d sends in %v", limit+1, span)
+		}
 	}
 }
 

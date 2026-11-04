@@ -105,14 +105,17 @@ type Permits struct {
 	Granted int
 	Retry   time.Duration
 	Paused  bool
+	// id names this reservation, so settling it touches only its own permits.
+	id string
 }
 
 // Limiter hands out permission to send on a channel.
 type Limiter interface {
 	// Reserve grants up to want sends. An error means there is no permission to send.
 	Reserve(ctx context.Context, channel string, want int) (Permits, error)
-	// Release gives back permits that turned out not to be needed.
-	Release(ctx context.Context, channel string, count int) error
+	// Settle says how many of the permits are about to be used. The rest are given
+	// back, and it answers how many of those used may really go out.
+	Settle(ctx context.Context, channel string, permits Permits, used int) (int, error)
 	Pause(ctx context.Context, channel string, length time.Duration) error
 }
 
@@ -251,7 +254,7 @@ func (w *Worker) takeDue(ctx context.Context, channel string, want int) ([]claim
 	}
 	claims, err := w.claim(ctx, channel, permits.Granted)
 	breaker.giveBack(allowed - len(claims))
-	w.giveBack(ctx, channel, permits.Granted-len(claims))
+	claims = w.settle(ctx, channel, permits, claims)
 	for i := range claims {
 		claims[i].probe = probing
 	}
@@ -264,17 +267,25 @@ func (w *Worker) takeDue(ctx context.Context, channel string, want int) ([]claim
 	return claims, 0, nil
 }
 
-// giveBack keeps an idle queue from using up the channel's rate. Failing to only
-// delays the next sends slightly, so it stops nothing.
-func (w *Worker) giveBack(ctx context.Context, channel string, count int) {
-	if count <= 0 {
-		return
-	}
-	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+// settle gives back what was not claimed, which keeps an idle queue from using up the
+// channel's rate, and counts the rest from now. A claim that outlasted its permits may
+// find the window full: those messages go back in the queue, at no cost to them.
+// Failing to settle only makes the count slightly old, so it stops nothing.
+func (w *Worker) settle(ctx context.Context, channel string, permits Permits, claims []claim) []claim {
+	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
 	defer cancel()
-	if err := w.limiter.Release(releaseCtx, channel, count); err != nil {
-		slog.WarnContext(ctx, "release permits", "channel", channel, "error", err)
+	confirmed, err := w.limiter.Settle(settleCtx, channel, permits, len(claims))
+	if err != nil {
+		slog.WarnContext(ctx, "settle permits", "channel", channel, "error", err)
+		return claims
 	}
+	for _, item := range claims[confirmed:] {
+		next := update{status: statusRetrying, attempts: item.attempts, retryIn: time.Second}
+		if err := w.record(ctx, item, next, nil); err != nil {
+			slog.ErrorContext(ctx, "return claim", "delivery_id", item.id, "error", err)
+		}
+	}
+	return claims[:confirmed]
 }
 
 func (w *Worker) recordHold(ctx context.Context, channel string, permits Permits) {

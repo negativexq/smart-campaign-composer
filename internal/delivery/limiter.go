@@ -25,7 +25,8 @@ const (
 // channel is paused. A fixed window or token bucket could let through up to twice
 // the limit around a boundary; this holds in every span of that length. It answers
 // with what was granted, how many milliseconds to wait if nothing was, and whether
-// that is because of a pause.
+// that is because of a pause. Each permit is stored under its reservation, so it can
+// be settled later without touching anyone else's.
 var slidingWindow = redis.NewScript(`
 local key, limit, window, want = KEYS[1], tonumber(ARGV[1]), tonumber(ARGV[3]), tonumber(ARGV[4])
 local paused = redis.call('PTTL', KEYS[2])
@@ -46,6 +47,31 @@ for i = 1, granted do
 end
 redis.call('PEXPIRE', key, 2000)
 return {granted, 0, 0}
+`)
+
+var settlePermits = redis.NewScript(`
+local key, limit, id, window, granted, used = KEYS[1], tonumber(ARGV[1]), ARGV[2], tonumber(ARGV[3]), tonumber(ARGV[4]), tonumber(ARGV[5])
+local time = redis.call('TIME')
+local now = time[1] * 1000000 + time[2]
+redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
+for i = used + 1, granted do
+  redis.call('ZREM', key, id .. ':' .. i)
+end
+local room = limit - redis.call('ZCARD', key)
+local confirmed = 0
+for i = 1, used do
+  local member = id .. ':' .. i
+  if redis.call('ZSCORE', key, member) then
+    redis.call('ZADD', key, now, member)
+    confirmed = confirmed + 1
+  elseif room > 0 then
+    redis.call('ZADD', key, now, member)
+    room = room - 1
+    confirmed = confirmed + 1
+  end
+end
+redis.call('PEXPIRE', key, 2000)
+return confirmed
 `)
 
 var extendPause = redis.NewScript(`
@@ -69,20 +95,24 @@ func NewRedisLimiter(client *redis.Client, limit int, prefix string) *RedisLimit
 // Reserve grants up to want sends without waiting. An error means there is no
 // permission to send, including when Redis cannot be reached.
 func (l *RedisLimiter) Reserve(ctx context.Context, channel string, want int) (Permits, error) {
-	answer, err := slidingWindow.Run(ctx, l.client, []string{l.rateKey(channel), l.pauseKey(channel)}, l.limit, rand.Text(), grantWindow.Microseconds(), want).Int64Slice()
+	id := rand.Text()
+	answer, err := slidingWindow.Run(ctx, l.client, []string{l.rateKey(channel), l.pauseKey(channel)}, l.limit, id, grantWindow.Microseconds(), want).Int64Slice()
 	if err != nil {
 		return Permits{}, fmt.Errorf("rate limiter: %w", err)
 	}
-	return Permits{Granted: int(answer[0]), Retry: time.Duration(answer[1]) * time.Millisecond, Paused: answer[2] == 1}, nil
+	return Permits{Granted: int(answer[0]), Retry: time.Duration(answer[1]) * time.Millisecond, Paused: answer[2] == 1, id: id}, nil
 }
 
-// Release gives back the newest permits. They need not be this caller's own: the
-// count is what the limit is about, and they were all granted moments ago.
-func (l *RedisLimiter) Release(ctx context.Context, channel string, count int) error {
-	if err := l.client.ZPopMax(ctx, l.rateKey(channel), int64(count)).Err(); err != nil {
-		return fmt.Errorf("release permits: %w", err)
+// Settle gives back this reservation's unused permits and counts the used ones from
+// now, which is when they go out. Only its own permits are touched, so a worker that
+// stalled past the window cannot erase what another has sent since. The answer is how
+// many of the used ones may go out, fewer only if that stall let the window fill up.
+func (l *RedisLimiter) Settle(ctx context.Context, channel string, permits Permits, used int) (int, error) {
+	confirmed, err := settlePermits.Run(ctx, l.client, []string{l.rateKey(channel)}, l.limit, permits.id, grantWindow.Microseconds(), permits.Granted, used).Int()
+	if err != nil {
+		return 0, fmt.Errorf("settle permits: %w", err)
 	}
-	return nil
+	return confirmed, nil
 }
 
 // Pause holds a channel for every worker, as after a 429. It never shortens a pause

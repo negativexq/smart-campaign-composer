@@ -58,6 +58,8 @@ type fakeLimiter struct {
 	err      error
 	pauses   map[string]time.Duration
 	pauseErr error
+	// confirm, when set, is how many used permits settling allows.
+	confirm int
 }
 
 func (f *fakeLimiter) Pause(_ context.Context, channel string, length time.Duration) error {
@@ -87,11 +89,14 @@ func (f *fakeLimiter) Reserve(_ context.Context, channel string, want int) (deli
 	return answer, nil
 }
 
-func (f *fakeLimiter) Release(_ context.Context, channel string, count int) error {
+func (f *fakeLimiter) Settle(_ context.Context, channel string, permits delivery.Permits, used int) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.permits[channel] -= count
-	return nil
+	f.permits[channel] -= permits.Granted - used
+	if f.confirm > 0 {
+		return f.confirm, nil
+	}
+	return used, nil
 }
 
 type rig struct {
@@ -1117,6 +1122,33 @@ func TestPermitsNotNeededAreGivenBack(t *testing.T) {
 		if r.limiter.permits[channel] != calls[channel] {
 			t.Fatalf("%s kept %d permits for %d calls", channel, r.limiter.permits[channel], calls[channel])
 		}
+	}
+}
+
+// A claim that outlasted its permits holds messages nothing allows sending yet. They
+// go back in the queue and lose no attempt.
+func TestAClaimWithoutConfirmedPermitsReturnsToTheQueue(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	r.limiter.confirm = 1
+	ctx := context.Background()
+	const batches = 2 // one per channel
+	sent, err := r.worker.ProcessBatch(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent != batches || len(r.sender.calls) != batches {
+		t.Fatalf("claimed %d, called %d", sent, len(r.sender.calls))
+	}
+	var sending, returned, attempts int
+	err = r.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status = 'SENDING'), count(*) FILTER (WHERE status = 'RETRYING'),
+		coalesce(sum(attempts) FILTER (WHERE status = 'RETRYING'), 0) FROM campaign_deliveries WHERE campaign_id = $1`, r.id).
+		Scan(&sending, &returned, &attempts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sending != 0 || returned == 0 || attempts != 0 {
+		t.Fatalf("sending %d, returned %d, attempts %d", sending, returned, attempts)
 	}
 }
 
