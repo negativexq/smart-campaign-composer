@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
 	"github.com/negativexq/smart-campaign-composer/internal/campaign"
 	"github.com/negativexq/smart-campaign-composer/internal/db"
+	"github.com/negativexq/smart-campaign-composer/internal/delivery"
 	"github.com/negativexq/smart-campaign-composer/internal/health"
 	"github.com/negativexq/smart-campaign-composer/internal/httpapi"
 	"github.com/negativexq/smart-campaign-composer/internal/server"
@@ -76,7 +78,11 @@ func run(logger *slog.Logger) error {
 	}
 	health.RegisterSystem(mux, "/api/system", system)
 	mux.Handle("GET /metrics", promhttp.Handler())
-	httpapi.Register(mux, campaigns, provider, metrics)
+	ratePerSecond, err := strconv.Atoi(server.Env("RATE_LIMIT_PER_SECOND", "100"))
+	if err != nil || ratePerSecond <= 0 {
+		return fmt.Errorf("RATE_LIMIT_PER_SECOND must be a positive number")
+	}
+	httpapi.Register(mux, campaigns, provider, metrics, httpapi.Sending{RatePerSecond: ratePerSecond, MaxAttempts: delivery.DefaultConfig().MaxAttempts})
 	if secret := os.Getenv("UNSUBSCRIBE_SECRET"); secret != "" {
 		httpapi.RegisterUnsubscribe(mux, campaigns, secret)
 	}

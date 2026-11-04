@@ -75,12 +75,14 @@ type ProposeInput struct {
 
 // View is a campaign as the marketer sees it.
 type View struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	NameSource string   `json:"name_source"`
-	Brief      string   `json:"brief"`
-	Status     string   `json:"status"`
-	Channels   []string `json:"channels"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	NameSource string `json:"name_source"`
+	// EmailTemplate is the design chosen before any message was written.
+	EmailTemplate string   `json:"email_template"`
+	Brief         string   `json:"brief"`
+	Status        string   `json:"status"`
+	Channels      []string `json:"channels"`
 	// ExcludedLanguages get no version of their own, and their readers get English.
 	ExcludedLanguages []string `json:"excluded_languages"`
 	Tone              string   `json:"tone"`
@@ -144,9 +146,17 @@ type NewCampaign struct {
 	ABTest                bool
 	// VariantAPercent is who gets version A, from 1 to 99. Half when left out.
 	VariantAPercent *int
+	// EmailTemplate is the design to write into, when one was chosen up front.
+	EmailTemplate string
+	// SavedAudienceID takes the rule from a saved audience, so the brief only has to say
+	// what the message is about.
+	SavedAudienceID string
 }
 
 func (n NewCampaign) validate() error {
+	if n.EmailTemplate != "" && !slices.Contains(content.EmailTemplates, n.EmailTemplate) {
+		return ErrInvalidOptions
+	}
 	if !slices.Contains([]string{"", "friendly", "formal", "urgent"}, n.Tone) {
 		return ErrInvalidOptions
 	}
@@ -183,6 +193,18 @@ func (s *Service) CreateWith(ctx context.Context, campaign NewCampaign) (string,
 	if err := campaign.validate(); err != nil {
 		return "", err
 	}
+	var (
+		savedName string
+		savedSpec segment.Spec
+	)
+	if campaign.SavedAudienceID != "" {
+		if savedName, savedSpec, err = s.savedRule(ctx, campaign.SavedAudienceID); err != nil {
+			return "", err
+		}
+		if campaign.NotMessagedWithinDays != nil {
+			savedSpec.NotMessagedWithinDays = campaign.NotMessagedWithinDays
+		}
+	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return "", fmt.Errorf("begin create: %w", err)
@@ -191,16 +213,22 @@ func (s *Service) CreateWith(ctx context.Context, campaign NewCampaign) (string,
 
 	var id string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO campaigns (brief, name, created_by, channels, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::int, 50)) RETURNING id::text`,
-		brief, provisionalName(brief), personFrom(ctx), chosen, campaign.Tone, campaign.OfferPercent, campaign.NotMessagedWithinDays, campaign.ABTest, campaign.VariantAPercent).Scan(&id); err != nil {
+		INSERT INTO campaigns (brief, name, created_by, channels, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::int, 50), $10) RETURNING id::text`,
+		brief, provisionalName(brief), personFrom(ctx), chosen, campaign.Tone, campaign.OfferPercent, campaign.NotMessagedWithinDays, campaign.ABTest, campaign.VariantAPercent, campaign.EmailTemplate).Scan(&id); err != nil {
 		return "", fmt.Errorf("insert campaign: %w", err)
 	}
-	if err := recordAudit(ctx, tx, id, eventCreated, map[string]any{"brief_characters": utf8.RuneCountInString(brief), "channels": chosen, "tone": campaign.Tone, "offer_percent": campaign.OfferPercent, "not_messaged_within_days": campaign.NotMessagedWithinDays}); err != nil {
+	if err := recordAudit(ctx, tx, id, eventCreated, map[string]any{"brief_characters": utf8.RuneCountInString(brief), "channels": chosen, "tone": campaign.Tone, "offer_percent": campaign.OfferPercent, "not_messaged_within_days": campaign.NotMessagedWithinDays, "email_template": campaign.EmailTemplate}); err != nil {
 		return "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit create: %w", err)
+	}
+	if campaign.SavedAudienceID != "" {
+		proposal := segment.Proposal{SavedAudience: savedName, Segment: savedSpec, Assumptions: []segment.Assumption{}, Evidence: []segment.Evidence{}, UnsupportedConditions: []string{}}
+		if err := s.useSavedRule(ctx, id, brief, false, proposal); err != nil {
+			return "", err
+		}
 	}
 	return id, nil
 }
@@ -231,8 +259,8 @@ func (s *Service) Duplicate(ctx context.Context, id string) (View, error) {
 
 	var copied string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO campaigns (brief, name, name_source, created_by, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, status)
-		SELECT brief, $2, name_source, $3, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, $4
+		INSERT INTO campaigns (brief, name, name_source, created_by, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, status)
+		SELECT brief, $2, name_source, $3, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, $4
 		FROM campaigns WHERE id = $1
 		RETURNING id::text`, id, string(name)+suffix, personFrom(ctx), status).Scan(&copied); err != nil {
 		return View{}, fmt.Errorf("copy campaign: %w", err)
@@ -442,6 +470,24 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 		return View{}, ErrNotEditable
 	}
 
+	// A saved rule stays until someone asks to change it: its brief says what the message
+	// is about, so there is no audience for a model to read from it.
+	if stored.Proposal != nil && stored.Proposal.SavedAudience != "" && input.Refinement == "" {
+		brief := stored.Brief
+		if input.Brief != nil {
+			if brief, err = cleanBrief(*input.Brief); err != nil {
+				return View{}, err
+			}
+			if err := checkOffer(brief, stored.OfferPercent); err != nil {
+				return View{}, err
+			}
+		}
+		if err := s.useSavedRule(ctx, id, brief, brief != stored.Brief, *stored.Proposal); err != nil {
+			return View{}, err
+		}
+		return s.Get(ctx, id)
+	}
+
 	request := ai.SegmentRequest{Brief: stored.Brief, Schema: segment.JSONSchema(), Refinement: input.Refinement}
 	if input.Brief != nil {
 		if request.Brief, err = cleanBrief(*input.Brief); err != nil {
@@ -453,7 +499,7 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 		request.Refinement = ""
 	} else if input.Refinement != "" && stored.Proposal != nil {
 		current := *stored.Proposal
-		current.Unmatched, current.NotApplied, current.Unsure, current.BriefParts = nil, nil, nil, nil
+		current.Unmatched, current.NotApplied, current.Unsure, current.BriefParts, current.SavedAudience = nil, nil, nil, nil, ""
 		if request.Current, err = json.Marshal(current); err != nil {
 			return View{}, fmt.Errorf("encode current proposal: %w", err)
 		}
@@ -473,7 +519,7 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 			return View{}, err
 		}
 	}
-	proposal.UpdatedBrief = ""
+	proposal.UpdatedBrief, proposal.SavedAudience = "", ""
 	// A refinement starts from the current rule, so a person can still ask to drop it.
 	if request.Refinement == "" && stored.NotMessagedWithinDays != nil {
 		proposal.Segment.NotMessagedWithinDays = stored.NotMessagedWithinDays
@@ -861,12 +907,12 @@ func (s *Service) loadFrom(ctx context.Context, q segment.Querier, id string) (V
 		snapshot     []byte
 	)
 	err := q.QueryRow(ctx, `
-		SELECT c.name, c.name_source, c.brief, c.status, c.channels, c.excluded_languages, c.tone, c.ab_test, c.variant_a_percent, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
+		SELECT c.name, c.name_source, c.email_template, c.brief, c.status, c.channels, c.excluded_languages, c.tone, c.ab_test, c.variant_a_percent, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.Channels, &view.ExcludedLanguages, &view.Tone, &view.ABTest, &view.VariantAPercent, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt, &snapshot)
+		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.EmailTemplate, &view.Brief, &view.Status, &view.Channels, &view.ExcludedLanguages, &view.Tone, &view.ABTest, &view.VariantAPercent, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt, &snapshot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}

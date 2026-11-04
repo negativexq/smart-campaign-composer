@@ -48,12 +48,13 @@ describe("App", () => {
     await flushPromises();
 
     const groups = wrapper.findAll("[data-testid=nav-group]");
-    expect(groups.map((group) => group.find("[data-testid=nav-group-title]").text())).toEqual(["Workspace", "Reference"]);
+    expect(groups.map((group) => group.find("[data-testid=nav-group-title]").text())).toEqual(["Workspace", "Operations", "Support"]);
     expect(groups[0].text()).toContain("Overview");
     expect(groups[0].text()).toContain("Campaigns");
     expect(groups[0].text()).not.toContain("Design system");
     expect(wrapper.find("[data-testid=new-campaign]").attributes("href")).toBe("/campaigns/new");
-    expect(groups[1].text()).toContain("Design system");
+    expect(groups[0].text()).toContain("Templates");
+    expect(groups[1].text()).toContain("Test inbox");
   });
 
   it("says when a page does not exist", async () => {

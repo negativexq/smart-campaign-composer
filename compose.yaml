@@ -10,6 +10,7 @@ x-backend: &backend
   environment: &backend-env
     DATABASE_URL: postgres://scc:scc@postgres:5432/scc?sslmode=disable
     REDIS_URL: redis://redis:6379/0
+    RATE_LIMIT_PER_SECOND: ${RATE_LIMIT_PER_SECOND:-100}
 
 services:
   postgres:

@@ -26,6 +26,7 @@ const reach = computed(() => {
           <th scope="col">Last accepted</th>
           <th scope="col" class="num">Calls, last hour</th>
           <th scope="col" class="num">Not accepted</th>
+          <th scope="col" class="num">Busiest second</th>
         </tr>
       </thead>
       <tbody>
@@ -36,10 +37,11 @@ const reach = computed(() => {
           <td>{{ row.last_accepted_at ? formatDateTime(row.last_accepted_at) : "Nothing yet" }}</td>
           <td class="num mono">{{ row.calls_last_hour.toLocaleString("en-US") }}</td>
           <td class="num mono">{{ row.not_accepted_last_hour.toLocaleString("en-US") }}</td>
+          <td class="num mono" :data-testid="`busiest-${row.channel}`">{{ row.busiest_second_last_hour.toLocaleString("en-US") }}</td>
         </tr>
       </tbody>
     </table>
-    <p class="muted small note">Both channels use the mock provider, so they go up and down together. Accepted means the provider took the message, not that a person got it.</p>
+    <p class="muted small note">Both channels use the mock provider, so they go up and down together. Sending is limited per channel per second, and the busiest second shows how close the last hour came. Accepted means the provider took the message, not that a person got it.</p>
   </div>
 </template>
 

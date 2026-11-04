@@ -10,6 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/negativexq/smart-campaign-composer/internal/content"
 )
 
 const (
@@ -186,6 +188,13 @@ type ChannelUse struct {
 	LastAcceptedAt *time.Time `json:"last_accepted_at"`
 	Calls          int        `json:"calls_last_hour"`
 	NotAccepted    int        `json:"not_accepted_last_hour"`
+	// BusiestSecond is the most calls made in one second, to compare with the rate limit.
+	BusiestSecond int `json:"busiest_second_last_hour"`
+}
+
+// Channels says what provider calls show about each channel.
+func (s *Service) Channels(ctx context.Context) ([]ChannelUse, error) {
+	return s.channelUse(ctx)
 }
 
 // Overview summarizes the workspace.
@@ -256,6 +265,46 @@ func (s *Service) queryActivity(ctx context.Context, id *pgtype.UUID, limit int)
 	return s.readActivity(ctx, query, args...)
 }
 
+// EmailTemplateUse is one design and how many campaigns currently use it.
+type EmailTemplateUse struct {
+	ID        string `json:"id"`
+	Version   string `json:"version"`
+	Campaigns int    `json:"campaigns"`
+}
+
+// EmailTemplateUses lists every design with its use. A campaign counts once, by its
+// latest version or, with no message yet, by the design it was started from. One with
+// no choice uses the default, as it would when sent.
+func (s *Service) EmailTemplateUses(ctx context.Context) ([]EmailTemplateUse, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT COALESCE(NULLIF(COALESCE(v.content->>'email_template', c.email_template), ''), $1), count(*)
+		FROM campaigns c
+		LEFT JOIN LATERAL (
+			SELECT content FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
+		) v ON true
+		WHERE 'email' = ANY(c.channels)
+		GROUP BY 1`, content.EmailTemplates[0])
+	if err != nil {
+		return nil, fmt.Errorf("count template use: %w", err)
+	}
+	counts := map[string]int{}
+	var (
+		name  string
+		count int
+	)
+	if _, err := pgx.ForEachRow(rows, []any{&name, &count}, func() error {
+		counts[name] = count
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("count template use: %w", err)
+	}
+	uses := make([]EmailTemplateUse, 0, len(content.EmailTemplates))
+	for _, id := range content.EmailTemplates {
+		uses = append(uses, EmailTemplateUse{ID: id, Version: content.EmailTemplateVersion(id), Campaigns: counts[id]})
+	}
+	return uses, nil
+}
+
 // Notifications are the events someone would want to hear about without watching:
 // a send that started on its own, one that ended, and anything that went wrong.
 // A scheduled run with nobody new to reach said nothing happened, so it is left out,
@@ -292,13 +341,18 @@ func (s *Service) channelUse(ctx context.Context) ([]ChannelUse, error) {
 		SELECT ch.channel, $2::text,
 		       (SELECT a.occurred_at FROM delivery_attempts a
 		        WHERE a.channel = ch.channel AND a.outcome = 'accepted' ORDER BY a.occurred_at DESC LIMIT 1),
-		       recent.calls, recent.not_accepted
+		       recent.calls, recent.not_accepted, COALESCE(busiest.calls, 0)
 		FROM unnest($1::text[]) AS ch (channel)
 		CROSS JOIN LATERAL (
 			SELECT count(*) AS calls, count(*) FILTER (WHERE a.outcome <> 'accepted') AS not_accepted
 			FROM delivery_attempts a
 			WHERE a.channel = ch.channel AND a.occurred_at >= $3
-		) recent`, channels, mockProviderName, s.now().Add(-time.Hour))
+		) recent
+		LEFT JOIN LATERAL (
+			SELECT count(*) AS calls FROM delivery_attempts a
+			WHERE a.channel = ch.channel AND a.occurred_at >= $3
+			GROUP BY date_trunc('second', a.occurred_at) ORDER BY 1 DESC LIMIT 1
+		) busiest ON true`, channels, mockProviderName, s.now().Add(-time.Hour))
 	if err != nil {
 		return nil, fmt.Errorf("channel use: %w", err)
 	}
@@ -307,4 +361,13 @@ func (s *Service) channelUse(ctx context.Context) ([]ChannelUse, error) {
 		return nil, fmt.Errorf("channel use: %w", err)
 	}
 	return use, nil
+}
+
+// CustomerCount is how many customers exist, whether or not they can be messaged.
+func (s *Service) CustomerCount(ctx context.Context) (int, error) {
+	var count int
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count customers: %w", err)
+	}
+	return count, nil
 }

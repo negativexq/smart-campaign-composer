@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Gauge, Inbox, LayoutGrid, ListChecks, Plus } from "lucide-vue-next";
+import { Activity, BarChart3, CircleHelp, Gauge, Inbox, LayoutGrid, LayoutTemplate, ListChecks, Plus, Radio, Settings, Users } from "lucide-vue-next";
 
 import { endSession } from "../api/session";
 import type { SystemStatus } from "../api/system";
@@ -19,15 +19,26 @@ const groups = [
     links: [
       { href: "/", label: "Overview", icon: Gauge },
       { href: "/campaigns", label: "Campaigns", icon: ListChecks },
+      { href: "/audiences", label: "Audiences", icon: Users },
+      { href: "/templates", label: "Templates", icon: LayoutTemplate },
+      { href: "/analytics", label: "Analytics", icon: BarChart3 },
     ],
   },
   {
-    title: "Reference",
+    title: "Operations",
     links: [
-      { href: "/design", label: "Design system", icon: LayoutGrid },
+      { href: "/delivery-monitor", label: "Delivery monitor", icon: Activity },
+      { href: "/channels", label: "Channels", icon: Radio },
+      // For whoever builds this, so it stays out of a marketer's day.
+      ...(import.meta.env.DEV ? [{ href: "/design", label: "Design system", icon: LayoutGrid }] : []),
       // The mock provider serves it, so it is outside this app.
       { href: `${location.protocol}//${location.hostname}:8083/`, label: "Test inbox", icon: Inbox, external: true },
+      { href: "/settings", label: "Settings", icon: Settings },
     ],
+  },
+  {
+    title: "Support",
+    links: [{ href: "/help", label: "Help & documentation", icon: CircleHelp }],
   },
 ];
 
@@ -143,9 +154,10 @@ const statusLabels = { checking: "Checking", operational: "Operational", degrade
   display: flex;
   flex: 1;
   flex-direction: column;
-  justify-content: space-between;
+  gap: var(--space-4);
   min-height: 0;
   margin-top: var(--space-2);
+  overflow-y: auto;
 }
 
 .nav-group {
@@ -329,10 +341,6 @@ const statusLabels = { checking: "Checking", operational: "Operational", degrade
   }
 
   .nav-title {
-    display: none;
-  }
-
-  .nav-group:last-child {
     display: none;
   }
 

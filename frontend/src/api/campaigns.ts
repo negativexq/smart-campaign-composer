@@ -85,6 +85,7 @@ export type Campaign = {
   id: string;
   name: string;
   name_source: "brief" | "ai" | "user";
+  email_template?: string;
   brief: string;
   status: string;
   channels: string[];
@@ -92,7 +93,7 @@ export type Campaign = {
   offer_percent?: number | null;
   not_messaged_within_days?: number | null;
   version: number;
-  proposal?: { brief_parts?: BriefPart[] | null; unsure?: string[] | null; not_applied?: string[] | null; not_audience?: string[] | null; assumptions: Assumption[]; evidence?: Evidence[] | null; unsupported_conditions: string[] };
+  proposal?: { saved_audience?: string; brief_parts?: BriefPart[] | null; unsure?: string[] | null; not_applied?: string[] | null; not_audience?: string[] | null; assumptions: Assumption[]; evidence?: Evidence[] | null; unsupported_conditions: string[] };
   conditions: Condition[];
   audience: Audience;
   audience_as_of?: string;
@@ -152,11 +153,17 @@ export type ChannelUse = {
   last_accepted_at: string | null;
   calls_last_hour: number;
   not_accepted_last_hour: number;
+  busiest_second_last_hour: number;
 };
 
 export type CampaignGroup = "" | "drafts" | "active" | "completed" | "failed";
 
 export type AiConfig = { llm_provider: string; llm_model: string };
+export type AppSettings = AiConfig & { rate_limit_per_second: number; max_attempts: number; customers: number };
+
+export function getSettings(): Promise<AppSettings> {
+  return request<AppSettings>("/api/settings");
+}
 
 export class ApiError extends Error {
   constructor(
@@ -194,7 +201,7 @@ function post<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-export type CampaignOptions = { tone?: string; offer_percent?: number; not_messaged_within_days?: number; ab_test?: boolean; variant_a_percent?: number };
+export type CampaignOptions = { tone?: string; offer_percent?: number; not_messaged_within_days?: number; ab_test?: boolean; variant_a_percent?: number; email_template?: string; saved_audience_id?: string };
 
 export async function createCampaign(brief: string, channels: string[], options: CampaignOptions = {}): Promise<string> {
   return (await post<{ id: string }>("/api/campaigns", { brief, channels, ...options })).id;
@@ -222,6 +229,89 @@ export function renameCampaign(id: string, name: string): Promise<Campaign> {
 
 export function getCampaign(id: string): Promise<Campaign> {
   return request<Campaign>(`/api/campaigns/${encodeURIComponent(id)}`);
+}
+
+export type EmailTemplateUse = { id: string; version: string; campaigns: number };
+
+export async function getEmailTemplates(): Promise<EmailTemplateUse[]> {
+  return (await request<{ templates: EmailTemplateUse[] }>("/api/email-templates")).templates;
+}
+
+export type MonitorEntry = {
+  id: string;
+  campaign_id: string;
+  campaign_name: string;
+  user_id: number;
+  first_name: string;
+  channel: string;
+  status: string;
+  calls: number;
+  response_code: number | null;
+  reason: string;
+  next_attempt_at: string;
+  updated_at: string;
+};
+export type DeliveryMonitor = { counts: Record<string, number>; channels: Record<string, number>; reasons: { reason: string; count: number }[]; total: number; deliveries: MonitorEntry[]; paused: { id: string; name: string }[] };
+export type MonitorQuery = { status: string; channel: string; outcome: string; reason: string; within_hours: string };
+
+export function getDeliveryMonitor(query: MonitorQuery, limit: number, offset = 0): Promise<DeliveryMonitor> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  for (const [key, value] of Object.entries(query)) if (value) params.set(key, value);
+  if (offset) params.set("offset", String(offset));
+  return request(`/api/delivery-monitor?${params}`);
+}
+
+export type SavedAudience = {
+  id: string;
+  name: string;
+  conditions: Condition[];
+  audience: Audience;
+  counted_at: string;
+  source_campaign_id: string | null;
+  source_campaign_name: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+export async function getAudiences(): Promise<SavedAudience[]> {
+  return (await request<{ audiences: SavedAudience[] }>("/api/audiences")).audiences;
+}
+
+export function saveAudience(campaignId: string, name: string): Promise<SavedAudience> {
+  return post<SavedAudience>("/api/audiences", { campaign_id: campaignId, name });
+}
+
+export function recountAudience(id: string): Promise<SavedAudience> {
+  return post<SavedAudience>(`/api/audiences/${encodeURIComponent(id)}/recount`, {});
+}
+
+export async function deleteAudience(id: string): Promise<void> {
+  await request<void>(`/api/audiences/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export type ChannelTotals = {
+  channel: string;
+  planned: number;
+  skipped: number;
+  accepted: number;
+  failed: number;
+  unknown: number;
+  on_the_way: number;
+  delivered: number;
+  bounced: number;
+  waiting: number;
+  opened: number;
+};
+export type CallDay = { day: string; accepted: number; not_accepted: number };
+export type CampaignResult = { id: string; name: string; status: string; accepted: number; failed: number; unknown: number };
+export type Analytics = { days: number; channels: ChannelTotals[]; calls: CallDay[]; campaigns: CampaignResult[] };
+
+export function getAnalytics(days: string): Promise<Analytics> {
+  return request(`/api/analytics?days=${encodeURIComponent(days)}`);
+}
+
+export async function getChannels(): Promise<ChannelUse[]> {
+  return (await request<{ channels: ChannelUse[] }>("/api/channels")).channels;
 }
 
 export function getOverview(): Promise<Overview> {

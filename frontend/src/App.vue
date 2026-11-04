@@ -11,20 +11,34 @@ import { campaignStatusMeta } from "./lib/campaignStatus";
 import { currentPath } from "./lib/navigation";
 import { currentUser } from "./lib/session";
 import { refreshSystemHealth, systemHealth } from "./lib/systemHealth";
+import AnalyticsView from "./views/AnalyticsView.vue";
+import AudiencesView from "./views/AudiencesView.vue";
 import AudienceView from "./views/AudienceView.vue";
 import CampaignDetailView from "./views/CampaignDetailView.vue";
 import CampaignsView from "./views/CampaignsView.vue";
+import ChannelsView from "./views/ChannelsView.vue";
+import HelpView from "./views/HelpView.vue";
+import SettingsView from "./views/SettingsView.vue";
 import ComposeView from "./views/ComposeView.vue";
 import ContentView from "./views/ContentView.vue";
+import DeliveryMonitorView from "./views/DeliveryMonitorView.vue";
 import DesignView from "./views/DesignView.vue";
 import OverviewView from "./views/OverviewView.vue";
 import ReviewView from "./views/ReviewView.vue";
 import SignInView from "./views/SignInView.vue";
+import TemplatesView from "./views/TemplatesView.vue";
 
 const route = computed(() => {
   const path = currentPath.value;
   if (path === "/") return { name: "overview", id: "" };
   if (path === "/design") return { name: "design", id: "" };
+  if (path === "/settings") return { name: "settings", id: "" };
+  if (path === "/help") return { name: "help", id: "" };
+  if (path === "/audiences") return { name: "audiences", id: "" };
+  if (path === "/analytics") return { name: "analytics", id: "" };
+  if (path === "/channels") return { name: "channels", id: "" };
+  if (path === "/delivery-monitor") return { name: "monitor", id: "" };
+  if (path === "/templates") return { name: "templates", id: "" };
   if (path === "/campaigns") return { name: "campaigns", id: "" };
   if (path === "/campaigns/new") return { name: "new", id: "" };
   const edit = path.match(/^\/campaigns\/([^/]+)\/edit$/);
@@ -44,9 +58,11 @@ const aiConfig = ref<AiConfig | null>(null);
 
 const wizardStatus = ref("DRAFT");
 const wizardChannels = ref(["sms", "email"]);
+const wizardSavedAudience = ref(false);
 watch(() => route.value.id, () => {
   wizardStatus.value = "DRAFT";
   wizardChannels.value = ["sms", "email"];
+  wizardSavedAudience.value = false;
 });
 
 const steps = computed(() => wizardSteps(wizardChannels.value));
@@ -81,6 +97,34 @@ onBeforeUnmount(() => clearInterval(healthTimer));
   <AppShell v-else-if="route.name === 'campaigns'" active-path="/campaigns" title="Campaigns" :system-status="status">
     <template #topbar><AiModeBadge v-if="aiConfig" :config="aiConfig" /></template>
     <CampaignsView />
+  </AppShell>
+
+  <AppShell v-else-if="route.name === 'settings'" active-path="/settings" title="Settings" :system-status="status">
+    <SettingsView />
+  </AppShell>
+
+  <AppShell v-else-if="route.name === 'help'" active-path="/help" title="Help & documentation" :system-status="status">
+    <HelpView />
+  </AppShell>
+
+  <AppShell v-else-if="route.name === 'audiences'" active-path="/audiences" title="Audiences" :system-status="status">
+    <AudiencesView />
+  </AppShell>
+
+  <AppShell v-else-if="route.name === 'analytics'" active-path="/analytics" title="Analytics" :system-status="status">
+    <AnalyticsView />
+  </AppShell>
+
+  <AppShell v-else-if="route.name === 'channels'" active-path="/channels" title="Channels" :system-status="status">
+    <ChannelsView />
+  </AppShell>
+
+  <AppShell v-else-if="route.name === 'monitor'" active-path="/delivery-monitor" title="Delivery monitor" :system-status="status">
+    <DeliveryMonitorView />
+  </AppShell>
+
+  <AppShell v-else-if="route.name === 'templates'" active-path="/templates" title="Templates" :system-status="status">
+    <TemplatesView />
   </AppShell>
 
   <AppShell v-else-if="route.name === 'detail'" active-path="/campaigns" title="Campaign" :system-status="status">
@@ -126,13 +170,18 @@ onBeforeUnmount(() => clearInterval(healthTimer));
       </div>
     </template>
 
-    <AudienceView v-if="route.name === 'edit'" :key="route.id" :campaign-id="route.id" @status="wizardStatus = $event" @channels="wizardChannels = $event" />
-    <ComposeView v-else />
+    <AudienceView v-if="route.name === 'edit'" :key="route.id" :campaign-id="route.id" @status="wizardStatus = $event" @channels="wizardChannels = $event" @saved-audience="wizardSavedAudience = $event" />
+    <ComposeView v-else @saved-audience="wizardSavedAudience = $event" />
 
     <template #panel>
       <section v-if="route.name === 'edit'" class="next card">
         <h3>How this audience was built</h3>
-        <ul class="next-list">
+        <ul v-if="wizardSavedAudience" class="next-list">
+          <li>These conditions come from your saved audience. AI did not read them from the brief.</li>
+          <li>The system counted the matches again just now.</li>
+          <li>Refining with AI replaces them on this campaign only.</li>
+        </ul>
+        <ul v-else class="next-list">
           <li>AI turned your brief into the conditions shown here.</li>
           <li>Anything marked as an assumption was not in your brief.</li>
           <li>The system checks each condition and counts the matches itself.</li>
@@ -142,7 +191,7 @@ onBeforeUnmount(() => clearInterval(healthTimer));
       <section v-else class="next card">
         <h3>What happens next</h3>
         <ol class="next-list">
-          <li>AI suggests an audience from your brief.</li>
+          <li>{{ wizardSavedAudience ? "You check your saved audience, counted again." : "AI suggests an audience from your brief." }}</li>
           <li>AI drafts your SMS and email.</li>
           <li>You edit and check everything.</li>
         </ol>

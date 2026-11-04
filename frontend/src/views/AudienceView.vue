@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 
-import { errorMessage, getCampaign, proposeSegment, setExcludedLanguages, type Campaign } from "../api/campaigns";
+import { errorMessage, getCampaign, proposeSegment, saveAudience, setExcludedLanguages, type Campaign } from "../api/campaigns";
 import AudienceFunnel from "../components/AudienceFunnel.vue";
 import AudienceLoading from "../components/AudienceLoading.vue";
 import AudienceSteps from "../components/AudienceSteps.vue";
@@ -19,7 +19,7 @@ import { takeAudienceRequest } from "../lib/pendingAudience";
 import { useAudienceBreakdown } from "../lib/useAudienceBreakdown";
 
 const props = defineProps<{ campaignId: string }>();
-const emit = defineEmits<{ status: [status: string]; channels: [channels: string[]] }>();
+const emit = defineEmits<{ status: [status: string]; channels: [channels: string[]]; savedAudience: [used: boolean] }>();
 
 const campaign = ref<Campaign | null>(null);
 const loadError = ref("");
@@ -31,6 +31,10 @@ const briefUpdatedBy = ref("");
 const refined = ref<{ changes: RuleChange[]; before: number; after: number } | null>(null);
 const editingBrief = ref(false);
 const editedBrief = ref("");
+const savingAudience = ref(false);
+const audienceName = ref("");
+const savedAudience = ref("");
+const saveAudienceError = ref("");
 // The results build up in order only right after a search, not when a draft is reopened.
 const staged = ref(false);
 
@@ -103,8 +107,23 @@ async function saveBrief() {
   if (await propose({ brief: editedBrief.value }, "Working out the segment rule...")) editingBrief.value = false;
 }
 
+async function keepAudience() {
+  savingAudience.value = true;
+  saveAudienceError.value = "";
+  savedAudience.value = "";
+  try {
+    savedAudience.value = (await saveAudience(props.campaignId, audienceName.value)).name;
+    audienceName.value = "";
+  } catch (failure) {
+    saveAudienceError.value = errorMessage(failure);
+  } finally {
+    savingAudience.value = false;
+  }
+}
+
 watch(() => campaign.value?.status, (status) => status && emit("status", status));
 watch(() => campaign.value?.channels, (channels) => channels && emit("channels", channels));
+watch(() => campaign.value?.proposal?.saved_audience, (saved) => emit("savedAudience", Boolean(saved)));
 
 onMounted(async () => {
   try {
@@ -198,7 +217,7 @@ onMounted(async () => {
         <AudienceSteps :campaign="campaign" :breakdown="breakdown" :failed="false" />
       </details>
 
-      <form class="section" @submit.prevent="refine">
+      <form class="section" data-testid="refine-form" @submit.prevent="refine">
         <label for="refinement"><h2>Refine with AI</h2></label>
         <p v-if="campaign.content" class="muted small" data-testid="clears-content">Changing the audience clears the messages written for it.</p>
         <div class="row">
@@ -210,6 +229,17 @@ onMounted(async () => {
           />
           <button class="button button--secondary" type="submit" :disabled="Boolean(busyMessage) || !refinement.trim()">Update</button>
         </div>
+      </form>
+
+      <form v-if="!blocked" class="section" data-testid="save-audience" @submit.prevent="keepAudience">
+        <label for="audience-name"><h2>Save this audience</h2></label>
+        <p class="muted small">Keep the rule for later campaigns. This campaign does not change.</p>
+        <div class="row">
+          <input id="audience-name" v-model="audienceName" class="field" maxlength="80" placeholder="For example: Istanbul cart abandoners" />
+          <button class="button button--secondary" type="submit" :disabled="savingAudience || !audienceName.trim()">Save audience</button>
+        </div>
+        <ValidationNotice v-if="saveAudienceError" tone="error" title="The audience was not saved">{{ saveAudienceError }}</ValidationNotice>
+        <p v-if="savedAudience" class="small" data-testid="audience-saved">Saved as "{{ savedAudience }}". <a href="/audiences">See your audiences</a></p>
       </form>
 
       <div class="row">

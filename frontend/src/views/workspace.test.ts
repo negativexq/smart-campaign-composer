@@ -6,6 +6,16 @@ import type { ActivityEntry, Campaign, CampaignSummary, Overview } from "../api/
 import { describeActivity } from "../lib/activity";
 import { navigate } from "../lib/navigation";
 import CampaignsView from "./CampaignsView.vue";
+import AnalyticsView from "./AnalyticsView.vue";
+import AudiencesView from "./AudiencesView.vue";
+import DonutChart from "../components/DonutChart.vue";
+import { defaultChannels, storedAutoRefresh } from "../lib/preferences";
+import ChannelsView from "./ChannelsView.vue";
+import HelpView from "./HelpView.vue";
+import SettingsView from "./SettingsView.vue";
+import ComposeView from "./ComposeView.vue";
+import DeliveryMonitorView from "./DeliveryMonitorView.vue";
+import TemplatesView from "./TemplatesView.vue";
 
 const summary = (overrides: Partial<CampaignSummary> = {}): CampaignSummary => ({
   id: "c1",
@@ -134,23 +144,6 @@ describe("overview", () => {
     wrapper.unmount();
   });
 
-  it("shows what each channel's calls did and that one provider serves both", async () => {
-    const { wrapper } = await open("/", {
-      "/api/overview": {
-        ...emptyOverview,
-        channels: [
-          { channel: "sms", provider: "Mock provider", last_accepted_at: "2026-11-03T12:00:00Z", calls_last_hour: 12, not_accepted_last_hour: 3 },
-          { channel: "email", provider: "Mock provider", last_accepted_at: null, calls_last_hour: 0, not_accepted_last_hour: 0 },
-        ],
-      },
-    });
-    const sms = wrapper.find("[data-testid=channel-sms]").text();
-    expect(sms).toContain("Mock provider");
-    expect(sms).toContain("12");
-    expect(wrapper.find("[data-testid=channel-email]").text()).toContain("Nothing yet");
-    expect(wrapper.find("[data-testid=channels]").text()).toContain("go up and down together");
-  });
-
   it("guides a new workspace to its first campaign instead of showing zeros", async () => {
     const { wrapper } = await open("/", { "/api/overview": emptyOverview });
 
@@ -161,6 +154,346 @@ describe("overview", () => {
   it("shows an error when the workspace cannot load", async () => {
     const { wrapper } = await open("/", {});
     expect(wrapper.find("[role=alert]").text()).toContain("could not load");
+  });
+});
+
+describe("channels", () => {
+  it("shows what each channel's calls did and that one provider serves both", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        channels: [
+          { channel: "sms", provider: "Mock provider", last_accepted_at: "2026-11-03T12:00:00Z", calls_last_hour: 12, not_accepted_last_hour: 3, busiest_second_last_hour: 9 },
+          { channel: "email", provider: "Mock provider", last_accepted_at: null, calls_last_hour: 0, not_accepted_last_hour: 0, busiest_second_last_hour: 0 },
+        ],
+      }),
+    }) as Response));
+    const wrapper = mount(ChannelsView);
+    await flushPromises();
+    const sms = wrapper.find("[data-testid=channel-sms]").text();
+    expect(sms).toContain("Mock provider");
+    expect(sms).toContain("12");
+    expect(wrapper.find("[data-testid=busiest-sms]").text()).toBe("9");
+    expect(wrapper.find("[data-testid=channel-email]").text()).toContain("Nothing yet");
+    expect(wrapper.find("[data-testid=channels]").text()).toContain("go up and down together");
+  });
+});
+
+describe("audiences", () => {
+  const saved = { id: "a1", name: "Istanbul abandoners", conditions: [{ field: "city", label: "City is", value: "Istanbul" }], audience: { total: 40, sms: 30, email: 20 }, counted_at: "2026-11-03T12:00:00Z", source_campaign_id: "c1", source_campaign_name: "Winter", created_by: null, created_at: "2026-11-03T12:00:00Z" };
+
+  it("shows the rule and last count, counts again, and deletes only after asking", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") return { ok: true, status: 204, json: async () => { throw new Error("empty"); } } as unknown as Response;
+      const body = url.endsWith("/recount") ? { ...saved, audience: { total: 44, sms: 30, email: 20 } } : { audiences: [saved] };
+      return { ok: true, status: 200, json: async () => body } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(AudiencesView);
+    await flushPromises();
+    expect(wrapper.text()).toContain("City is Istanbul");
+    expect(wrapper.find("[data-testid=audience-total]").text()).toBe("40");
+    expect(wrapper.find("[data-testid=use-audience]").attributes("href")).toBe("/campaigns/new?audience=a1");
+
+    await wrapper.find("[data-testid=recount-audience]").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=audience-total]").text()).toBe("44");
+    expect(wrapper.find("[data-testid=audience-recounted]").text()).toBe("Counted again. Changed: customers 40 to 44.");
+
+    fetchMock.mockImplementationOnce(async () => ({ ok: true, status: 200, json: async () => ({ ...saved, audience: { total: 44, sms: 30, email: 20 } }) }) as Response);
+    await wrapper.find("[data-testid=recount-audience]").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=audience-recounted]").text()).toBe("Counted again. Still 44 customers, nothing changed.");
+
+    await wrapper.find("[data-testid=delete-audience]").trigger("click");
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+    await wrapper.find("[data-testid=confirm-delete-audience]").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=no-audiences]").exists()).toBe(true);
+  });
+});
+
+describe("a new campaign from a saved audience", () => {
+  it("brings the rule, asks only for the message and can drop the audience", async () => {
+    window.history.replaceState({}, "", "/campaigns/new?audience=a1");
+    const saved = { id: "a1", name: "Istanbul abandoners", conditions: [{ field: "city", label: "City is", value: "Istanbul" }], audience: { total: 40, sms: 30, email: 20 }, counted_at: "2026-11-03T12:00:00Z", source_campaign_id: null, source_campaign_name: null, created_by: null, created_at: "2026-11-03T12:00:00Z" };
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => ({ ok: true, status: url === "/api/campaigns" ? 201 : 200, json: async () => (url === "/api/campaigns" ? { id: "new" } : { audiences: [saved], notifications: [] }) }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(ComposeView);
+    await flushPromises();
+    expect(wrapper.find("[data-testid=chosen-audience]").text()).toContain("City is Istanbul");
+    expect(wrapper.text()).toContain("What should the message say?");
+    expect((wrapper.find("textarea").element as HTMLTextAreaElement).value).toBe("");
+
+    await wrapper.find("textarea").setValue("Free shipping this week.");
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+    const created = fetchMock.mock.calls.find(([url]) => url === "/api/campaigns");
+    expect(JSON.parse(String(created?.[1]?.body))).toMatchObject({ brief: "Free shipping this week.", saved_audience_id: "a1" });
+    window.history.replaceState({}, "", "/");
+  });
+});
+
+describe("analytics", () => {
+  it("adds channels up, redraws on a new period and lists the worst campaign first", async () => {
+    window.history.replaceState({}, "", "/analytics");
+    const channel = { channel: "sms", planned: 10, skipped: 2, accepted: 6, failed: 1, unknown: 1, on_the_way: 0, delivered: 5, bounced: 1, waiting: 0, opened: 0 };
+    const fetchMock = vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => (url.endsWith("days=7")
+        ? { days: 7, channels: [], calls: [], campaigns: [] }
+        : { days: 30, channels: [channel, { ...channel, channel: "email" }], calls: [{ day: "2026-11-03T00:00:00Z", accepted: 3, not_accepted: 1 }], campaigns: [{ id: "c1", name: "Winter", status: "COMPLETED_WITH_FAILURES", accepted: 12, failed: 2, unknown: 2 }] }),
+    }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(AnalyticsView);
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith("/api/analytics?days=30", undefined);
+    expect(wrapper.find("[data-testid=analytics-result-failed]").text()).toContain("4");
+    expect(wrapper.find("[data-testid=calls-table]").text()).toContain("25.0%");
+    expect(wrapper.find("[data-testid=analytics-campaign]").text()).toContain("25.0%");
+    await wrapper.find("[data-testid=calls-day]").trigger("mouseenter");
+    expect(wrapper.find("[data-testid=calls-readout]").text()).toContain("3 accepted, 1 not accepted, 25.0% error rate");
+
+    await wrapper.find("[data-testid=analytics-range]").setValue("7");
+    await flushPromises();
+    expect(window.location.search).toBe("?days=7");
+    expect(wrapper.find("[data-testid=analytics-empty]").exists()).toBe(true);
+  });
+});
+
+describe("settings", () => {
+  it("shows what the app runs with and remembers the monitor's refresh", async () => {
+    window.localStorage.removeItem("delivery-monitor-refresh");
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ llm_provider: "openai", llm_model: "gpt-x", rate_limit_per_second: 100, max_attempts: 5, customers: 6000 }) }) as Response));
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(wrapper.find("[data-testid=settings-provider]").text()).toBe("OpenAI");
+    expect(wrapper.find("[data-testid=settings-model]").text()).toBe("gpt-x");
+    expect(wrapper.find("[data-testid=settings-rate]").text()).toContain("100");
+    expect(wrapper.find("[data-testid=settings-attempts]").text()).toBe("5");
+    expect(wrapper.find("[data-testid=settings-customers]").text()).toContain("6,000");
+
+    await wrapper.find("[data-testid=settings-auto-refresh]").setValue("30");
+    expect(wrapper.find("[data-testid=settings-saved]").exists()).toBe(true);
+    expect(storedAutoRefresh()).toBe("30");
+
+    await wrapper.find("[data-testid=settings-theme]").setValue("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    await wrapper.find("[data-testid=settings-theme]").setValue("light");
+    expect(document.documentElement.dataset.theme).toBe("light");
+
+    await wrapper.find("[data-testid=settings-channel-sms]").setValue(false);
+    expect(defaultChannels()).toEqual(["email"]);
+    expect(wrapper.find("[data-testid=settings-channel-email]").attributes("disabled")).toBeDefined();
+    await wrapper.find("[data-testid=settings-channel-sms]").setValue(true);
+    expect(defaultChannels()).toEqual(["sms", "email"]);
+    window.localStorage.clear();
+  });
+});
+
+describe("help", () => {
+  it("explains every delivery status and links the documents", () => {
+    const wrapper = mount(HelpView);
+    expect(wrapper.find("[data-testid=help-statuses]").text()).toContain("does not confirm delivery");
+    expect(wrapper.find("[data-testid=help-documents]").findAll("a")).toHaveLength(2);
+  });
+});
+
+describe("donut chart", () => {
+  it("keeps a tiny slice visible, says so honestly and fills the ring", () => {
+    const wrapper = mount(DonutChart, {
+      props: { title: "By channel", testPrefix: "c", unit: ["delivery", "deliveries"] as [string, string], slices: [{ key: "sms", label: "SMS", count: 1, color: "#000" }, { key: "email", label: "Email", count: 999, color: "#111" }, { key: "none", label: "None", count: 0, color: "#222" }] },
+    });
+    const length = (key: string) => Number(wrapper.find(`[data-testid=c-arc-${key}]`).attributes("stroke-dasharray")?.split(" ")[0]);
+    expect(length("sms")).toBeGreaterThanOrEqual(2);
+    expect(length("none")).toBe(0);
+    expect(length("sms") + length("email")).toBeCloseTo(98, 5);
+    expect(wrapper.find("[data-testid=c-sms]").text()).toContain("<1%");
+    expect(wrapper.find("[data-testid=c-email]").text()).toContain(">99%");
+  });
+});
+
+describe("delivery monitor refresh", () => {
+  it("refreshes on a click, on the chosen interval and not when turned off", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    window.localStorage.removeItem("delivery-monitor-refresh");
+    window.history.replaceState({}, "", "/delivery-monitor");
+    const fetchMock = vi.fn(async (_url: string) => ({ ok: true, status: 200, json: async () => ({ counts: {}, channels: {}, reasons: [], total: 0, deliveries: [], paused: [] }) }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    const calls = () => fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/delivery-monitor")).length;
+    const wrapper = mount(DeliveryMonitorView);
+    await flushPromises();
+    expect(calls()).toBe(1);
+    expect(wrapper.find("[data-testid=monitor-updated]").text()).toContain("next in 10s");
+    expect((wrapper.find("[data-testid=monitor-auto-refresh]").element as HTMLSelectElement).value).toBe("10");
+
+    await wrapper.find("[data-testid=monitor-refresh]").trigger("click");
+    await flushPromises();
+    expect(calls()).toBe(2);
+
+    vi.advanceTimersByTime(4_000);
+    await flushPromises();
+    expect(wrapper.find("[data-testid=monitor-updated]").text()).toContain("next in 6s");
+    vi.advanceTimersByTime(6_000);
+    await flushPromises();
+    expect(calls()).toBe(3);
+
+    await wrapper.find("[data-testid=monitor-auto-refresh]").setValue("30");
+    vi.advanceTimersByTime(29_000);
+    await flushPromises();
+    expect(calls()).toBe(3);
+    vi.advanceTimersByTime(1_000);
+    await flushPromises();
+    expect(calls()).toBe(4);
+
+    await wrapper.find("[data-testid=monitor-auto-refresh]").setValue("0");
+    vi.advanceTimersByTime(120_000);
+    await flushPromises();
+    expect(calls()).toBe(4);
+    expect(window.localStorage.getItem("delivery-monitor-refresh")).toBe("0");
+    expect(wrapper.find("[data-testid=monitor-updated]").text()).not.toContain("next in");
+
+    wrapper.unmount();
+    window.localStorage.removeItem("delivery-monitor-refresh");
+    vi.useRealTimers();
+  });
+});
+
+describe("delivery monitor", () => {
+  const row = { id: "d1", campaign_id: "c1", campaign_name: "Winter sale", user_id: 7, first_name: "Ayşe", channel: "sms", status: "FAILED", calls: 3, response_code: 500, reason: "server_error", next_attempt_at: "2026-11-03T12:00:00Z", updated_at: "2026-11-03T12:00:00Z" };
+  const answer = (overrides = {}) => ({ counts: { QUEUED: 4, SENDING: 0, RETRYING: 2, UNKNOWN: 0, FAILED: 1 }, channels: { sms: 5, email: 2 }, reasons: [{ reason: "", count: 6 }, { reason: "server_error", count: 1 }], total: 1, deliveries: [row], paused: [], ...overrides });
+  const stubMonitor = (body: (url: string) => unknown) => {
+    const fetchMock = vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => body(url) }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  };
+
+  it("counts each status, links to the campaign and opens the attempt history", async () => {
+    window.history.replaceState({}, "", "/delivery-monitor");
+    stubMonitor((url) => (url.includes("/attempts") ? { attempts: [{ attempt: 1, response_code: 500, outcome: "server_error", error: "", occurred_at: "2026-11-03T12:00:00Z" }] } : answer()));
+    const wrapper = mount(DeliveryMonitorView);
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid=count-QUEUED]").text()).toContain("4");
+    expect(wrapper.find("[data-testid=monitor-campaign]").attributes("href")).toBe("/campaigns/c1?tab=deliveries&status=FAILED&channel=sms");
+    await wrapper.find("[data-testid=monitor-history]").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=monitor-attempts]").text()).toContain("500");
+  });
+
+  it("draws each breakdown to scale, redraws it on filter and filters from a slice", async () => {
+    window.history.replaceState({}, "", "/delivery-monitor");
+    const fetchMock = stubMonitor((url) =>
+      url.includes("reason=server_error") ? answer({ channels: { sms: 1, email: 3 }, reasons: [{ reason: "server_error", count: 4 }] }) : answer(),
+    );
+    const wrapper = mount(DeliveryMonitorView);
+    await flushPromises();
+    expect(wrapper.find("[data-testid=channel-sms]").text()).toContain("71%");
+    const arc = () => wrapper.find("[data-testid=channel-arc-email]");
+    const before = arc().attributes("stroke-dasharray");
+
+    // Every row of a legend filters, and the choice shows in the filters under the charts.
+    await wrapper.find("[data-testid=reason-none]").trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith("/api/delivery-monitor?limit=100&reason=none", undefined);
+    expect((wrapper.find("[data-testid=monitor-reason]").element as HTMLSelectElement).value).toBe("none");
+    await wrapper.find("[data-testid=reason-none]").trigger("click");
+    await flushPromises();
+    await wrapper.find("[data-testid=count-UNKNOWN]").trigger("click");
+    await flushPromises();
+    expect((wrapper.find("[data-testid=monitor-status]").element as HTMLSelectElement).value).toBe("UNKNOWN");
+    await wrapper.find("[data-testid=monitor-status]").setValue("");
+    await flushPromises();
+    await wrapper.find("[data-testid=reason-server_error]").trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith("/api/delivery-monitor?limit=100&reason=server_error", undefined);
+    expect(window.location.search).toBe("?reason=server_error");
+    // The same element, so the browser slides it to its new share.
+    expect(arc().attributes("stroke-dasharray")).not.toBe(before);
+    expect(arc().attributes("stroke-dasharray")?.startsWith("74")).toBe(true);
+    expect(wrapper.find("[data-testid=channel-email]").text()).toContain("75%");
+
+    await wrapper.find("[data-testid=channel-arc-email]").trigger("click");
+    await flushPromises();
+    expect(window.location.search).toBe("?channel=email&reason=server_error");
+    await wrapper.find("[data-testid=channel-email]").trigger("click");
+    await flushPromises();
+    expect(window.location.search).toBe("?reason=server_error");
+  });
+
+  it("filters on the server and keeps the filters in the address", async () => {
+    window.history.replaceState({}, "", "/delivery-monitor?channel=sms&outcome=timeout&within_hours=1");
+    const fetchMock = stubMonitor(() => answer());
+    const wrapper = mount(DeliveryMonitorView);
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith("/api/delivery-monitor?limit=100&channel=sms&outcome=timeout&within_hours=1", undefined);
+
+    await wrapper.find("[data-testid=count-FAILED]").trigger("click");
+    await flushPromises();
+    expect(window.location.search).toBe("?status=FAILED&channel=sms&outcome=timeout&within_hours=1");
+    await wrapper.find("[data-testid=count-FAILED]").trigger("click");
+    await flushPromises();
+    expect(window.location.search).toBe("?channel=sms&outcome=timeout&within_hours=1");
+    await wrapper.find("[data-testid=monitor-clear]").trigger("click");
+    await flushPromises();
+    expect(window.location.search).toBe("");
+  });
+
+  it("names a paused campaign and says when nothing needs watching", async () => {
+    window.history.replaceState({}, "", "/delivery-monitor");
+    stubMonitor(() => answer({ total: 0, deliveries: [], paused: [{ id: "c2", name: "Bursa" }] }));
+    const wrapper = mount(DeliveryMonitorView);
+    await flushPromises();
+    expect(wrapper.find("[data-testid=monitor-paused]").text()).toContain("Bursa");
+    expect(wrapper.find("[data-testid=monitor-paused] a").attributes("href")).toBe("/campaigns/c2");
+    expect(wrapper.find("[data-testid=monitor-empty]").text()).toBe("Nothing is waiting and nothing has failed.");
+  });
+
+  it("shows more past the first page", async () => {
+    window.history.replaceState({}, "", "/delivery-monitor");
+    const everyone = Array.from({ length: 130 }, (_, index) => ({ ...row, id: `d${index}` }));
+    stubMonitor((url) => {
+      const address = new URL(url, "http://test");
+      const offset = Number(address.searchParams.get("offset") ?? 0);
+      return answer({ total: 130, deliveries: everyone.slice(offset, offset + Number(address.searchParams.get("limit"))) });
+    });
+    const wrapper = mount(DeliveryMonitorView);
+    await flushPromises();
+    expect(wrapper.find("[data-testid=monitor-count]").text()).toBe("Showing 100 of 130 deliveries");
+    await wrapper.find("[data-testid=monitor-more]").trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll("[data-testid=monitor-row]")).toHaveLength(130);
+    expect(wrapper.find("[data-testid=monitor-more]").exists()).toBe(false);
+  });
+});
+
+describe("templates", () => {
+  it("shows each design from the backend, its real use, and starts a campaign from it", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      const body = url === "/api/email-templates"
+        ? { templates: [{ id: "classic", version: "aaa", campaigns: 3 }, { id: "banner", version: "bbb", campaigns: 1 }, { id: "offer", version: "ccc", campaigns: 0 }] }
+        : { subject: "s", html: `<p>${JSON.parse(String(init?.body)).email_template}</p>`, text: "t" };
+      return { ok: true, status: 200, json: async () => body } as Response;
+    }));
+    const wrapper = mount(TemplatesView);
+    await flushPromises();
+    await flushPromises();
+
+    const banner = wrapper.find("[data-testid=template-banner]");
+    expect(banner.find("[data-testid=template-use]").text()).toContain("Used by 1 campaign ");
+    expect(banner.find("[data-testid=template-use]").text()).toContain("bbb");
+    expect(banner.find("[data-testid=template-frame]").attributes("srcdoc")).toBe("<p>banner</p>");
+    expect(banner.find("[data-testid=use-template]").attributes("href")).toBe("/campaigns/new?template=banner");
+  });
+
+  it("says so when the templates cannot be loaded", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({ error: "no" }) }) as Response));
+    const wrapper = mount(TemplatesView);
+    await flushPromises();
+    expect(wrapper.text()).toContain("We could not load the templates");
+    expect(wrapper.find("[data-testid=use-template]").exists()).toBe(false);
   });
 });
 

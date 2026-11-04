@@ -31,17 +31,33 @@ type api struct {
 	campaigns *campaign.Service
 	provider  ai.Provider
 	metrics   *telemetry.Metrics
+	sending   Sending
+}
+
+// Sending is how the workers send, shown on the settings page.
+type Sending struct {
+	RatePerSecond int
+	MaxAttempts   int
 }
 
 // Register adds the campaign routes to mux.
-func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provider, metrics *telemetry.Metrics) {
-	a := &api{campaigns, provider, metrics}
+func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provider, metrics *telemetry.Metrics, sending Sending) {
+	a := &api{campaigns, provider, metrics, sending}
 	mux.HandleFunc("GET /api/config", a.config)
 	mux.HandleFunc("GET /api/session", a.session)
 	mux.HandleFunc("POST /api/session", a.signIn)
 	mux.HandleFunc("DELETE /api/session", a.signOut)
 	for pattern, handler := range map[string]http.HandlerFunc{
 		"GET /api/overview":                                      a.overview,
+		"GET /api/settings":                                      a.settings,
+		"GET /api/email-templates":                               a.emailTemplates,
+		"GET /api/delivery-monitor":                              a.deliveryMonitor,
+		"GET /api/analytics":                                     a.analytics,
+		"GET /api/channels":                                      a.channels,
+		"GET /api/audiences":                                     a.audiences,
+		"POST /api/audiences":                                    a.saveAudience,
+		"POST /api/audiences/{id}/recount":                       a.recountAudience,
+		"DELETE /api/audiences/{id}":                             a.deleteAudience,
 		"GET /api/campaigns":                                     a.list,
 		"POST /api/campaigns":                                    a.create,
 		"GET /api/campaigns/{id}":                                a.get,
@@ -76,6 +92,19 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 
 func (a *api) config(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"llm_provider": a.provider.Name(), "llm_model": a.provider.Model()})
+}
+
+func (a *api) settings(w http.ResponseWriter, r *http.Request) {
+	customers, err := a.campaigns.CustomerCount(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"llm_provider": a.provider.Name(), "llm_model": a.provider.Model(),
+		"rate_limit_per_second": a.sending.RatePerSecond, "max_attempts": a.sending.MaxAttempts,
+		"customers": customers,
+	})
 }
 
 func (a *api) overview(w http.ResponseWriter, r *http.Request) {
@@ -120,6 +149,103 @@ func (a *api) list(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"campaigns": campaigns, "total": total})
 }
 
+func (a *api) emailTemplates(w http.ResponseWriter, r *http.Request) {
+	templates, err := a.campaigns.EmailTemplateUses(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"templates": templates})
+}
+
+func (a *api) analytics(w http.ResponseWriter, r *http.Request) {
+	days, err := strconv.Atoi(r.URL.Query().Get("days"))
+	if err != nil {
+		writeError(w, r, campaign.ErrUnknownFilter)
+		return
+	}
+	analytics, err := a.campaigns.Analytics(r.Context(), days)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, analytics)
+}
+
+func (a *api) channels(w http.ResponseWriter, r *http.Request) {
+	channels, err := a.campaigns.Channels(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"channels": channels})
+}
+
+func (a *api) audiences(w http.ResponseWriter, r *http.Request) {
+	saved, err := a.campaigns.SavedSegments(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"audiences": saved})
+}
+
+func (a *api) saveAudience(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		CampaignID string `json:"campaign_id"`
+		Name       string `json:"name"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	saved, err := a.campaigns.SaveSegment(r.Context(), body.CampaignID, body.Name)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, saved)
+}
+
+func (a *api) recountAudience(w http.ResponseWriter, r *http.Request) {
+	saved, err := a.campaigns.RecountSegment(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, saved)
+}
+
+func (a *api) deleteAudience(w http.ResponseWriter, r *http.Request) {
+	if err := a.campaigns.DeleteSegment(r.Context(), r.PathValue("id")); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *api) deliveryMonitor(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	limit, _ := strconv.Atoi(query.Get("limit"))   //nolint:errcheck // anything invalid means the default
+	offset, _ := strconv.Atoi(query.Get("offset")) //nolint:errcheck // anything invalid means the start
+	within := 0
+	if value := query.Get("within_hours"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			writeError(w, r, campaign.ErrUnknownFilter)
+			return
+		}
+		within = parsed
+	}
+	monitor, err := a.campaigns.DeliveryMonitor(r.Context(), campaign.MonitorFilter{
+		Status: query.Get("status"), Channel: query.Get("channel"), Outcome: query.Get("outcome"), Reason: query.Get("reason"), WithinHours: within, Limit: limit, Offset: offset,
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, monitor)
+}
+
 func (a *api) activity(w http.ResponseWriter, r *http.Request) {
 	entries, err := a.campaigns.Activity(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -138,12 +264,14 @@ func (a *api) create(w http.ResponseWriter, r *http.Request) {
 		Skip     *int     `json:"not_messaged_within_days"`
 		ABTest   bool     `json:"ab_test"`
 		Share    *int     `json:"variant_a_percent"`
+		Template string   `json:"email_template"`
+		Audience string   `json:"saved_audience_id"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
 	id, err := a.campaigns.CreateWith(r.Context(), campaign.NewCampaign{
-		Brief: body.Brief, Channels: body.Channels, Tone: body.Tone, OfferPercent: body.Offer, NotMessagedWithinDays: body.Skip, ABTest: body.ABTest, VariantAPercent: body.Share,
+		Brief: body.Brief, Channels: body.Channels, Tone: body.Tone, OfferPercent: body.Offer, NotMessagedWithinDays: body.Skip, ABTest: body.ABTest, VariantAPercent: body.Share, EmailTemplate: body.Template, SavedAudienceID: body.Audience,
 	})
 	if err != nil {
 		writeError(w, r, err)
@@ -605,6 +733,14 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusBadRequest, "The brief mentions a different discount than the one you entered. Change one of them."
 	case errors.Is(err, campaign.ErrInvalidName):
 		status, message = http.StatusBadRequest, "Write a campaign name of up to 80 characters."
+	case errors.Is(err, campaign.ErrSegmentNotFound):
+		status, message = http.StatusNotFound, "This saved audience does not exist."
+	case errors.Is(err, campaign.ErrSegmentName):
+		status, message = http.StatusBadRequest, "Write an audience name of up to 80 characters."
+	case errors.Is(err, campaign.ErrSegmentNameTaken):
+		status, message = http.StatusConflict, "You already have a saved audience with this name."
+	case errors.Is(err, campaign.ErrSegmentNotSavable):
+		status, message = http.StatusConflict, "This campaign has no audience to save. Resolve anything blocking its rule first."
 	case errors.Is(err, campaign.ErrUnknownGroup):
 		status, message = http.StatusBadRequest, "This campaign filter does not exist."
 	case errors.Is(err, campaign.ErrNotFound):

@@ -52,3 +52,28 @@
   --transition-fast: 120ms ease;
   --transition-standard: 180ms ease;
 }
+
+/* Dark uses the same roles with its own steps, chosen on Settings. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-canvas: #0F1420;
+  --color-surface: #171D2B;
+  --color-surface-subtle: #212939;
+  --color-border: #2C3548;
+  --color-border-input: #6F7B90;
+
+  --color-text: #E6EAF2;
+  --color-text-muted: #A0ACBE;
+
+  --color-primary: #7E9BFF;
+  --color-primary-hover: #9BB2FF;
+  --color-primary-soft: #222D52;
+  --color-on-primary: #0B1020;
+  --color-ai: #B0A4FF;
+  --color-success: #34D399;
+  --color-warning: #FBBF24;
+  --color-error: #F87171;
+
+  --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.5);
+}

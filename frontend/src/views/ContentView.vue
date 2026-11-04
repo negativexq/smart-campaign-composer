@@ -108,7 +108,7 @@ const next = computed(() =>
     : { href: `/campaigns/${props.campaignId}/review`, label: "Continue to review" },
 );
 const template = computed({
-  get: () => messages.email_template || EMAIL_TEMPLATES[0].id,
+  get: () => messages.email_template || campaign.value?.email_template || EMAIL_TEMPLATES[0].id,
   set: (id: string) => (messages.email_template = id),
 });
 const buttonHasProblem = computed(() => Boolean(issueFor("email_cta_label") || issueFor("email_cta_url")));

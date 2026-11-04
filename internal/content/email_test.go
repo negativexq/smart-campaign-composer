@@ -469,3 +469,28 @@ func TestOffersDifferAcrossVersions(t *testing.T) {
 		t.Fatal("a different discount")
 	}
 }
+
+func TestTemplateVersionStaysPutAfterRenderingAndDiffersByDesign(t *testing.T) {
+	t.Parallel()
+	before := map[string]string{}
+	for _, name := range content.EmailTemplates {
+		before[name] = content.EmailTemplateVersion(name)
+		if before[name] == "" {
+			t.Fatalf("%s has no version", name)
+		}
+	}
+	for _, name := range content.EmailTemplates {
+		if _, err := content.RenderEmail(content.Content{EmailSubject: "s", EmailBody: "b", EmailTemplate: name}, "Ayşe", ""); err != nil {
+			t.Fatalf("render %s: %v", name, err)
+		}
+		if got := content.EmailTemplateVersion(name); got != before[name] {
+			t.Fatalf("%s moved from %s to %s", name, before[name], got)
+		}
+	}
+	if before["classic"] == before["banner"] || before["banner"] == before["offer"] {
+		t.Fatalf("designs share a version: %v", before)
+	}
+	if content.EmailTemplateVersion("") != before["classic"] {
+		t.Fatal("no choice should be the default design")
+	}
+}

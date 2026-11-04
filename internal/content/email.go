@@ -2,7 +2,9 @@ package content
 
 import (
 	"bytes"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"fmt"
 	"html/template"
 	"regexp"
@@ -21,6 +23,8 @@ var EmailTemplates = []string{"classic", "banner", "offer"}
 var (
 	emailTemplate = template.Must(template.New("email").Parse(emailSource))
 	blankLine     = regexp.MustCompile(`\n\s*\n`)
+
+	templateVersions = readTemplateVersions()
 )
 
 // Email is one person's message, ready to hand to a provider.
@@ -87,6 +91,22 @@ func footerFor(code string) emailFooter {
 		known, _ = language.Get(language.Fallback)
 	}
 	return emailFooter{known.Code, known.Received, known.Unsubscribe, known.LinkLater}
+}
+
+// EmailTemplateVersion identifies a design as it stands now and changes only when that
+// design does, so an approval can record exactly which one it approved.
+func EmailTemplateVersion(name string) string {
+	return templateVersions[templateName(name)]
+}
+
+// Read at startup, because rendering rewrites a template's parsed form to escape it.
+func readTemplateVersions() map[string]string {
+	versions := make(map[string]string, len(EmailTemplates))
+	for _, name := range EmailTemplates {
+		sum := sha256.Sum256([]byte(emailTemplate.Lookup(name).Tree.Root.String()))
+		versions[name] = hex.EncodeToString(sum[:])[:12]
+	}
+	return versions
 }
 
 // templateName falls back to the default, so older drafts and anything already

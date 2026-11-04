@@ -46,6 +46,7 @@ export function sourceOf(campaign: Campaign, condition: Condition): { quotes: st
   const quotes = (evidence ?? []).filter((entry) => entry.field === condition.field).map((entry) => entry.quote);
   if (quotes.length) return { quotes, text: "" };
   if (condition.field === "not_messaged_within_days" && campaign.not_messaged_within_days) return { quotes, text: "From Options" };
+  if (campaign.proposal?.saved_audience) return { quotes, text: "From your saved audience" };
   // Older proposals were made before quotes existed, so they have nothing to say here.
   const assumed = campaign.proposal?.assumptions.some((assumption) => assumption.field === condition.field);
   if (!evidence || assumed) return { quotes, text: "" };

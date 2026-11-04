@@ -104,7 +104,10 @@ func (l *FilterList) UnmarshalJSON(raw []byte) error {
 // UpdatedBrief is the brief rewritten for a refinement. It moves to the campaign
 // once checked, so it is never stored with the proposal.
 type Proposal struct {
-	CampaignName          string       `json:"campaign_name,omitempty"`
+	CampaignName string `json:"campaign_name,omitempty"`
+	// SavedAudience names the saved rule this was taken from. No model read it from the
+	// brief, and only the campaign service writes it.
+	SavedAudience         string       `json:"saved_audience,omitempty"`
 	UpdatedBrief          string       `json:"updated_brief,omitempty"`
 	Segment               Spec         `json:"segment"`
 	Assumptions           []Assumption `json:"assumptions"`

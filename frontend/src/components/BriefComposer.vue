@@ -4,6 +4,8 @@ import { computed } from "vue";
 const props = defineProps<{
   modelValue: string;
   actionLabel: string;
+  label?: string;
+  placeholder?: string;
   suggestions?: string[];
   unavailableReason?: string;
 }>();
@@ -25,12 +27,12 @@ function submit() {
 
 <template>
   <form class="composer" @submit.prevent="submit">
-    <label class="label" for="brief">Campaign brief</label>
+    <label class="label" for="brief">{{ label ?? "Campaign brief" }}</label>
     <textarea
       id="brief"
       class="field"
       rows="7"
-      placeholder="Describe who you want to reach, what you want to say and the tone you want."
+      :placeholder="placeholder ?? 'Describe who you want to reach, what you want to say and the tone you want.'"
       aria-describedby="brief-hint"
       :value="modelValue"
       @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"

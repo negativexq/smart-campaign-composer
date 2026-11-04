@@ -1,3 +1,4 @@
+import { EMAIL_TEMPLATES } from "./emailTemplates";
 import type { ActivityEntry } from "../api/campaigns";
 import { languageName } from "./languages";
 
@@ -23,6 +24,7 @@ const FIELD_NAMES: Record<string, string> = {
 const TRIGGER_TITLES: Record<string, string> = {
   refinement: "Audience refined",
   brief_edit: "Brief edited, audience proposed again",
+  saved_audience: "Audience taken from a saved one",
 };
 
 function plural(count: number, noun: string) {
@@ -51,6 +53,8 @@ function pauseDetail(details: Record<string, unknown>) {
 }
 
 /** How a notification reads at a glance: a problem, an end or a start. */
+const templateName = (id: string) => (EMAIL_TEMPLATES.find((template) => template.id === id) ?? EMAIL_TEMPLATES[0]).name;
+
 export function notificationTone(entry: ActivityEntry): "error" | "done" | "started" {
   const { failed, unknown } = entry.details;
   if (entry.type === "campaign.paused" || entry.type === "content.generation_failed") return "error";
@@ -85,7 +89,7 @@ export function describeActivity(entry: ActivityEntry): { title: string; detail:
       return { title: `Renamed to "${details.name}"`, detail: "" };
     case "segment.proposed": {
       const audience = details.audience as { total: number } | undefined;
-      const parts = [audience ? `${plural(audience.total, "matching customer")}` : "", `by ${details.provider}`];
+      const parts = [audience ? `${plural(audience.total, "matching customer")}` : "", details.trigger === "saved_audience" ? "" : `by ${details.provider}`];
       const blocked = Number(details.unsupported_conditions ?? 0);
       if (blocked) parts.push(`${plural(blocked, "unsupported condition")}`);
       return {
@@ -105,8 +109,10 @@ export function describeActivity(entry: ActivityEntry): { title: string; detail:
     }
     case "content.generation_failed":
       return { title: "Writing messages failed", detail: FAILURE_REASONS[String(details.reason)] ?? "" };
+    case "audience.saved":
+      return { title: "Audience saved", detail: String(details.name ?? "") };
     case "campaign.approved":
-      return { title: "Approved", detail: "Audience rules and messages are now fixed" };
+      return { title: "Approved", detail: details.email_template_version ? `Audience rules and messages are now fixed. ${templateName(String(details.email_template ?? ""))} email design, version ${details.email_template_version}` : "Audience rules and messages are now fixed" };
     case "campaign.scheduled":
       return { title: "Scheduled", detail: String(details.schedule ?? "") };
     case "campaign.schedule_cancelled":

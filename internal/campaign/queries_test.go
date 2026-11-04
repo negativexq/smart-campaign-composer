@@ -330,3 +330,37 @@ func TestListPagesThroughEveryCampaignAndCountsThem(t *testing.T) {
 		t.Fatalf("unknown group: %v", err)
 	}
 }
+
+func TestAChosenTemplateIsKeptAndCounted(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, step{output: validProposal})
+	ctx := context.Background()
+	id, err := h.service.CreateWith(ctx, campaign.NewCampaign{Brief: "Istanbul cart reminder", Channels: []string{"sms", "email"}, EmailTemplate: "banner"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	view, err := h.service.Get(ctx, id)
+	if err != nil || view.EmailTemplate != "banner" {
+		t.Fatalf("view: %q %v", view.EmailTemplate, err)
+	}
+	if _, err := h.service.Create(ctx, "No choice made"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	uses, err := h.service.EmailTemplateUses(ctx)
+	if err != nil {
+		t.Fatalf("uses: %v", err)
+	}
+	got := map[string]int{}
+	for _, use := range uses {
+		got[use.ID] = use.Campaigns
+		if use.Version == "" {
+			t.Fatalf("no version: %+v", use)
+		}
+	}
+	if got["banner"] != 1 || got["classic"] != 1 || got["offer"] != 0 || len(got) != 3 {
+		t.Fatalf("uses: %v", got)
+	}
+	if _, err := h.service.CreateWith(ctx, campaign.NewCampaign{Brief: "x y", Channels: []string{"email"}, EmailTemplate: "nope"}); !errors.Is(err, campaign.ErrInvalidOptions) {
+		t.Fatalf("unknown template: %v", err)
+	}
+}

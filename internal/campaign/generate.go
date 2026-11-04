@@ -703,6 +703,7 @@ func issueReasons(invalid *content.ValidationError) []string {
 // alone, which keeps its text and its record of what a person changed.
 func (g *Generation) merged(generated content.Content) StoredContent {
 	stored := g.view.Content
+	generated.EmailTemplate = g.view.EmailTemplate
 	if stored != nil {
 		generated.EmailTemplate = stored.EmailTemplate
 	}

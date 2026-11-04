@@ -1,23 +1,43 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
-import { createCampaign, errorMessage } from "../api/campaigns";
+import { createCampaign, errorMessage, getAudiences, type SavedAudience } from "../api/campaigns";
 import BriefComposer from "../components/BriefComposer.vue";
 import ChannelPicker from "../components/ChannelPicker.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
+import { ruleText } from "../lib/audience";
+import { defaultChannels } from "../lib/preferences";
+import { EMAIL_TEMPLATES } from "../lib/emailTemplates";
 import { navigate } from "../lib/navigation";
 import { requestAudience } from "../lib/pendingAudience";
 
 const brief = ref("");
-const channels = ref(["sms", "email"]);
+const channels = ref(defaultChannels());
 const tone = ref("");
 const hasOffer = ref(false);
 const abTest = ref(false);
 const firstShare = ref<number | "">(50);
 const offer = ref<number | "">("");
 const quietDays = ref("");
+// Set by "Use template". It needs a channel to apply to, so email must stay chosen.
+const template = ref(EMAIL_TEMPLATES.find((item) => item.id === new URLSearchParams(window.location.search).get("template")) ?? null);
 const busy = ref(false);
 const error = ref("");
+
+const savedAudience = ref<SavedAudience | null>(null);
+const emit = defineEmits<{ savedAudience: [used: boolean] }>();
+watch(savedAudience, (saved) => emit("savedAudience", Boolean(saved)));
+
+// "Use in a new campaign" brings the rule itself, so the brief only says what to tell them.
+onMounted(async () => {
+  const id = new URLSearchParams(window.location.search).get("audience");
+  if (!id) return;
+  try {
+    savedAudience.value = (await getAudiences()).find((item) => item.id === id) ?? null;
+  } catch (failure) {
+    error.value = errorMessage(failure);
+  }
+});
 
 const suggestions = [
   "Send a 30% discount reminder to users in Istanbul who added to their cart in the last 30 days and did not buy. Keep it friendly and short.",
@@ -54,6 +74,8 @@ async function findAudience() {
       ...(hasOffer.value && offer.value !== "" ? { offer_percent: offer.value } : {}),
       ...(quietDays.value ? { not_messaged_within_days: Number(quietDays.value) } : {}),
       ...(abTest.value ? { ab_test: true, variant_a_percent: Number(firstShare.value) } : {}),
+      ...(template.value && channels.value.includes("email") ? { email_template: template.value.id } : {}),
+      ...(savedAudience.value ? { saved_audience_id: savedAudience.value.id } : {}),
     });
     requestAudience(id);
     navigate(`/campaigns/${id}/edit`);
@@ -76,12 +98,22 @@ async function findAudience() {
 
     <BriefComposer
       v-model="brief"
-      action-label="Find audience"
-      :suggestions="suggestions"
+      :action-label="savedAudience ? 'Continue' : 'Find audience'"
+      :label="savedAudience ? 'What should the message say?' : undefined"
+      :placeholder="savedAudience ? 'What you want to tell them and the tone you want.' : undefined"
+      :suggestions="savedAudience ? [] : suggestions"
       :unavailable-reason="unavailableReason"
       @submit="findAudience"
     >
       <ChannelPicker v-model="channels" :disabled="busy" />
+      <p v-if="savedAudience" class="small muted chosen-template" data-testid="chosen-audience">
+        Audience: {{ savedAudience.name }} ({{ savedAudience.conditions.map(ruleText).join(", ") }}).
+        <button class="link-button small" type="button" data-testid="remove-audience" @click="savedAudience = null">Remove</button>
+      </p>
+      <p v-if="template && channels.includes('email')" class="small muted chosen-template" data-testid="chosen-template">
+        Email design: {{ template.name }}.
+        <button class="link-button small" type="button" data-testid="drop-template" :disabled="busy" @click="template = null">Remove</button>
+      </p>
       <details class="more" data-testid="campaign-options">
         <summary class="more-toggle">
           <span>Options</span>
@@ -219,5 +251,18 @@ async function findAudience() {
 
 .error {
   margin-bottom: var(--space-4);
+}
+
+.chosen-template {
+  margin: 0;
+}
+
+.link-button {
+  padding: 0;
+  color: var(--color-primary);
+  background: transparent;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
 }
 </style>

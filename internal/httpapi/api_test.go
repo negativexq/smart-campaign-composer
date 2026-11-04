@@ -45,7 +45,7 @@ func newAPI(t *testing.T, provider ai.Provider) http.Handler {
 	service := campaign.NewService(pool, provider, metrics,
 		noop.NewTracerProvider().Tracer("test"), func() time.Time { return referenceTime })
 	mux := http.NewServeMux()
-	httpapi.Register(mux, service, provider, metrics)
+	httpapi.Register(mux, service, provider, metrics, httpapi.Sending{RatePerSecond: 100, MaxAttempts: 5})
 	return mux
 }
 
@@ -115,6 +115,18 @@ func TestRefinementThroughTheAPI(t *testing.T) {
 	// Only the fixtures with a cart event newer than 4 days remain: one user.
 	if total := response["audience"].(map[string]any)["total"].(float64); total != 1 {
 		t.Fatalf("total: %v", total)
+	}
+}
+
+func TestSettingsShowWhatTheAppRunsWith(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, ai.NewMock())
+	status, body := call(t, api, http.MethodGet, "/api/settings", "")
+	if status != http.StatusOK || body["llm_provider"] != "mock" || body["rate_limit_per_second"] != float64(100) || body["max_attempts"] != float64(5) {
+		t.Fatalf("settings: %d %+v", status, body)
+	}
+	if customers, _ := body["customers"].(float64); customers == 0 {
+		t.Fatalf("customers: %+v", body)
 	}
 }
 

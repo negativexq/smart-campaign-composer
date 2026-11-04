@@ -348,7 +348,7 @@ describe("audience page", () => {
     });
 
     await wrapper.find("#refinement").setValue("make it 4 days");
-    await wrapper.findAll("form").at(-1)!.trigger("submit");
+    await wrapper.find("[data-testid=refine-form]").trigger("submit");
     await flushPromises();
 
     expect(JSON.parse(postsTo(fetchMock, "/api/campaigns/c1/segment")[0][1]!.body as string)).toEqual({ refinement: "make it 4 days" });
@@ -382,7 +382,7 @@ describe("audience page", () => {
     expect(wrapper.find("[data-testid=refinement-diff]").exists()).toBe(false);
 
     await wrapper.find("#refinement").setValue("make it 14 days");
-    await wrapper.findAll("form").at(-1)!.trigger("submit");
+    await wrapper.find("[data-testid=refine-form]").trigger("submit");
     await flushPromises();
 
     const changes = wrapper.findAll("[data-testid=refinement-change]").map((row) => [row.find(".kind").text(), row.text().replace(row.find(".kind").text(), "").replace(/\s+/g, " ").trim()]);
@@ -400,7 +400,7 @@ describe("audience page", () => {
       "POST /api/campaigns/c1/segment": { body: campaign },
     });
     await wrapper.find("#refinement").setValue("make it nicer");
-    await wrapper.findAll("form").at(-1)!.trigger("submit");
+    await wrapper.find("[data-testid=refine-form]").trigger("submit");
     await flushPromises();
     expect(wrapper.find("[data-testid=refinement-diff]").exists()).toBe(false);
   });
@@ -413,7 +413,7 @@ describe("audience page", () => {
     expect(wrapper.find('[data-testid="brief-updated"]').exists()).toBe(false);
 
     await wrapper.find("#refinement").setValue("make it 14 days");
-    await wrapper.findAll("form").at(-1)!.trigger("submit");
+    await wrapper.find("[data-testid=refine-form]").trigger("submit");
     await flushPromises();
 
     expect(wrapper.find('[data-testid="brief-text"]').text()).toBe("Ankara customers in the last 14 days");
@@ -427,7 +427,7 @@ describe("audience page", () => {
     });
 
     await wrapper.find("#refinement").setValue("make it 14 days");
-    await wrapper.findAll("form").at(-1)!.trigger("submit");
+    await wrapper.find("[data-testid=refine-form]").trigger("submit");
     await flushPromises();
 
     expect(wrapper.find('[data-testid="brief-updated"]').exists()).toBe(false);
@@ -440,7 +440,7 @@ describe("audience page", () => {
     });
 
     await wrapper.find("#refinement").setValue("make it 4 days");
-    await wrapper.findAll("form").at(-1)!.trigger("submit");
+    await wrapper.find("[data-testid=refine-form]").trigger("submit");
     await flushPromises();
 
     expect(wrapper.find("[role=alert]").text()).toContain("unavailable");
