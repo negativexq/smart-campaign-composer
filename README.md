@@ -6,6 +6,8 @@ Turns a marketer's plain-language brief into a validated audience and SMS and em
 
 The full path works with the mock AI or a real model: brief, validated audience, validated messages, approval, immediate or scheduled sending through the queue, live progress and a per-recipient report. `make test-e2e` covers it end to end, and `make test-chaos` kills and stops services under a running stack. The UI components are visible with sample data at http://localhost:8080/design.
 
+To run it yourself, follow [Install from scratch](#install-from-scratch). It needs only Docker and no API key.
+
 ## Product tour
 
 Every screenshot below is a real run: an OpenAI model wrote the audiences and messages, the seeded fake customers received them, and the mock provider accepted them. Select one to open it at full size.
@@ -89,13 +91,46 @@ The overview shows campaign counts, recent activity and system health. Analytics
 
 Details and the trade-offs behind each are in [DECISIONS.md](DECISIONS.md).
 
-## Run
+## Install from scratch
 
-Docker is the only requirement.
+This takes a few minutes and needs no API key. It has been tested on macOS with Docker Desktop.
+
+### 1. What you need
+
+- [Git](https://git-scm.com/downloads)
+- [Docker](https://docs.docker.com/get-started/get-docker/) with Compose 2.24 or newer, running. Check with `docker compose version`.
+- Ports 8080, 8081, 8082 and 8083 free
+
+You do not need Go, Node, PostgreSQL or Redis on your machine.
+
+### 2. Get the code
 
 ```bash
-docker compose up --build
+git clone https://github.com/negativexq/smart-campaign-composer.git
 ```
+
+```bash
+cd smart-campaign-composer
+```
+
+### 3. Start it
+
+```bash
+docker compose up --build -d --wait
+```
+
+The command returns when every service is ready. The first run downloads the base images, so it takes longest. With those already on the machine, a full build took about a minute and starting took about 10 seconds. `make up` does the same.
+
+On first start, setup applies migrations and loads:
+
+- 6,000 fake customers reading Turkish, English, German, French or Spanish, with event times relative to that moment
+- seven ready email templates with their images, and an example brand kit. They are ordinary templates you can edit or delete, and a deleted one stays deleted.
+
+### 4. Check that it runs
+
+Open http://localhost:8080. The app asks for a username or email, prefilled with `marketer@example.com`. Select **Continue**. There is no password: the name only records who did what in each campaign's activity.
+
+You should see an empty Overview with a `Mock AI` badge at the top and Database, Rate limiter, Sending worker and Mock provider all `Up`.
 
 | Service | URL |
 |---|---|
@@ -105,11 +140,65 @@ docker compose up --build
 | Test inbox | http://localhost:8083 |
 | Mock provider health | http://localhost:8083/healthz |
 
-Setup applies migrations and loads 6,000 fake users reading Turkish, English, German, French or Spanish on first start. Event times are relative to that moment. It also adds seven ready email templates with their images and an example brand kit, so the Templates page has something to use and copy; they are ordinary templates you can edit or delete, and a deleted one stays deleted. To reseed, remove the volume with `docker compose down -v`.
+### 5. Send your first campaign
+
+1. Open **Templates**, find **Flash Sale** and select **Use template**.
+2. Paste this brief, then select **Find audience**:
+
+   ```text
+   Send a 30% discount reminder to customers in Istanbul who added to their cart in the last 30 days and did not buy. Link: https://example.com/sale
+   ```
+
+3. Read the conditions and the audience count, about 570 people, then select **Continue to SMS**.
+4. Check the SMS, select **Continue to email**, check the email, and select **Continue to review**.
+5. On review, open each language's tab. Then select **Approve and send**. No real message is sent.
+6. The campaign page shows progress live. A send this size finishes in about 20 seconds. Open its **Deliveries** tab for the report.
+7. Open the test inbox at http://localhost:8083 to read the messages as customers would get them.
 
 The test inbox shows each SMS and email the mock provider accepted, with names filled in. Opening one there sends a signed event back to the app, and the campaign's Deliveries report counts it as opened or read. The inbox is in memory, so restarting the provider empties it, while the opens already reported stay in the database.
 
-The app asks for a username or email, prefilled with `marketer@example.com`. There is no password: the name only records who did what in each campaign's activity.
+To see an audience problem, try a brief with something no filter can express, such as "customers in Antalya who are aged 25-34". The condition is named and approval is blocked.
+
+### 6. Use a real model (optional)
+
+The mock AI is enough to try everything. To use a real model:
+
+```bash
+cp .env.example .env
+```
+
+In `.env`, set `LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`, or `LLM_PROVIDER=openai` and `OPENAI_API_KEY`. `.env` is ignored by Git. Then apply it:
+
+```bash
+docker compose up -d --wait
+```
+
+The badge at the top now shows the model's name.
+
+### 7. Stop or start over
+
+Stop it and keep your campaigns:
+
+```bash
+docker compose down
+```
+
+Remove everything, including campaigns and uploaded images. The next start loads fresh customers and the ready templates again:
+
+```bash
+docker compose down -v
+```
+
+### Troubleshooting
+
+| What you see | What to do |
+|---|---|
+| `Bind for 0.0.0.0:8080 failed: port is already allocated`, or the same for 8081 to 8083 | Stop whatever uses that port, then run the start command again. |
+| `dependency failed to start: container ... api ... is unhealthy` after setting a model | A provider was chosen without its key. `docker compose logs api` says which one, such as `LLM_PROVIDER=openai requires OPENAI_API_KEY`. Fill it in `.env`, or set `LLM_PROVIDER=mock`. |
+| `Cannot connect to the Docker daemon` | Start Docker and try again. |
+| `Resolve the audience problems before writing messages.`, or an audience of 0 | The brief needs at least one condition the data can check: city, purchases or cart activity. "All customers" and spending or membership conditions are not filters here. |
+| The email has no button | The AI only uses a link that is in the brief, and never makes one up. Add `Link: https://...` to the brief. |
+| A service will not start for another reason | `docker compose ps -a` shows which one, and `docker compose logs <service>` shows why. |
 
 ## LLM provider
 
