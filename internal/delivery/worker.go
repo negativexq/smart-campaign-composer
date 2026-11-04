@@ -48,6 +48,8 @@ const (
 	recordTimeout      = 5 * time.Second
 	defaultSendTimeout = 5 * time.Second
 	finishInterval     = time.Second
+	stallInterval      = 30 * time.Second
+	defaultStallAfter  = 10 * time.Minute
 	idlePause          = 200 * time.Millisecond
 	// claimGap lets a few slots free up before the next claim, so a busy worker
 	// takes several deliveries per query instead of running one per finished call.
@@ -133,6 +135,9 @@ type Config struct {
 	Backoff     func(attempt int) time.Duration
 	// Breaker stops calling a provider that is failing. Without MinCalls it is off.
 	Breaker BreakerConfig
+	// StallAfter is how long a campaign may wait on retries with nothing finishing
+	// before it stops and someone is told. Zero leaves it waiting.
+	StallAfter time.Duration
 	// Unsubscribe gives the signed link for a person's emails.
 	Unsubscribe func(userID int64) string
 }
@@ -146,6 +151,7 @@ func DefaultConfig() Config {
 		MaxAttempts: 5,
 		SendTimeout: defaultSendTimeout,
 		Backoff:     ExponentialBackoff,
+		StallAfter:  defaultStallAfter,
 		// Failures as usual stay far below half the calls, and twenty calls keep a
 		// short bad patch from stopping a channel.
 		Breaker: BreakerConfig{Window: 10 * time.Second, MinCalls: 20, FailureRatio: 0.5, FirstWait: 5 * time.Second, MaxWait: maxPause, Probes: 3},
@@ -324,10 +330,16 @@ func takeFreeSlots(ctx context.Context, slots chan struct{}) int {
 func (w *Worker) runHousekeeping(ctx context.Context) {
 	ticker := time.NewTicker(finishInterval)
 	defer ticker.Stop()
+	stalls := time.NewTicker(stallInterval)
+	defer stalls.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-stalls.C:
+			if err := w.PauseStalled(ctx); err != nil && ctx.Err() == nil {
+				slog.ErrorContext(ctx, "pause stalled campaigns", "error", err)
+			}
 		case <-ticker.C:
 			if _, err := w.RecoverExpired(ctx); err != nil && ctx.Err() == nil {
 				slog.ErrorContext(ctx, "recover deliveries", "error", err)
@@ -852,6 +864,83 @@ func (w *Worker) finishCampaign(ctx context.Context, id string) error {
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit finish: %w", err)
 	}
+	return nil
+}
+
+// stalledCondition is a campaign waiting on retries with nothing finishing for $1
+// seconds. Messages that are only queued do not count: they may simply be behind
+// another campaign's. Time starts over when a campaign starts or resumes.
+const stalledCondition = `
+	c.status = 'DISPATCHING' AND c.updated_at < now() - make_interval(secs => $1)
+	AND EXISTS (SELECT 1 FROM campaign_deliveries d WHERE d.campaign_id = c.id AND d.status = 'RETRYING')
+	AND NOT EXISTS (
+		SELECT 1 FROM campaign_deliveries d
+		WHERE d.campaign_id = c.id AND d.status IN ('SENT', 'FAILED', 'UNKNOWN', 'SKIPPED')
+		  AND d.updated_at >= now() - make_interval(secs => $1))`
+
+// PauseStalled stops campaigns that have got nowhere for StallAfter. Their messages
+// stay as they are, so resuming carries on without anyone being messaged twice.
+func (w *Worker) PauseStalled(ctx context.Context) error {
+	if w.config.StallAfter <= 0 {
+		return nil
+	}
+	rows, err := w.db.Query(ctx, `SELECT c.id::text FROM campaigns c WHERE`+stalledCondition, w.config.StallAfter.Seconds())
+	if err != nil {
+		return fmt.Errorf("find stalled campaigns: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("find stalled campaigns: %w", err)
+	}
+	var failures []error
+	for _, id := range ids {
+		failures = append(failures, w.pauseCampaign(ctx, id))
+	}
+	return errors.Join(failures...)
+}
+
+func (w *Worker) pauseCampaign(ctx context.Context, id string) error {
+	tx, err := w.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin pause: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+
+	// Looked at again under the lock, in case another worker paused it or it recovered.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM campaigns WHERE id = $1 FOR UPDATE`, id); err != nil {
+		return fmt.Errorf("lock campaign: %w", err)
+	}
+	var stalled bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM campaigns c WHERE c.id = $2 AND`+stalledCondition+`)`, w.config.StallAfter.Seconds(), id).Scan(&stalled); err != nil {
+		return fmt.Errorf("check stalled campaign: %w", err)
+	}
+	if !stalled {
+		return nil
+	}
+	var (
+		waiting int
+		reason  string
+	)
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE status IN ('QUEUED', 'RETRYING')),
+		       COALESCE(mode() WITHIN GROUP (ORDER BY last_error) FILTER (WHERE status = 'RETRYING'), '')
+		FROM campaign_deliveries WHERE campaign_id = $1`, id).Scan(&waiting, &reason); err != nil {
+		return fmt.Errorf("read waiting deliveries: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = 'PAUSED', updated_at = now() WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("pause campaign: %w", err)
+	}
+	details, err := json.Marshal(map[string]any{"waiting": waiting, "reason": reason, "after_minutes": int(w.config.StallAfter.Minutes())})
+	if err != nil {
+		return fmt.Errorf("encode audit details: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO audit_events (campaign_id, event_type, details) VALUES ($1, 'campaign.paused', $2)`, id, details); err != nil {
+		return fmt.Errorf("record pause: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit pause: %w", err)
+	}
+	slog.WarnContext(ctx, "paused a campaign that was getting nowhere", "campaign_id", id, "waiting", waiting, "reason", reason)
 	return nil
 }
 

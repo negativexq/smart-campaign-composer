@@ -340,6 +340,17 @@ describe("campaign page after approval", () => {
     expect(wrapper.find("[data-testid=phone-message]").text()).toBe("Merhaba Can");
   });
 
+  it("says a stopped campaign lost nothing, and resumes it", async () => {
+    const { wrapper, fetchMock } = await open({
+      ...routes({ ...ready, status: "PAUSED" }),
+      "POST /api/campaigns/c1/resume": { body: { ...ready, status: "DISPATCHING" } },
+    });
+    expect(wrapper.find("[data-testid=paused]").text()).toContain("Nothing is lost");
+    await wrapper.find("[data-testid=resume]").trigger("click");
+    await flushPromises();
+    expect(called(fetchMock, "POST", "/api/campaigns/c1/resume")).toHaveLength(1);
+  });
+
   it("offers sending or scheduling an approved campaign", async () => {
     const { wrapper, fetchMock } = await open({
       ...routes({ ...ready, status: "APPROVED" }),

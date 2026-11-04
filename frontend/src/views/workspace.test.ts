@@ -5,6 +5,7 @@ import App from "../App.vue";
 import type { ActivityEntry, Campaign, CampaignSummary, Overview } from "../api/campaigns";
 import { describeActivity } from "../lib/activity";
 import { navigate } from "../lib/navigation";
+import CampaignsView from "./CampaignsView.vue";
 
 const summary = (overrides: Partial<CampaignSummary> = {}): CampaignSummary => ({
   id: "c1",
@@ -94,6 +95,25 @@ describe("overview", () => {
     expect(wrapper.text()).toContain("24");
     expect(wrapper.text()).toContain("Cart Recovery");
     expect(wrapper.text()).toContain("Audience refined");
+  });
+
+  it("leads from each total to the campaigns it counts", async () => {
+    const { wrapper } = await open("/", {
+      "/api/overview": { counts: { total: 24, drafts: 3, active: 2, completed: 18, failed: 1 }, recent_campaigns: [summary()], recent_activity: activity },
+    });
+    const links = wrapper.findAll("[aria-label='Campaign totals'] a").map((link) => link.attributes("href"));
+    expect(links).toEqual(["/campaigns", "/campaigns?group=active", "/campaigns?group=completed", "/campaigns?group=drafts", "/campaigns?group=failed"]);
+  });
+
+  it("opens the filter the address names and keeps it there", async () => {
+    window.history.replaceState({}, "", "/campaigns?group=failed");
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ campaigns: [] }) }) as Response));
+    const wrapper = mount(CampaignsView);
+    await flushPromises();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("group=failed"))).toBe(true);
+    await wrapper.findAll(".filters button")[0].trigger("click");
+    expect(window.location.search).toBe("");
+    wrapper.unmount();
   });
 
   it("shows what each channel's calls did and that one provider serves both", async () => {

@@ -127,6 +127,7 @@ export type CampaignSummary = {
 };
 
 export type ActivityEntry = {
+  id?: number;
   campaign_id: string;
   campaign_name: string;
   type: string;
@@ -135,6 +136,8 @@ export type ActivityEntry = {
   details: Record<string, unknown>;
   occurred_at: string;
 };
+
+export type NotificationEntry = ActivityEntry & { id: number };
 
 export type Overview = {
   counts: { total: number; drafts: number; active: number; completed: number; failed: number };
@@ -270,6 +273,14 @@ export async function getSampleRecipients(id: string): Promise<SampleRecipient[]
 
 export function approveCampaign(id: string): Promise<Campaign> {
   return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/approve`, {});
+}
+
+export function resumeCampaign(id: string): Promise<Campaign> {
+  return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/resume`, {});
+}
+
+export async function getNotifications(): Promise<NotificationEntry[]> {
+  return (await request<{ notifications: NotificationEntry[] }>("/api/notifications")).notifications;
 }
 
 export function dispatchCampaign(id: string): Promise<Campaign> {

@@ -151,7 +151,7 @@ A campaign can be sent now, once at a chosen time, at regular intervals, or on c
 
 Missed runs are not replayed one by one. After downtime one run covers them, because each run already reaches everyone who is still owed the message.
 
-An immediate send counts the audience at the proposal time, so it matches the number that was approved. A scheduled send counts at run time, because its point is to reach the people who match then. The UI says the number can differ.
+A one-time send, now or at a set time, goes to the people who were approved: approval stores the list, because someone signed off on that audience. New purchases or moves afterwards change nothing. Consent is the exception, checked again when queuing and before each message, and so is a "not messaged recently" rule, because a message sent since would break what the campaign promised. A repeating send finds who matches at each run, because its point is to reach the people who match then, and the UI says the number can change. Approvals from before the list existed read the rule when they send.
 
 Known limit: a person who starts matching later can have a longer first name than anyone checked at approval. If their SMS then exceeds the limit, it ends as FAILED after a provider 400 rather than being cut.
 
@@ -162,6 +162,12 @@ A fixed one-second bucket allows up to 200 messages across a bucket boundary. A 
 ## An earlier timeout makes the result UNKNOWN
 
 A timeout means the provider may have accepted the message. Retrying with the same idempotency key is safe, but if the retries end in failure, that failure does not prove the first call failed. So a delivery with any earlier timeout ends as UNKNOWN unless a later call is accepted.
+
+## A campaign that gets nowhere stops and says so
+
+A 429 or an unreachable provider costs no attempt, so a long outage would otherwise leave a campaign "sending" forever. After 10 minutes with messages waiting on retries and none finishing, it becomes `PAUSED`, and a notification says why. Messages keep their place and idempotency keys, so nothing is lost or failed, and only a person's Resume starts it again, because a provider back after hours may no longer be the moment someone wants this message to go out. Messages that are merely queued do not count, because they may just be behind another campaign's.
+
+Notifications read the audit trail rather than a table of their own: what started on its own, what ended and what went wrong are already recorded there, in the same transaction as the change. What someone has seen or cleared stays in their browser, since nobody here has a real account. Clearing removes only sends that ended well, and a problem leaves the list once it is put right, by resuming or by writing the messages again. A campaign that finished with failures stays, because nothing puts it right. The bell checks every 15 seconds.
 
 ## A 429 does not use up an attempt
 

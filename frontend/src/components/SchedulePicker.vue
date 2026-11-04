@@ -120,9 +120,9 @@ function inputValue(event: Event) {
     </label>
 
     <p v-if="repeats" class="muted small" data-testid="once-per-person">
-      Nobody gets this message twice. Each send counts the audience again and reaches only people who have not received it yet.
+      Each send finds who matches at that time, so the number can change. Nobody gets this message twice: only people who have not received it yet are reached.
     </p>
-    <p v-else-if="modelValue.mode === 'once'" class="muted small">The audience is counted again at that time, so the number can differ from the one above.</p>
+    <p v-else class="muted small" data-testid="approved-people">Goes to the people you approve now. Anyone who withdraws consent before the send is left out.</p>
   </fieldset>
 </template>
 

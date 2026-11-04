@@ -38,6 +38,26 @@ function finishDetail(details: Record<string, unknown>) {
   return `${count("accepted")} accepted, ${count("failed")} failed, ${count("unknown")} unknown, ${count("skipped")} skipped`;
 }
 
+const PAUSE_REASONS: Record<string, string> = {
+  rate_limited: "The provider kept asking us to slow down",
+  provider_unreachable: "The provider could not be reached",
+  server_error: "The provider kept returning errors",
+  timeout: "The provider stopped answering",
+};
+
+function pauseDetail(details: Record<string, unknown>) {
+  const why = PAUSE_REASONS[String(details.reason)] ?? "Nothing finished";
+  return `${why} for ${Number(details.after_minutes ?? 0)} minutes. ${plural(Number(details.waiting ?? 0), "message")} waiting, none lost.`;
+}
+
+/** How a notification reads at a glance: a problem, an end or a start. */
+export function notificationTone(entry: ActivityEntry): "error" | "done" | "started" {
+  const { failed, unknown } = entry.details;
+  if (entry.type === "campaign.paused" || entry.type === "content.generation_failed") return "error";
+  if (entry.type === "campaign.run") return "started";
+  return Number(failed ?? 0) + Number(unknown ?? 0) > 0 ? "error" : "done";
+}
+
 // Who an event belongs to. Older records have no name, and that stays visible.
 export function describeActor(entry: ActivityEntry): string {
   if (entry.actor_type === "user") return `by ${entry.actor}`;
@@ -99,6 +119,10 @@ export function describeActivity(entry: ActivityEntry): { title: string; detail:
       return { title: "Scheduled send finished", detail: finishDetail(details) };
     case "campaign.completed":
       return { title: "Campaign finished", detail: finishDetail(details) };
+    case "campaign.paused":
+      return { title: "Sending stopped", detail: pauseDetail(details) };
+    case "campaign.resumed":
+      return { title: "Sending resumed", detail: "" };
     default:
       return { title: entry.type, detail: "" };
   }

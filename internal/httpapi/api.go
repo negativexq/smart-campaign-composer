@@ -56,6 +56,8 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 		"POST /api/email-preview":                                a.emailPreview,
 		"POST /api/campaigns/{id}/approve":                       a.approve,
 		"POST /api/campaigns/{id}/dispatch":                      a.dispatch,
+		"POST /api/campaigns/{id}/resume":                        a.resume,
+		"GET /api/notifications":                                 a.notifications,
 		"POST /api/campaigns/{id}/schedule":                      a.schedule,
 		"DELETE /api/campaigns/{id}/schedule":                    a.cancelSchedule,
 		"GET /api/campaigns/{id}/progress":                       a.progress,
@@ -370,6 +372,24 @@ func (a *api) dispatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, view)
 }
 
+func (a *api) resume(w http.ResponseWriter, r *http.Request) {
+	view, err := a.campaigns.Resume(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *api) notifications(w http.ResponseWriter, r *http.Request) {
+	entries, err := a.campaigns.Notifications(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"notifications": entries})
+}
+
 func (a *api) schedule(w http.ResponseWriter, r *http.Request) {
 	var spec schedule.Spec
 	if !decode(w, r, &spec) {
@@ -584,6 +604,8 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusConflict, "This campaign has no messages ready to approve."
 	case errors.Is(err, campaign.ErrNotApproved):
 		status, message = http.StatusConflict, "This campaign must be approved before it can be sent."
+	case errors.Is(err, campaign.ErrNotPaused):
+		status, message = http.StatusConflict, "This campaign is not paused."
 	case errors.Is(err, campaign.ErrAlreadyScheduled):
 		status, message = http.StatusConflict, "This campaign is scheduled. Cancel the schedule to send it now."
 	case errors.Is(err, campaign.ErrNoSchedule):

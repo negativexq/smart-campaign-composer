@@ -9,6 +9,7 @@ import {
   getActivity,
   getCampaign,
   getProgress,
+  resumeCampaign,
   getSampleRecipients,
   watchCampaign,
   type ActivityEntry,
@@ -135,7 +136,7 @@ async function onLiveUpdate(state: LiveState) {
 }
 
 function watchIfChanging() {
-  if (stopWatching || !["APPROVED", "SCHEDULED", "DISPATCHING"].includes(campaign.value?.status ?? "")) return;
+  if (stopWatching || !["APPROVED", "SCHEDULED", "DISPATCHING", "PAUSED"].includes(campaign.value?.status ?? "")) return;
   stopWatching = watchCampaign(props.campaignId, {
     onUpdate: onLiveUpdate,
     onConnection: (connected) => (disconnected.value = !connected),
@@ -230,6 +231,7 @@ onBeforeUnmount(() => stopWatching?.());
       >
         Continue editing
       </a>
+      <button v-else-if="campaign.status === 'PAUSED'" class="button button--primary" type="button" data-testid="resume" :disabled="acting" @click="act(() => resumeCampaign(campaignId))">Resume sending</button>
       <div v-else-if="campaign.status === 'APPROVED'" class="actions">
         <a class="button button--secondary link-button" :href="`/campaigns/${campaignId}/review`" data-testid="choose-time">Choose a time</a>
         <button class="button button--primary" type="button" data-testid="send-now" :disabled="acting" @click="act(() => dispatchCampaign(campaignId))">Send now</button>
@@ -256,6 +258,9 @@ onBeforeUnmount(() => stopWatching?.());
     <ValidationNotice v-if="actionError" tone="error" title="This did not go through">{{ actionError }}</ValidationNotice>
     <ValidationNotice v-if="disconnected" tone="warning" title="Live updates stopped" data-testid="live-disconnected">
       These numbers may be out of date. We keep trying to reconnect, and sending does not depend on this page.
+    </ValidationNotice>
+    <ValidationNotice v-if="campaign.status === 'PAUSED'" tone="warning" title="Sending stopped" data-testid="paused">
+      The provider gave no way forward for a long time, so this campaign stopped trying. Nothing is lost and nobody gets a message twice. Resume when the provider is back.
     </ValidationNotice>
     <ValidationNotice v-if="isLive && sendingBlockers.length" tone="warning" title="Sending is held up" data-testid="sending-blocked">
       <span v-for="blocker in sendingBlockers" :key="blocker.id" class="blocker"><strong>{{ blocker.label }} is down.</strong> {{ blocker.effect }}</span>

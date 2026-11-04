@@ -4,6 +4,7 @@ import { Gauge, Inbox, LayoutGrid, ListChecks, Plus } from "lucide-vue-next";
 import { endSession } from "../api/session";
 import type { SystemStatus } from "../api/system";
 import { currentUser } from "../lib/session";
+import NotificationBell from "./NotificationBell.vue";
 
 defineProps<{
   activePath: string;
@@ -90,7 +91,10 @@ const statusLabels = { checking: "Checking", operational: "Operational", degrade
           <span class="title-text">{{ title }}</span>
           <span v-if="campaignStatus" class="status small" data-testid="campaign-status">{{ campaignStatus }}</span>
         </div>
-        <slot name="topbar" />
+        <div class="topbar-end">
+          <slot name="topbar" />
+          <NotificationBell />
+        </div>
       </header>
 
       <div class="content" :class="{ 'content--with-panel': $slots.panel }">
@@ -241,6 +245,13 @@ const statusLabels = { checking: "Checking", operational: "Operational", degrade
   padding: var(--space-3) var(--space-8);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
+}
+
+.topbar-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .topbar-title {

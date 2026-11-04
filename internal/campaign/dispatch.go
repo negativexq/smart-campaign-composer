@@ -25,9 +25,11 @@ import (
 const (
 	statusApproved    = "APPROVED"
 	statusDispatching = "DISPATCHING"
+	statusPaused      = "PAUSED"
 	eventApproved     = "campaign.approved"
 
 	eventDispatched      = "campaign.dispatched"
+	eventResumed         = "campaign.resumed"
 	reasonWithoutConsent = "no_consent"
 
 	eventExported        = "deliveries.exported"
@@ -42,6 +44,7 @@ var (
 	ErrNotApproved   = errors.New("campaign has not been approved")
 	ErrUnknownFilter = errors.New("unknown delivery filter")
 	ErrUnknownEvent  = errors.New("unknown delivery event")
+	ErrNotPaused     = errors.New("campaign is not paused")
 )
 
 var (
@@ -83,7 +86,7 @@ func (s *Service) Approve(ctx context.Context, id string) (View, error) {
 	}
 	switch status {
 	case statusReady:
-	case statusApproved, statusScheduled, statusDispatching, "COMPLETED", "COMPLETED_WITH_FAILURES":
+	case statusApproved, statusScheduled, statusDispatching, statusPaused, "COMPLETED", "COMPLETED_WITH_FAILURES":
 		return s.get(ctx, tx, id)
 	default:
 		return View{}, ErrNotReviewable
@@ -110,7 +113,10 @@ func (s *Service) Approve(ctx context.Context, id string) (View, error) {
 	if err != nil {
 		return View{}, fmt.Errorf("encode audience snapshot: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE campaign_versions SET approved_at = now(), audience_snapshot = $3 WHERE campaign_id = $1 AND version = $2`, id, view.Version, snapshot); err != nil {
+	if err := keepRecipients(ctx, tx, id, view.Version, view.Proposal.Segment, view.AudienceAsOf); err != nil {
+		return View{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE campaign_versions SET approved_at = now(), audience_snapshot = $3, recipients_kept = true WHERE campaign_id = $1 AND version = $2`, id, view.Version, snapshot); err != nil {
 		return View{}, fmt.Errorf("approve version: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1`, id, statusApproved); err != nil {
@@ -127,7 +133,24 @@ func (s *Service) Approve(ctx context.Context, id string) (View, error) {
 	return s.Get(ctx, id)
 }
 
-// Dispatch fixes the recipients and queues one delivery per person and channel.
+// keepRecipients stores the people the counted audience is made of, whatever their
+// consent: someone who agrees before the send is still one of the people approved.
+func keepRecipients(ctx context.Context, tx pgx.Tx, id string, version int, spec segment.Spec, asOf time.Time) error {
+	where, args := segment.Compile(spec, asOf)
+	campaignParam := fmt.Sprintf("$%d", len(args)+1)
+	versionParam := fmt.Sprintf("$%d", len(args)+2)
+	args = append(args, id, version)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO campaign_recipients (campaign_version_id, user_id)
+		SELECT (SELECT v.id FROM campaign_versions v WHERE v.campaign_id = `+campaignParam+`::uuid AND v.version = `+versionParam+`::int), u.id
+		FROM users u
+		WHERE `+where, args...); err != nil {
+		return fmt.Errorf("keep recipients: %w", err)
+	}
+	return nil
+}
+
+// Dispatch queues one delivery per approved person and channel.
 // People without consent are recorded as skipped, so the report can account for
 // everyone. Only someone skipped, who was therefore never messaged, can be queued
 // by a later run. Repeating it changes nothing.
@@ -152,7 +175,7 @@ func (s *Service) Dispatch(ctx context.Context, id string) (view View, err error
 	}
 	switch status {
 	case statusApproved:
-	case statusDispatching, "COMPLETED", "COMPLETED_WITH_FAILURES":
+	case statusDispatching, statusPaused, "COMPLETED", "COMPLETED_WITH_FAILURES":
 		return s.get(ctx, tx, id)
 	case statusScheduled:
 		return View{}, ErrAlreadyScheduled
@@ -164,7 +187,15 @@ func (s *Service) Dispatch(ctx context.Context, id string) (view View, err error
 		return View{}, err
 	}
 
-	queued, skipped, err := insertDeliveries(ctx, tx, id, stored.Version, stored.Channels, testShare(stored.ABTest, stored.VariantAPercent), stored.Proposal.Segment, stored.AudienceAsOf, traceParent(ctx))
+	var kept bool
+	if err := tx.QueryRow(ctx, `SELECT recipients_kept FROM campaign_versions WHERE campaign_id = $1 AND version = $2`, id, stored.Version).Scan(&kept); err != nil {
+		return View{}, fmt.Errorf("read recipients: %w", err)
+	}
+	asOf := stored.AudienceAsOf
+	if kept {
+		asOf = s.now()
+	}
+	queued, skipped, err := insertDeliveries(ctx, tx, id, stored.Version, stored.Channels, testShare(stored.ABTest, stored.VariantAPercent), stored.Proposal.Segment, kept, asOf, traceParent(ctx))
 	if err != nil {
 		return View{}, err
 	}
@@ -178,6 +209,38 @@ func (s *Service) Dispatch(ctx context.Context, id string) (view View, err error
 		return View{}, fmt.Errorf("commit dispatch: %w", err)
 	}
 	span.SetAttributes(attribute.Int("delivery.queued", queued), attribute.Int("delivery.skipped", skipped))
+	return s.Get(ctx, id)
+}
+
+// Resume carries on with a paused campaign. Its messages kept their place and their
+// idempotency keys, so nobody is messaged twice. Repeating it changes nothing.
+func (s *Service) Resume(ctx context.Context, id string) (View, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return View{}, fmt.Errorf("begin resume: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+
+	status, err := lockStatus(ctx, tx, id)
+	if err != nil {
+		return View{}, err
+	}
+	switch status {
+	case statusPaused:
+	case statusDispatching:
+		return s.get(ctx, tx, id)
+	default:
+		return View{}, ErrNotPaused
+	}
+	if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1`, id, statusDispatching); err != nil {
+		return View{}, fmt.Errorf("resume campaign: %w", err)
+	}
+	if err := recordAudit(ctx, tx, id, eventResumed, map[string]any{}); err != nil {
+		return View{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return View{}, fmt.Errorf("commit resume: %w", err)
+	}
 	return s.Get(ctx, id)
 }
 
@@ -202,14 +265,29 @@ func testShare(abTest bool, percent int) int {
 	return 0
 }
 
-func insertDeliveries(ctx context.Context, tx pgx.Tx, id string, version int, channels []string, variantAPercent int, spec segment.Spec, asOf time.Time, parent string) (queued, skipped int, err error) {
+// insertDeliveries queues the people the rule finds at asOf or, with kept, the people
+// approval kept. Those were settled then, except that a message sent to one of them
+// since must still hold back a campaign that promised to leave recent ones alone.
+func insertDeliveries(ctx context.Context, tx pgx.Tx, id string, version int, channels []string, variantAPercent int, spec segment.Spec, kept bool, asOf time.Time, parent string) (queued, skipped int, err error) {
 	where, args := segment.Compile(spec, asOf)
+	if kept {
+		where, args = "TRUE", nil
+		if spec.NotMessagedWithinDays != nil {
+			where, args = segment.Compile(segment.Spec{NotMessagedWithinDays: spec.NotMessagedWithinDays}, asOf)
+		}
+	}
 	campaignParam := fmt.Sprintf("$%d", len(args)+1)
 	versionParam := fmt.Sprintf("$%d", len(args)+2)
 	traceParam := fmt.Sprintf("$%d", len(args)+3)
 	channelsParam := fmt.Sprintf("$%d", len(args)+4)
 	testParam := fmt.Sprintf("$%d", len(args)+5)
 	args = append(args, id, version, parent, channels, variantAPercent)
+	if kept {
+		where += ` AND u.id IN (
+			SELECT r.user_id FROM campaign_recipients r
+			JOIN campaign_versions v ON v.id = r.campaign_version_id
+			WHERE v.campaign_id = ` + campaignParam + `::uuid AND v.version = ` + versionParam + `::int)`
+	}
 
 	// The compiled conditions are the fixed fragments from segment.Compile, and
 	// all of their values stay parameters.
@@ -268,7 +346,7 @@ func (s *Service) Live(ctx context.Context, id string) (LiveState, bool, error) 
 	if err != nil {
 		return LiveState{}, false, err
 	}
-	changing := view.Status == statusApproved || view.Status == statusScheduled || view.Status == statusDispatching
+	changing := view.Status == statusApproved || view.Status == statusScheduled || view.Status == statusDispatching || view.Status == statusPaused
 	return LiveState{view.Status, progress}, changing, nil
 }
 

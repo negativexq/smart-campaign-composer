@@ -38,11 +38,11 @@ onMounted(async () => {
 
     <template v-else>
       <section class="metrics" aria-label="Campaign totals">
-        <MetricCard label="Total campaigns" :value="overview.counts.total" />
-        <MetricCard label="Active" :value="overview.counts.active" hint="Approved, scheduled or sending" />
-        <MetricCard label="Completed" :value="overview.counts.completed" hint="Finished without failures" />
-        <MetricCard label="Drafts" :value="overview.counts.drafts" hint="Not approved yet" />
-        <MetricCard label="Needs attention" :value="overview.counts.failed" hint="Failed or partly failed" />
+        <MetricCard label="Total campaigns" :value="overview.counts.total" href="/campaigns" />
+        <MetricCard label="Active" :value="overview.counts.active" hint="Approved, scheduled, sending or paused" href="/campaigns?group=active" />
+        <MetricCard label="Completed" :value="overview.counts.completed" hint="Finished without failures" href="/campaigns?group=completed" />
+        <MetricCard label="Drafts" :value="overview.counts.drafts" hint="Not approved yet" href="/campaigns?group=drafts" />
+        <MetricCard label="Needs attention" :value="overview.counts.failed" hint="Failed or partly failed" href="/campaigns?group=failed" />
       </section>
 
       <section class="section">

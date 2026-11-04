@@ -101,7 +101,7 @@ func (s *Service) CancelSchedule(ctx context.Context, id string) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
-	if status != statusScheduled && status != statusDispatching {
+	if status != statusScheduled && status != statusDispatching && status != statusPaused {
 		return View{}, ErrNoSchedule
 	}
 	var pending, sentBefore bool
@@ -114,6 +114,9 @@ func (s *Service) CancelSchedule(ctx context.Context, id string) (View, error) {
 		return View{}, fmt.Errorf("read schedule: %w", err)
 	}
 	next := statusDispatching // the worker closes it once its deliveries are done
+	if status == statusPaused {
+		next = statusPaused // cancelling later runs does not resume this one
+	}
 	if sentBefore {
 		_, err = tx.Exec(ctx, `UPDATE campaign_schedules SET next_run_at = NULL WHERE campaign_id = $1`, id)
 	} else {
@@ -216,16 +219,17 @@ func (s *Scheduler) runOne(ctx context.Context) (bool, error) {
 		channels         []string
 		abTest           bool
 		variantAPercent  int
+		kept             bool
 	)
 	err = tx.QueryRow(ctx, `
-		SELECT c.id::text, c.status, v.version, s.spec, v.segment, s.next_run_at, s.created_by, c.channels, c.ab_test, c.variant_a_percent
+		SELECT c.id::text, c.status, v.version, s.spec, v.segment, s.next_run_at, s.created_by, c.channels, c.ab_test, c.variant_a_percent, v.recipients_kept
 		FROM campaign_schedules s
 		JOIN campaigns c ON c.id = s.campaign_id
 		JOIN campaign_versions v ON v.campaign_id = c.id AND v.approved_at IS NOT NULL
 		WHERE s.next_run_at <= $1 AND c.status IN ('SCHEDULED', 'DISPATCHING')
 		ORDER BY s.next_run_at
 		LIMIT 1
-		FOR UPDATE OF s, c SKIP LOCKED`, now).Scan(&id, &status, &version, &encodedSpec, &seg, &scheduledFor, &scheduledBy, &channels, &abTest, &variantAPercent)
+		FOR UPDATE OF s, c SKIP LOCKED`, now).Scan(&id, &status, &version, &encodedSpec, &seg, &scheduledFor, &scheduledBy, &channels, &abTest, &variantAPercent, &kept)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -244,9 +248,9 @@ func (s *Scheduler) runOne(ctx context.Context) (bool, error) {
 	if err := json.Unmarshal(seg, &proposal); err != nil {
 		return false, fmt.Errorf("decode segment: %w", err)
 	}
-	// The audience is counted fresh, and the unique key on deliveries keeps
-	// everyone already reached out of it.
-	queued, skipped, err := insertDeliveries(ctx, tx, id, version, channels, testShare(abTest, variantAPercent), proposal.Segment, now, traceParent(ctx))
+	// A one-time send goes to the people approved. A repeating one finds who matches
+	// now, and the unique key on deliveries keeps everyone already reached out of it.
+	queued, skipped, err := insertDeliveries(ctx, tx, id, version, channels, testShare(abTest, variantAPercent), proposal.Segment, kept && spec.Kind == schedule.KindOnce, now, traceParent(ctx))
 	if err != nil {
 		return false, err
 	}

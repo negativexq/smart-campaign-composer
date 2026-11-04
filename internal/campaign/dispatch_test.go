@@ -3,6 +3,7 @@ package campaign_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -449,6 +450,215 @@ func TestARepeatingScheduleNeverMessagesAnyoneTwice(t *testing.T) {
 	view, _ := h.service.Get(ctx, id)
 	if view.Schedule.Runs != 2 || view.Schedule.NextRunAt == nil {
 		t.Fatalf("schedule: %+v", view.Schedule)
+	}
+}
+
+// changeWhoMatches makes one approved person stop matching the rule and one other
+// person start, as new purchases and moves do after an approval.
+func changeWhoMatches(t *testing.T, h *harness) (left, joined string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := h.pool.Exec(ctx, `INSERT INTO purchase_events (user_id, product_id, occurred_at) VALUES ($1, 1, $2)`, seed.FixtureCartNoPurchase, referenceTime); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE users SET city = (SELECT city FROM users WHERE id = $1) WHERE id = $2`, seed.FixtureCartNoPurchase, seed.FixtureOtherCity); err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprintf("%d:sms", seed.FixtureCartNoPurchase), fmt.Sprintf("%d:sms", seed.FixtureOtherCity)
+}
+
+func TestSendingNowReachesThePeopleWhoWereApproved(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	left, joined := changeWhoMatches(t, h)
+	if _, err := h.service.Dispatch(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	rows := deliveryRows(t, h, id)
+	if rows[left] != "QUEUED" {
+		t.Fatalf("an approved person was dropped: %v", rows)
+	}
+	if _, found := rows[joined]; found {
+		t.Fatalf("someone nobody approved was added: %v", rows)
+	}
+}
+
+func TestASendAtASetTimeReachesThePeopleWhoWereApproved(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	at := referenceTime.Add(time.Hour)
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: &at}); err != nil {
+		t.Fatal(err)
+	}
+	left, joined := changeWhoMatches(t, h)
+	if _, err := scheduler(h, at.Add(time.Second)).RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows := deliveryRows(t, h, id)
+	if rows[left] != "QUEUED" {
+		t.Fatalf("an approved person was dropped: %v", rows)
+	}
+	if _, found := rows[joined]; found {
+		t.Fatalf("someone nobody approved was added: %v", rows)
+	}
+}
+
+func TestARepeatingSendFindsWhoMatchesAtEachRun(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindInterval, EveryHours: 24}); err != nil {
+		t.Fatal(err)
+	}
+	left, joined := changeWhoMatches(t, h)
+	if _, err := scheduler(h, referenceTime.Add(24*time.Hour+time.Second)).RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows := deliveryRows(t, h, id)
+	if _, found := rows[left]; found {
+		t.Fatalf("someone who stopped matching was still sent to: %v", rows)
+	}
+	if _, found := rows[joined]; !found {
+		t.Fatalf("someone who started matching was missed: %v", rows)
+	}
+}
+
+func TestARecentMessageSinceApprovalStillHoldsBackACampaignThatAsked(t *testing.T) {
+	t.Parallel()
+	h, id := readyCampaign(t)
+	ctx := context.Background()
+	if _, err := h.pool.Exec(ctx, `UPDATE campaign_versions SET segment = jsonb_set(segment, '{segment,not_messaged_within_days}', '7') WHERE campaign_id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Approve(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	var other, version string
+	if err := h.pool.QueryRow(ctx, `INSERT INTO campaigns (brief, name) VALUES ('other', 'other') RETURNING id::text`).Scan(&other); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.pool.QueryRow(ctx, `INSERT INTO campaign_versions (campaign_id, version, segment, content) VALUES ($1, 1, '{}', '{}') RETURNING id::text`, other).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `
+		INSERT INTO campaign_deliveries (campaign_id, campaign_version_id, user_id, channel, idempotency_key, status, updated_at)
+		VALUES ($1, $2, $3, 'sms', 'other', 'SENT', $4)`, other, version, seed.FixtureCartNoPurchase, referenceTime.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Dispatch(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	rows := deliveryRows(t, h, id)
+	if _, found := rows[fmt.Sprintf("%d:sms", seed.FixtureCartNoPurchase)]; found {
+		t.Fatalf("messaged again too soon: %v", rows)
+	}
+	if rows[fmt.Sprintf("%d:sms", seed.FixtureCartAgainAfterPurchase)] != "QUEUED" {
+		t.Fatalf("everyone else still gets it: %v", rows)
+	}
+}
+
+func TestNotificationsTellOfWhatStartedAloneEndedOrWentWrong(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	for _, event := range []struct{ kind, details string }{
+		{"campaign.run", `{"queued": 0}`},
+		{"campaign.run", `{"queued": 4}`},
+		{"campaign.dispatched", `{"queued": 4}`},
+		{"campaign.completed", `{"failed": 1}`},
+		{"campaign.run_finished", `{}`},
+		{"campaign.paused", `{"waiting": 3}`},
+		{"content.generation_failed", `{}`},
+	} {
+		if _, err := h.pool.Exec(ctx, `INSERT INTO audit_events (campaign_id, event_type, details) VALUES ($1, $2, $3)`, id, event.kind, event.details); err != nil {
+			t.Fatal(err)
+		}
+	}
+	types := func(status string) []string {
+		t.Helper()
+		if _, err := h.pool.Exec(ctx, `UPDATE campaigns SET status = $2 WHERE id = $1`, id, status); err != nil {
+			t.Fatal(err)
+		}
+		entries, err := h.service.Notifications(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, entry := range entries {
+			got = append(got, entry.Type)
+		}
+		return got
+	}
+	if got, want := types("PAUSED"), []string{"campaign.paused", "campaign.run_finished", "campaign.completed", "campaign.run"}; !slices.Equal(got, want) {
+		t.Fatalf("while paused: %v", got)
+	}
+	if got, want := types("GENERATION_FAILED"), []string{"content.generation_failed", "campaign.run_finished", "campaign.completed", "campaign.run"}; !slices.Equal(got, want) {
+		t.Fatalf("after failing to write: %v", got)
+	}
+	if got, want := types("COMPLETED"), []string{"campaign.run_finished", "campaign.completed", "campaign.run"}; !slices.Equal(got, want) {
+		t.Fatalf("once put right: %v", got)
+	}
+}
+
+func TestResumingNeedsAPausedCampaign(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	if _, err := h.service.Resume(context.Background(), id); !errors.Is(err, campaign.ErrNotPaused) {
+		t.Fatalf("err: %v", err)
+	}
+}
+
+func TestConsentWithdrawnAfterApprovalStillStopsTheMessage(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.pool.Exec(ctx, `UPDATE consents SET allowed = false WHERE user_id = $1 AND channel = 'sms'`, seed.FixtureCartNoPurchase); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Dispatch(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if rows := deliveryRows(t, h, id); rows[fmt.Sprintf("%d:sms", seed.FixtureCartNoPurchase)] != "SKIPPED" {
+		t.Fatalf("rows: %v", rows)
+	}
+}
+
+func TestACampaignApprovedBeforeTheListWasKeptStillSends(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.pool.Exec(ctx, `ALTER TABLE campaign_versions DISABLE TRIGGER campaign_versions_immutable_after_approval`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE campaign_versions SET recipients_kept = false WHERE campaign_id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `DELETE FROM campaign_recipients`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Dispatch(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if rows := deliveryRows(t, h, id); rows[fmt.Sprintf("%d:sms", seed.FixtureCartNoPurchase)] != "QUEUED" {
+		t.Fatalf("rows: %v", rows)
+	}
+}
+
+func TestTheKeptListIsTheAudienceThatWasCounted(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	view, err := h.service.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept int
+	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM campaign_recipients r JOIN campaign_versions v ON v.id = r.campaign_version_id WHERE v.campaign_id = $1`, id).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept != view.Audience.Total || kept == 0 {
+		t.Fatalf("kept %d, approved %d", kept, view.Audience.Total)
 	}
 }
 

@@ -15,7 +15,9 @@ const filters: { group: CampaignGroup; label: string }[] = [
   { group: "failed", label: "Failed" },
 ];
 
-const group = ref<CampaignGroup>("");
+// In the address, so a link can open a filter and a refresh keeps it.
+const named = new URLSearchParams(window.location.search).get("group") as CampaignGroup | null;
+const group = ref<CampaignGroup>(filters.some((filter) => filter.group === named) ? (named as CampaignGroup) : "");
 const query = ref("");
 const channel = ref("");
 const createdWithinDays = ref("");
@@ -39,6 +41,7 @@ async function load() {
   }
 }
 
+watch(group, (value) => window.history.replaceState({}, "", value ? `${window.location.pathname}?group=${value}` : window.location.pathname));
 watch([group, channel, createdWithinDays, sort], load);
 watch(query, () => {
   clearTimeout(searchTimer);

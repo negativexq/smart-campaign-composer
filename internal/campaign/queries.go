@@ -14,7 +14,8 @@ import (
 
 const (
 	// DefaultListLimit caps the campaign list.
-	DefaultListLimit = 100
+	DefaultListLimit  = 100
+	notificationLimit = 30
 
 	recentCampaigns = 5
 	recentActivity  = 8
@@ -24,7 +25,7 @@ const (
 // group, so overview counts add up; cancelled campaigns only appear under all.
 var groupStatuses = map[string][]string{
 	"drafts":    {"DRAFT", "GENERATING", "READY_FOR_REVIEW"},
-	"active":    {"APPROVED", "SCHEDULED", "DISPATCHING"},
+	"active":    {"APPROVED", "SCHEDULED", "DISPATCHING", "PAUSED"},
 	"completed": {"COMPLETED"},
 	"failed":    {"GENERATION_FAILED", "COMPLETED_WITH_FAILURES"},
 }
@@ -189,6 +190,7 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 
 // ActivityEntry is one audit event, for people to read.
 type ActivityEntry struct {
+	ID         int64           `json:"id"`
 	CampaignID string          `json:"campaign_id"`
 	Name       string          `json:"campaign_name"`
 	Type       string          `json:"type"`
@@ -214,7 +216,7 @@ func (s *Service) Activity(ctx context.Context, id string) ([]ActivityEntry, err
 // first when id is nil.
 func (s *Service) queryActivity(ctx context.Context, id *pgtype.UUID, limit int) ([]ActivityEntry, error) {
 	query := `
-		SELECT a.campaign_id::text, c.name, a.event_type, a.actor_type, a.actor, a.details, a.occurred_at
+		SELECT a.id, a.campaign_id::text, c.name, a.event_type, a.actor_type, a.actor, a.details, a.occurred_at
 		FROM audit_events a JOIN campaigns c ON c.id = a.campaign_id `
 	var args []any
 	if id != nil {
@@ -224,13 +226,32 @@ func (s *Service) queryActivity(ctx context.Context, id *pgtype.UUID, limit int)
 		query += `ORDER BY a.id DESC LIMIT $1`
 		args = append(args, limit)
 	}
+	return s.readActivity(ctx, query, args...)
+}
+
+// Notifications are the events someone would want to hear about without watching:
+// a send that started on its own, one that ended, and anything that went wrong.
+// A scheduled run with nobody new to reach said nothing happened, so it is left out,
+// and a problem since put right, by resuming or by writing again, is no longer news.
+func (s *Service) Notifications(ctx context.Context) ([]ActivityEntry, error) {
+	return s.readActivity(ctx, `
+		SELECT a.id, a.campaign_id::text, c.name, a.event_type, a.actor_type, a.actor, a.details, a.occurred_at
+		FROM audit_events a JOIN campaigns c ON c.id = a.campaign_id
+		WHERE a.event_type IN ('campaign.completed', 'campaign.run_finished')
+		   OR (a.event_type = 'campaign.paused' AND c.status = 'PAUSED')
+		   OR (a.event_type = 'content.generation_failed' AND c.status = 'GENERATION_FAILED')
+		   OR (a.event_type = 'campaign.run' AND (a.details->>'queued')::int > 0)
+		ORDER BY a.id DESC LIMIT $1`, notificationLimit)
+}
+
+func (s *Service) readActivity(ctx context.Context, query string, args ...any) ([]ActivityEntry, error) {
 	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read activity: %w", err)
 	}
 	entries, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ActivityEntry, error) {
 		var entry ActivityEntry
-		err := row.Scan(&entry.CampaignID, &entry.Name, &entry.Type, &entry.ActorType, &entry.Actor, &entry.Details, &entry.OccurredAt)
+		err := row.Scan(&entry.ID, &entry.CampaignID, &entry.Name, &entry.Type, &entry.ActorType, &entry.Actor, &entry.Details, &entry.OccurredAt)
 		return entry, err
 	})
 	if err != nil {

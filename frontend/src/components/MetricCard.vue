@@ -6,17 +6,18 @@ const props = defineProps<{
   value: number;
   hint?: string;
   prominent?: boolean;
+  href?: string;
 }>();
 
 const formatted = computed(() => props.value.toLocaleString("en-US"));
 </script>
 
 <template>
-  <div class="metric card" :class="{ 'metric--prominent': prominent }">
+  <component :is="href ? 'a' : 'div'" class="metric card" :class="{ 'metric--prominent': prominent, 'metric--link': href }" :href="href">
     <div class="value">{{ formatted }}</div>
     <div class="label">{{ label }}</div>
     <div v-if="hint" class="muted small">{{ hint }}</div>
-  </div>
+  </component>
 </template>
 
 <style scoped>
@@ -24,6 +25,15 @@ const formatted = computed(() => props.value.toLocaleString("en-US"));
   display: grid;
   gap: var(--space-1);
   padding: var(--space-4);
+}
+
+.metric--link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.metric--link:hover {
+  border-color: var(--color-primary);
 }
 
 .value {

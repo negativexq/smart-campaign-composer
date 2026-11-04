@@ -416,6 +416,126 @@ func TestFinishingLeavesDeliveriesFromARunThatJustStarted(t *testing.T) {
 	}
 }
 
+// rests makes everything look as if the last news came long ago.
+func (r *rig) rests(t *testing.T, length time.Duration) {
+	t.Helper()
+	ctx := context.Background()
+	for _, query := range []string{
+		`UPDATE campaigns SET updated_at = now() - make_interval(secs => $2) WHERE id = $1`,
+		`UPDATE campaign_deliveries SET updated_at = now() - make_interval(secs => $2) WHERE campaign_id = $1`,
+	} {
+		if _, err := r.pool.Exec(ctx, query, r.id, length.Seconds()); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func (r *rig) stallingWorker() *delivery.Worker {
+	return delivery.New(r.pool, r.sender, r.limiter, r.metrics, noop.NewTracerProvider().Tracer("test"), delivery.Config{
+		Unsubscribe: func(userID int64) string { return fmt.Sprintf("https://app.example.com/api/unsubscribe/%d", userID) },
+		BatchSize:   50, Concurrency: 8, Lease: time.Minute, MaxAttempts: 3, SendTimeout: time.Second,
+		Backoff: func(int) time.Duration { return time.Hour }, StallAfter: 10 * time.Minute,
+	})
+}
+
+func TestACampaignGettingNowhereInAnOutageStopsAndCanResume(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	r := newRig(t, always(delivery.Result{StatusCode: http.StatusTooManyRequests}, nil))
+	worker := r.stallingWorker()
+	if _, err := worker.ProcessBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := worker.PauseStalled(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if status := r.campaignStatus(t); status != "DISPATCHING" {
+		t.Fatalf("stopped too soon: %s", status)
+	}
+
+	r.rests(t, 11*time.Minute)
+	if err := worker.PauseStalled(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if status := r.campaignStatus(t); status != "PAUSED" {
+		t.Fatalf("still %s after the outage", status)
+	}
+	var details string
+	if err := r.pool.QueryRow(ctx, `SELECT details::text FROM audit_events WHERE campaign_id = $1 AND event_type = 'campaign.paused'`, r.id).Scan(&details); err != nil {
+		t.Fatalf("no record of the pause: %v", err)
+	}
+	if !strings.Contains(details, "rate_limited") {
+		t.Fatalf("details: %s", details)
+	}
+
+	// Nothing is lost and nothing is claimed while it is stopped.
+	before := len(r.sender.calls)
+	if _, err := r.pool.Exec(ctx, `UPDATE campaign_deliveries SET next_attempt_at = now() WHERE campaign_id = $1`, r.id); err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := worker.ProcessBatch(ctx); err != nil || claimed != 0 {
+		t.Fatalf("claimed %d while paused: %v", claimed, err)
+	}
+	if got := r.statuses(t); got["FAILED"] != 0 || got["RETRYING"] == 0 {
+		t.Fatalf("statuses: %v", got)
+	}
+	if len(r.sender.calls) != before {
+		t.Fatal("called the provider while paused")
+	}
+
+	r.sender.respond = always(accepted, nil)
+	if _, err := r.service.Resume(ctx, r.id); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.PauseStalled(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if status := r.campaignStatus(t); status != "DISPATCHING" {
+		t.Fatalf("resuming started no new wait: %s", status)
+	}
+	r.drain(t)
+	if status := r.campaignStatus(t); status != "COMPLETED" {
+		t.Fatalf("status after resuming: %s, %v", status, r.statuses(t))
+	}
+}
+
+func TestACampaignThatKeepsFinishingMessagesIsNotStopped(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	r := newRig(t, always(delivery.Result{StatusCode: http.StatusTooManyRequests}, nil))
+	worker := r.stallingWorker()
+	if _, err := worker.ProcessBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.rests(t, 11*time.Minute)
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE campaign_deliveries SET status = 'SENT', updated_at = now()
+		WHERE id = (SELECT id FROM campaign_deliveries WHERE campaign_id = $1 AND status = 'RETRYING' ORDER BY id LIMIT 1)`, r.id); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.PauseStalled(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if status := r.campaignStatus(t); status != "DISPATCHING" {
+		t.Fatalf("stopped although a message just finished: %s", status)
+	}
+}
+
+func TestACampaignOnlyWaitingBehindAnotherIsNotStopped(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	r := newRig(t, always(accepted, nil))
+	r.rests(t, 11*time.Minute)
+	worker := r.stallingWorker()
+	if err := worker.PauseStalled(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if status := r.campaignStatus(t); status != "DISPATCHING" {
+		t.Fatalf("stopped although nothing went wrong: %s", status)
+	}
+}
+
 func TestServerErrorsEndAsFailed(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, always(delivery.Result{StatusCode: http.StatusServiceUnavailable}, nil))
