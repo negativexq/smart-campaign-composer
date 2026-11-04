@@ -6,7 +6,9 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -187,24 +189,51 @@ func Load(ctx context.Context, pool *pgxpool.Pool, store asset.Store) (bool, err
 	return true, nil
 }
 
-// putImages stores every image the way an upload would and returns their ids by file name.
-func putImages(ctx context.Context, tx pgx.Tx, store asset.Store) (map[string]string, error) {
+type starterImage struct {
+	name  string
+	image asset.Image
+}
+
+// processedImages redraws the embedded images, which never change while the program runs,
+// so it does this work only once. Each image takes a while, so they are done side by side.
+var processedImages = sync.OnceValues(func() ([]starterImage, error) {
 	entries, err := imageFiles.ReadDir("images")
 	if err != nil {
 		return nil, fmt.Errorf("list starter images: %w", err)
 	}
-	ids := make(map[string]string, len(entries))
-	for _, entry := range entries {
-		raw, err := imageFiles.ReadFile("images/" + entry.Name())
-		if err != nil {
-			return nil, fmt.Errorf("read starter image %s: %w", entry.Name(), err)
-		}
-		image, err := asset.Process(raw)
-		if err != nil {
-			return nil, fmt.Errorf("process starter image %s: %w", entry.Name(), err)
-		}
+	images := make([]starterImage, len(entries))
+	problems := make([]error, len(entries))
+	var wait sync.WaitGroup
+	for i, entry := range entries {
+		wait.Go(func() {
+			raw, err := imageFiles.ReadFile("images/" + entry.Name())
+			if err != nil {
+				problems[i] = fmt.Errorf("read starter image %s: %w", entry.Name(), err)
+				return
+			}
+			image, err := asset.Process(raw)
+			if err != nil {
+				problems[i] = fmt.Errorf("process starter image %s: %w", entry.Name(), err)
+				return
+			}
+			images[i] = starterImage{name: entry.Name(), image: image}
+		})
+	}
+	wait.Wait()
+	return images, errors.Join(problems...)
+})
+
+// putImages stores every image the way an upload would and returns their ids by file name.
+func putImages(ctx context.Context, tx pgx.Tx, store asset.Store) (map[string]string, error) {
+	images, err := processedImages()
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[string]string, len(images))
+	for _, item := range images {
+		image := item.image
 		if err := store.Put(ctx, image.FileName(), image.Data); err != nil {
-			return nil, fmt.Errorf("store starter image %s: %w", entry.Name(), err)
+			return nil, fmt.Errorf("store starter image %s: %w", item.name, err)
 		}
 		var id string
 		err = tx.QueryRow(ctx, `
@@ -212,11 +241,11 @@ func putImages(ctx context.Context, tx pgx.Tx, store asset.Store) (map[string]st
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (file_name) DO UPDATE SET file_name = EXCLUDED.file_name
 			RETURNING id::text`,
-			entry.Name(), image.MIME, len(image.Data), image.Width, image.Height, image.FileName(), author).Scan(&id)
+			item.name, image.MIME, len(image.Data), image.Width, image.Height, image.FileName(), author).Scan(&id)
 		if err != nil {
-			return nil, fmt.Errorf("record starter image %s: %w", entry.Name(), err)
+			return nil, fmt.Errorf("record starter image %s: %w", item.name, err)
 		}
-		ids[entry.Name()] = id
+		ids[item.name] = id
 	}
 	return ids, nil
 }
