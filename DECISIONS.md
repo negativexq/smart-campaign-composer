@@ -405,6 +405,14 @@ An upload is judged by its content, not its name or declared type: only PNG and 
 
 Files are named by their hash and never change, and equal uploads share one. An image cannot be deleted while a template, the brand kit or a campaign's content mentions it, so a sent email's picture does not disappear. The file endpoint needs no session, since people reading an email have none. Emails carry a URL built from `PUBLIC_URL`, so outside a local demo that must be a public HTTPS address. Files sit on a Docker volume behind a small `Store` interface that object storage can replace.
 
+## Build and page weight: the cheap gains only
+
+Measured on one machine: after changing Go code, the backend image took 46 seconds to rebuild and now takes about 8, because the module and compile caches stay in BuildKit cache mounts between builds. They never enter the image, the binaries are the same size, and a first build with empty caches still compiles everything, which took 52 seconds. CI starts from an empty machine each time, so it gains nothing from this.
+
+Nginx now sends the app's JavaScript in 106 KB rather than 338 KB and its CSS in 17 KB rather than 91 KB, and files with a hash in their name are cached for a year. `index.html` is revalidated, so a new build is found. Server-sent events are left out of compression, so they still arrive as they are produced.
+
+We left the rest out for now. The API binary is 78 MB and the worker 51 MB, and the worker carries both LLM SDKs through `internal/campaign` although it calls no model, but nothing suffers from that yet. Separate images would lose the shared layer, loading each page separately needs loading and error states for little gain, and the browser already downloads only the font files a page needs. None of this changes model latency or the sending rate.
+
 ## Starter templates load once and never overwrite
 
 Setup adds seven templates, their images and an example brand kit, so a new installation can show the Template Studio without anyone uploading first. The images are embedded in the setup binary and go through the same processing and store as an upload.
