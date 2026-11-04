@@ -461,6 +461,9 @@ func noteNotApplied(proposal *segment.Proposal, stored View, brief string, reque
 		reflect.DeepEqual(proposal.Segment, stored.Proposal.Segment) &&
 		slices.Equal(proposal.UnsupportedConditions, stored.Proposal.UnsupportedConditions)
 	if unchanged {
+		if len(proposal.NotApplied) > 0 {
+			return // the model has already said so, and why
+		}
 		proposal.NotApplied = append(proposal.NotApplied, fmt.Sprintf("Nothing changed for your request: %q.", request.Refinement))
 		return
 	}
