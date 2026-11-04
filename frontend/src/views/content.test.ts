@@ -168,6 +168,31 @@ describe("content page", () => {
       expect(JSON.parse(String(put?.[1]?.body))).toMatchObject({ language: "en", sms: "Edited {{first_name}}" });
     });
 
+    it("starts the progress over when the second version of a test begins", async () => {
+      let next: (chunk: string) => void = () => {};
+      const stream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          next = (chunk) => controller.enqueue(encoder.encode(chunk));
+        },
+      });
+      stub({ ...base, ab_test: true }, async () => ({ ok: true, status: 200, body: stream }));
+      const wrapper = open();
+      await flushPromises();
+      next(event("started", {}) + event("plan", { languages: ["tr", "en"] }));
+      await vi.waitFor(() => expect(wrapper.find("[data-testid=generation-progress] h3").text()).toBe("Writing version A"));
+
+      next(event("language_done", { language: "tr" }) + event("language_done", { language: "en" }));
+      await vi.waitFor(() => expect(wrapper.find("[data-testid=generation-count]").text()).toBe("2 of 2 languages"));
+
+      next(event("variant", { variant: "B" }));
+      await vi.waitFor(() => expect(wrapper.find("[data-testid=generation-progress] h3").text()).toBe("Writing version B"));
+      expect(wrapper.find("[data-testid=generation-count]").text()).toBe("0 of 2 languages");
+      expect(wrapper.find("[data-testid=generation-tr]").text()).toContain("Writing");
+      expect(wrapper.find("[data-testid=generation-en]").text()).toContain("Up next");
+      wrapper.unmount();
+    });
+
     it("says which version is being written after the first", async () => {
       let finish: () => void = () => {};
       const stream = new ReadableStream({

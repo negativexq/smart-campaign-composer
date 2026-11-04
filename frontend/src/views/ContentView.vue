@@ -207,7 +207,7 @@ async function generate(input: { instruction?: string; missing_languages?: boole
   saveError.value = "";
   stopped.value = false;
   writingLanguage.value = "";
-  writingVariant.value = "";
+  writingVariant.value = campaign.value?.ab_test ? "A" : "";
   wholeCampaign.value = !before || Boolean(input.missing_languages);
   planned.value = [];
   writingNow.value = [];
@@ -236,8 +236,11 @@ async function generate(input: { instruction?: string; missing_languages?: boole
         },
         onLanguageDone: (language) => finished.value.push(language),
         onVariant: (variant) => {
+          // The next version goes through every language again, so its progress starts over.
           writingVariant.value = variant;
           writingLanguage.value = "";
+          writingNow.value = planned.value.slice(0, 1);
+          finished.value = [];
         },
       },
       controller.signal,

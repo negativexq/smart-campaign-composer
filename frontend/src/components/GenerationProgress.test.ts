@@ -22,6 +22,24 @@ describe("GenerationProgress", () => {
     expect(wrapper.get('[data-testid="generation-progress"]').attributes("aria-live")).toBe("polite");
   });
 
+  it("ticks a finished version before the next one is written", () => {
+    const row = (state: "waiting" | "writing" | "done") => [{ language: "en", name: "English", state }];
+    const states = (variant: string, state: "waiting" | "writing" | "done") => {
+      const wrapper = mount(GenerationProgress, { props: { writes: "SMS", variant, languages: row(state) } });
+      return ["A", "B"].map((name) => wrapper.get(`[data-testid="generation-version-${name}"]`).attributes("data-state"));
+    };
+
+    expect(states("A", "writing")).toEqual(["writing", "waiting"]);
+    expect(states("A", "done")).toEqual(["done", "waiting"]);
+    expect(states("B", "writing")).toEqual(["done", "writing"]);
+    expect(states("B", "done")).toEqual(["done", "done"]);
+  });
+
+  it("shows no versions when the campaign is not a test", () => {
+    const wrapper = mount(GenerationProgress, { props: { writes: "SMS", languages: [{ language: "en", name: "English", state: "writing" }] } });
+    expect(wrapper.find('[data-testid="generation-versions"]').exists()).toBe(false);
+  });
+
   it("names the version of a test", () => {
     const wrapper = mount(GenerationProgress, { props: { writes: "SMS", variant: "B", languages: [{ language: "en", name: "English", state: "writing" }] } });
     expect(wrapper.text()).toContain("Writing version B");

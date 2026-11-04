@@ -241,10 +241,17 @@ describe("campaign options", () => {
     await wrapper.find("#campaign-ab-test").setValue(true);
     await wrapper.find("#campaign-first-share").setValue(30);
     expect(wrapper.find("[data-testid=ab-test-note]").text()).toContain("other 70%");
-    expect(wrapper.find("[data-testid=options-summary]").text()).toContain("30/70");
     await wrapper.find("form").trigger("submit");
     await flushPromises();
     expect(sentBody(fetchMock)).toMatchObject({ ab_test: true, variant_a_percent: 30 });
+  });
+
+  it("offers the two-version test without opening the options", () => {
+    composeStub();
+    const wrapper = mount(ComposeView);
+    expect(wrapper.find("#campaign-ab-test").exists()).toBe(true);
+    expect(wrapper.find("[data-testid=campaign-options] #campaign-ab-test").exists()).toBe(false);
+    expect(wrapper.find("#campaign-first-share").exists()).toBe(false);
   });
 
   it("does not continue with a share that leaves a side empty", async () => {

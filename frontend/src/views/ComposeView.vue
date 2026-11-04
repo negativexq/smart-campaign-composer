@@ -50,8 +50,10 @@ onMounted(async () => {
 });
 
 const suggestions = [
-  "Send a 30% discount reminder to users in Istanbul who added to their cart in the last 30 days and did not buy. Keep it friendly and short.",
-  "Tell Ankara customers who bought in the last 60 days about free shipping this weekend.",
+  "Remind customers in İstanbul who added to their cart in the last 7 days and did not buy. Link: https://example.com/cart",
+  "Send a 10% discount to customers who have not purchased in the last 60 days. Link: https://example.com/offer",
+  "Tell customers who purchased in the last 30 days about our new collection. Link: https://example.com/new",
+  "Tell customers in Ankara about free shipping this weekend. Link: https://example.com/shipping",
 ];
 
 const validShare = computed(() => Number.isInteger(firstShare.value) && Number(firstShare.value) >= 1 && Number(firstShare.value) <= 99);
@@ -69,7 +71,6 @@ const optionsSummary = computed(() => {
   const chosen = [
     tone.value && tone.value[0].toUpperCase() + tone.value.slice(1),
     hasOffer.value && offer.value !== "" && `${offer.value}% discount`,
-    abTest.value && validShare.value && `Two versions, ${firstShare.value}/${100 - Number(firstShare.value)}`,
     quietDays.value && `Leaves out people messaged in the last ${quietDays.value} days`,
   ].filter(Boolean);
   return chosen.length ? chosen.join(" · ") : "Optional";
@@ -116,6 +117,22 @@ async function findAudience() {
       @submit="findAudience"
     >
       <ChannelPicker v-model="channels" :disabled="busy" />
+      <fieldset class="ab" :class="{ 'ab--on': abTest }" :disabled="busy" data-testid="ab-option">
+        <label class="ab-choice" for="campaign-ab-test">
+          <input id="campaign-ab-test" v-model="abTest" type="checkbox" data-testid="ab-test" />
+          <span class="ab-text">
+            <span class="ab-name">A/B test: try two versions of the message</span>
+            <span class="muted small">Each person gets one of two wordings, and the report shows how each did.</span>
+          </span>
+        </label>
+        <div v-if="abTest" class="option ab-share">
+          <label class="small muted" for="campaign-first-share">People who get version A (%)</label>
+          <input id="campaign-first-share" v-model.number="firstShare" class="field control" type="number" min="1" max="99" step="1" data-testid="ab-share" />
+          <p class="muted small" data-testid="ab-test-note">
+            <template v-if="validShare">The other {{ 100 - Number(firstShare) }}% get version B. </template>The offer stays the same; only the wording differs.
+          </p>
+        </div>
+      </fieldset>
       <p v-if="savedAudience" class="small muted chosen-template" data-testid="chosen-audience">
         Audience: {{ savedAudience.name }} ({{ savedAudience.conditions.map(ruleText).join(", ") }}).
         <button class="link-button small" type="button" data-testid="remove-audience" @click="savedAudience = null">Remove</button>
@@ -149,17 +166,6 @@ async function findAudience() {
               <label class="small muted" for="campaign-offer">Discount (%)</label>
               <input id="campaign-offer" v-model.number="offer" class="field control" type="number" min="1" max="100" step="1" />
             </div>
-            <label class="check small" for="campaign-ab-test">
-              <input id="campaign-ab-test" v-model="abTest" type="checkbox" data-testid="ab-test" />
-              Test two versions of the message
-            </label>
-            <div v-if="abTest" class="option">
-              <label class="small muted" for="campaign-first-share">People who get version A (%)</label>
-              <input id="campaign-first-share" v-model.number="firstShare" class="field control" type="number" min="1" max="99" step="1" data-testid="ab-share" />
-              <p class="muted small" data-testid="ab-test-note">
-                <template v-if="validShare">The other {{ 100 - Number(firstShare) }}% get version B. </template>The offer stays the same; only the wording differs.
-              </p>
-            </div>
           </fieldset>
           <fieldset class="options" :disabled="busy" data-testid="audience-options">
             <legend class="legend">Who to leave out</legend>
@@ -181,6 +187,58 @@ async function findAudience() {
 </template>
 
 <style scoped>
+.ab {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.ab--on {
+  border-color: var(--color-primary);
+}
+
+.ab:disabled {
+  opacity: 0.6;
+}
+
+.ab-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.ab:disabled .ab-choice {
+  cursor: not-allowed;
+}
+
+.ab-choice input {
+  margin: 3px 0 0;
+  accent-color: var(--color-primary);
+}
+
+.ab-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ab-name {
+  font-weight: 500;
+}
+
+.ab-share .control {
+  max-width: 120px;
+}
+
+.ab-share p {
+  margin: 0;
+}
+
 .more {
   margin-top: var(--space-2);
 }
