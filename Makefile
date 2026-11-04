@@ -1,6 +1,6 @@
 COMPOSE_TEST := docker compose -f compose.test.yaml
 
-.PHONY: test test-go test-frontend test-local test-e2e test-chaos test-env-up test-env-down up down
+.PHONY: test test-go test-frontend test-local test-e2e test-chaos benchmark test-env-up test-env-down up down
 
 ## test: run all tests in containers (needs only Docker, no API key)
 test: test-go test-frontend
@@ -22,6 +22,10 @@ test-e2e:
 ## test-chaos: kill and stop services under a running stack and check nothing is lost (takes a few minutes)
 test-chaos:
 	go test -tags=chaos -count=1 -timeout=15m -v ./tests/chaos/...
+
+## benchmark: score a provider on the hard cases (mock unless LLM_PROVIDER is set; a real one costs money)
+benchmark: test-env-up
+	go test -tags=benchmark -count=1 -timeout=90m -run TestBenchmark -v ./tests/benchmark/
 
 test-env-up:
 	$(COMPOSE_TEST) up -d --wait postgres redis
