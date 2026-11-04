@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 
-import { previewEmail, type EmailPreviewResult, type Messages } from "../api/campaigns";
+import { previewEmail, type EmailDesign, type EmailPreviewResult, type Messages } from "../api/campaigns";
 import { renderMessage } from "../lib/message";
 
 const props = defineProps<{
-  message: Partial<Messages>;
+  message: Partial<Messages> & { email_design?: EmailDesign | null };
   recipients: { id: number; label: string; first_name: string }[];
   language?: string;
 }>();

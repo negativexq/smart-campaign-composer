@@ -112,7 +112,7 @@ export function describeActivity(entry: ActivityEntry): { title: string; detail:
     case "audience.saved":
       return { title: "Audience saved", detail: String(details.name ?? "") };
     case "campaign.approved":
-      return { title: "Approved", detail: details.email_template_version ? `Audience rules and messages are now fixed. ${templateName(String(details.email_template ?? ""))} email design, version ${details.email_template_version}` : "Audience rules and messages are now fixed" };
+      return { title: "Approved", detail: details.email_template_version ? `Audience rules and messages are now fixed. ${String(details.email_template_name ?? "") || templateName(String(details.email_template ?? ""))} email design, version ${details.email_template_version}` : "Audience rules and messages are now fixed" };
     case "campaign.scheduled":
       return { title: "Scheduled", detail: String(details.schedule ?? "") };
     case "campaign.schedule_cancelled":

@@ -138,6 +138,8 @@ type Config struct {
 	// StallAfter is how long a campaign may wait on retries with nothing finishing
 	// before it stops and someone is told. Zero leaves it waiting.
 	StallAfter time.Duration
+	// AssetBase is the public address the images in emails load from.
+	AssetBase string
 	// Unsubscribe gives the signed link for a person's emails.
 	Unsubscribe func(userID int64) string
 }
@@ -458,7 +460,7 @@ func (w *Worker) claim(ctx context.Context, channel string, limit int) ([]claim,
 	return claims, nil
 }
 
-func (c claim) message(unsubscribeURL string) (Message, error) {
+func (c claim) message(unsubscribeURL, assetBase string) (Message, error) {
 	message := Message{Channel: c.channel, IdempotencyKey: c.key}
 	if c.channel == "sms" {
 		message.To = c.phone
@@ -467,7 +469,7 @@ func (c claim) message(unsubscribeURL string) (Message, error) {
 	}
 	message.To = c.email
 	message.UnsubscribeURL = unsubscribeURL
-	email, err := content.RenderEmail(c.content, c.firstName, unsubscribeURL)
+	email, err := content.RenderEmailWith(c.content, c.firstName, unsubscribeURL, content.RenderOptions{AssetBase: assetBase})
 	if err != nil {
 		return Message{}, err
 	}
@@ -490,7 +492,7 @@ func (w *Worker) handle(ctx context.Context, item claim) (err error) {
 		return w.record(ctx, item, update{status: statusSkipped, attempts: item.attempts, reason: "consent_withdrawn"}, nil)
 	}
 
-	message, err := item.message(w.unsubscribeURL(item))
+	message, err := item.message(w.unsubscribeURL(item), w.config.AssetBase)
 	if err != nil {
 		w.breakers[item.channel].giveBack(1)
 		slog.ErrorContext(ctx, "render message", "delivery_id", item.id, "error", err)

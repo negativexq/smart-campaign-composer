@@ -276,6 +276,18 @@ type EmailTemplateUse struct {
 // latest version or, with no message yet, by the design it was started from. One with
 // no choice uses the default, as it would when sent.
 func (s *Service) EmailTemplateUses(ctx context.Context) ([]EmailTemplateUse, error) {
+	counts, err := s.templateCounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	uses := make([]EmailTemplateUse, 0, len(content.EmailTemplates))
+	for _, id := range content.EmailTemplates {
+		uses = append(uses, EmailTemplateUse{ID: id, Version: content.EmailTemplateVersion(id), Campaigns: counts[id]})
+	}
+	return uses, nil
+}
+
+func (s *Service) templateCounts(ctx context.Context) (map[string]int, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT COALESCE(NULLIF(COALESCE(v.content->>'email_template', c.email_template), ''), $1), count(*)
 		FROM campaigns c
@@ -298,11 +310,7 @@ func (s *Service) EmailTemplateUses(ctx context.Context) ([]EmailTemplateUse, er
 	}); err != nil {
 		return nil, fmt.Errorf("count template use: %w", err)
 	}
-	uses := make([]EmailTemplateUse, 0, len(content.EmailTemplates))
-	for _, id := range content.EmailTemplates {
-		uses = append(uses, EmailTemplateUse{ID: id, Version: content.EmailTemplateVersion(id), Campaigns: counts[id]})
-	}
-	return uses, nil
+	return counts, nil
 }
 
 // Notifications are the events someone would want to hear about without watching:

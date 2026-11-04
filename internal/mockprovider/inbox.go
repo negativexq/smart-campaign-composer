@@ -150,7 +150,7 @@ func (s *Server) registerInbox(mux *http.ServeMux) {
 func serveInboxPage(w http.ResponseWriter, _ *http.Request) {
 	// Message text comes from a model and from people, so the page runs only its
 	// own script and never loads anything from elsewhere.
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src http: https:; base-uri 'none'; form-action 'none'")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(inboxPage)

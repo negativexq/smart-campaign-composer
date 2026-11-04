@@ -96,6 +96,7 @@ func run() error {
 
 	config := delivery.DefaultConfig()
 	publicURL := strings.TrimRight(server.Env("PUBLIC_URL", "http://localhost:8080"), "/")
+	config.AssetBase = publicURL
 	config.Unsubscribe = func(userID int64) string {
 		return publicURL + "/api/unsubscribe/" + unsubscribe.Token(unsubscribeSecret, userID)
 	}

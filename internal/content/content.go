@@ -63,6 +63,8 @@ type Content struct {
 	EmailCTAURL    string `json:"email_cta_url"`
 	// EmailTemplate is a person's choice of design. Models only write text.
 	EmailTemplate string `json:"email_template"`
+	// EmailDesign is the campaign's own copy of a marketer's design, when it uses one.
+	EmailDesign *Design `json:"email_design,omitempty"`
 	// Language says who this version is for. Older campaigns have none.
 	Language string `json:"language,omitempty"`
 	// Variant is "B" for the second version of a campaign that compares two.
@@ -150,6 +152,7 @@ func (l Limits) Keep(c Content) Content {
 	if l.SkipEmail {
 		c.EmailSubject, c.EmailBody = "", ""
 		c.EmailPreheader, c.EmailHeadline, c.EmailCTALabel, c.EmailCTAURL, c.EmailTemplate = "", "", "", "", ""
+		c.EmailDesign = nil
 	}
 	return c
 }
@@ -192,6 +195,7 @@ func ParseGenerated(raw []byte, limits Limits, offerSource string) (Content, err
 	}
 	generated := limits.Keep(decoded.Content)
 	generated.EmailTemplate, generated.Language, generated.Variant = "", "", ""
+	generated.EmailDesign = nil
 	issues := append(CheckMessages(generated, limits), CheckDiscounts(generated, offerSource)...)
 	if len(issues) > 0 {
 		return Content{}, &ValidationError{Issues: issues}
@@ -241,7 +245,7 @@ func CheckMessages(c Content, limits Limits) []Issue {
 		}
 	}
 	if !limits.SkipEmail {
-		if c.EmailTemplate != "" && !slices.Contains(EmailTemplates, c.EmailTemplate) {
+		if c.EmailTemplate != "" && !usableTemplate(c) {
 			issues = append(issues, Issue{FieldEmailTemplate, "unknown_template", "This email template does not exist."})
 		}
 		issues = append(issues, checkEmailDesign(c, limits)...)

@@ -1,13 +1,18 @@
 package campaign_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/png"
 	"slices"
 	"testing"
 
+	"github.com/negativexq/smart-campaign-composer/internal/asset"
 	"github.com/negativexq/smart-campaign-composer/internal/campaign"
+	"github.com/negativexq/smart-campaign-composer/internal/content"
 )
 
 func (h *harness) createWithStatus(t *testing.T, brief, status string) string {
@@ -362,5 +367,119 @@ func TestAChosenTemplateIsKeptAndCounted(t *testing.T) {
 	}
 	if _, err := h.service.CreateWith(ctx, campaign.NewCampaign{Brief: "x y", Channels: []string{"email"}, EmailTemplate: "nope"}); !errors.Is(err, campaign.ErrInvalidOptions) {
 		t.Fatalf("unknown template: %v", err)
+	}
+}
+
+func TestACampaignKeepsItsOwnCopyOfAMarketersDesign(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, step{output: validProposal})
+	ctx := context.Background()
+	raw := new(bytes.Buffer)
+	if err := png.Encode(raw, image.NewRGBA(image.Rect(0, 0, 4, 2))); err != nil {
+		t.Fatal(err)
+	}
+	picture, err := asset.Process(raw.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hero, err := h.service.RecordAsset(ctx, "hero.png", picture)
+	if err != nil || hero.Width != 4 || hero.InUse {
+		t.Fatalf("record: %+v %v", hero, err)
+	}
+	if again, err := h.service.RecordAsset(ctx, "same.png", picture); err != nil || again.ID != hero.ID {
+		t.Fatalf("the same picture twice: %+v %v", again, err)
+	}
+	blocks := []content.Block{
+		{ID: "a", Type: "image", AssetID: hero.ID, Alt: "Hero", Width: 100},
+		{ID: "b", Type: "heading", Slot: content.SlotHeadline},
+		{ID: "c", Type: "text", Slot: content.SlotBody},
+		{ID: "d", Type: "button", Slot: content.SlotCTA},
+	}
+	design := content.Design{Name: "  Mine ", Accent: "#0A7A5C", Page: "#F5F7FA", Button: "pill", Corners: 8, Font: "sans", Blocks: blocks}
+	missing := design
+	missing.Blocks = append([]content.Block{{ID: "x", Type: "logo", AssetID: "99999999-2222-3333-4444-555555555555", Alt: "Gone", Width: 20}}, blocks...)
+	var gone *campaign.DesignError
+	if _, err := h.service.SaveEmailDesign(ctx, "", missing); !errors.As(err, &gone) {
+		t.Fatalf("an image that does not exist: %v", err)
+	}
+	saved, err := h.service.SaveEmailDesign(ctx, "", design)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if saved.Name != "Mine" || saved.Version == "" {
+		t.Fatalf("saved: %+v", saved)
+	}
+	if _, err := h.service.SaveEmailDesign(ctx, "", design); !errors.Is(err, campaign.ErrDesignNameTaken) {
+		t.Fatalf("same name: %v", err)
+	}
+	bad := design
+	bad.Accent = "red"
+	var problem *campaign.DesignError
+	if _, err := h.service.SaveEmailDesign(ctx, "", bad); !errors.As(err, &problem) {
+		t.Fatalf("bad color: %v", err)
+	}
+
+	name := content.CustomTemplateName(saved.ID)
+	id, err := h.service.CreateWith(ctx, campaign.NewCampaign{Brief: "Istanbul cart reminder", Channels: []string{"email"}, EmailTemplate: name})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Changing the design later leaves the campaign as it was chosen, and looks count once.
+	changed := saved.Design
+	changed.Accent = "#112233"
+	updated, err := h.service.SaveEmailDesign(ctx, saved.ID, changed)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Version == saved.Version || updated.Campaigns != 0 {
+		t.Fatalf("updated: %+v", updated)
+	}
+	view, err := h.service.Get(ctx, id)
+	if err != nil || view.EmailTemplate != name || view.EmailDesign == nil || view.EmailDesign.Accent != "#0A7A5C" {
+		t.Fatalf("view: %+v %v", view.EmailDesign, err)
+	}
+	designs, err := h.service.EmailDesigns(ctx)
+	if err != nil || len(designs) != 1 || designs[0].Campaigns != 1 {
+		t.Fatalf("designs: %+v %v", designs, err)
+	}
+
+	// A copy of the campaign carries the design too, even with the original gone.
+	if err := h.service.DeleteEmailDesign(ctx, saved.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if view, err = h.service.Get(ctx, id); err != nil || view.EmailDesign == nil {
+		t.Fatalf("after delete: %+v %v", view.EmailDesign, err)
+	}
+	if _, err := h.service.CreateWith(ctx, campaign.NewCampaign{Brief: "x y", Channels: []string{"email"}, EmailTemplate: name}); !errors.Is(err, campaign.ErrInvalidOptions) {
+		t.Fatalf("deleted design: %v", err)
+	}
+	// So its image has to stay as well, until the last thing showing it has gone.
+	if _, err := h.service.DeleteAsset(ctx, hero.ID); !errors.Is(err, campaign.ErrAssetInUse) {
+		t.Fatalf("delete an image a campaign shows: %v", err)
+	}
+	if listed, err := h.service.Assets(ctx); err != nil || len(listed) != 1 || !listed[0].InUse {
+		t.Fatalf("assets: %+v %v", listed, err)
+	}
+}
+
+func TestTheBrandKitStartsWithDefaultsAndChecksItsLogo(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, step{output: validProposal})
+	ctx := context.Background()
+	brand, err := h.service.Brand(ctx)
+	if err != nil || brand.Accent != content.DefaultBrand().Accent {
+		t.Fatalf("defaults: %+v %v", brand, err)
+	}
+	brand.Name, brand.Accent = " Acme ", "#112233"
+	if saved, err := h.service.SaveBrand(ctx, brand); err != nil || saved.Name != "Acme" {
+		t.Fatalf("save: %+v %v", saved, err)
+	}
+	if read, err := h.service.Brand(ctx); err != nil || read.Accent != "#112233" {
+		t.Fatalf("read: %+v %v", read, err)
+	}
+	brand.LogoAssetID = "99999999-2222-3333-4444-555555555555"
+	var problem *campaign.DesignError
+	if _, err := h.service.SaveBrand(ctx, brand); !errors.As(err, &problem) {
+		t.Fatalf("a logo that does not exist: %v", err)
 	}
 }

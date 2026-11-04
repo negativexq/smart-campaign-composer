@@ -14,6 +14,8 @@ import {
   type MessageField,
   type Messages,
   type SampleRecipient,
+  getEmailDesigns,
+  type EmailDesign,
 } from "../api/campaigns";
 import EmailPreview from "../components/EmailPreview.vue";
 import EmailTemplatePicker from "../components/EmailTemplatePicker.vue";
@@ -25,7 +27,7 @@ import ValidationNotice from "../components/ValidationNotice.vue";
 import { channelLabel, firstMessagePath } from "../lib/campaignSteps";
 import { isDraftStatus } from "../lib/campaignStatus";
 import { audienceLanguages, recipientsFor, listNames, languageName, longestNameFor, missingLanguages, missingSecondVersion, variantCount, variantPeople, variantShare, versionFor } from "../lib/languages";
-import { EMAIL_TEMPLATES } from "../lib/emailTemplates";
+import { customTemplateName, EMAIL_TEMPLATES, isCustomTemplate } from "../lib/emailTemplates";
 import { navigate } from "../lib/navigation";
 
 const EMAIL_FIELDS: MessageField[] = ["email_subject", "email_preheader", "email_headline", "email_body", "email_cta_label", "email_cta_url"];
@@ -107,6 +109,19 @@ const next = computed(() =>
     ? { href: `/campaigns/${props.campaignId}/email`, label: "Continue to email" }
     : { href: `/campaigns/${props.campaignId}/review`, label: "Continue to review" },
 );
+// A campaign keeps its own copy, so that copy can be chosen even after the original is deleted.
+const designLibrary = ref<EmailDesign[]>([]);
+const designChoices = computed(() => {
+  const own = campaign.value?.email_design;
+  return own && !designLibrary.value.some((design) => design.id === own.id) ? [...designLibrary.value, own] : designLibrary.value;
+});
+const previewMessage = computed(() => {
+  const chosen = template.value;
+  if (!isCustomTemplate(chosen)) return messages;
+  const own = campaign.value?.email_design;
+  const design = own && customTemplateName(own.id) === chosen ? own : designLibrary.value.find((item) => customTemplateName(item.id) === chosen);
+  return { ...messages, email_design: design ?? null };
+});
 const template = computed({
   get: () => messages.email_template || campaign.value?.email_template || EMAIL_TEMPLATES[0].id,
   set: (id: string) => (messages.email_template = id),
@@ -278,6 +293,10 @@ watch(generating, (active) => {
   else if (campaign.value) emit("status", campaign.value.status);
 });
 
+onMounted(() => {
+  // Only the extra choices depend on this, so the page still works without them.
+  getEmailDesigns().then((designs) => (designLibrary.value = designs)).catch(() => {});
+});
 onMounted(async () => {
   try {
     [campaign.value, recipients.value] = await Promise.all([
@@ -406,7 +425,7 @@ onBeforeUnmount(() => controller?.abort());
             :problem="issueFor('sms')"
           />
           <template v-else>
-            <EmailTemplatePicker v-model="template" :disabled="generating" />
+            <EmailTemplatePicker v-model="template" :designs="designChoices" :disabled="generating" />
             <MessageEditor v-model="messages.email_subject" plain no-variables label="Subject" :limit="80" :rows="1" :state="editorState('email_subject')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_subject')" />
             <MessageEditor v-model="messages.email_preheader" plain no-variables label="Preview text" :limit="120" :rows="2" :state="editorState('email_preheader')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_preheader')" />
             <MessageEditor v-model="messages.email_headline" plain no-variables label="Headline" :limit="80" :rows="1" :state="editorState('email_headline')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_headline')" />
@@ -450,7 +469,7 @@ onBeforeUnmount(() => controller?.abort());
 
       <aside v-if="recipients.length" class="previews" aria-label="Message preview">
         <PhonePreview v-if="channel === 'sms'" :key="selectedVariant + selectedLanguage" :message="messages.sms" :recipients="shownRecipients" :language="selectedLanguage" />
-        <EmailPreview v-else :key="selectedVariant + selectedLanguage" :message="messages" :recipients="shownRecipients" :language="selectedLanguage" />
+        <EmailPreview v-else :key="selectedVariant + selectedLanguage" :message="previewMessage" :recipients="shownRecipients" :language="selectedLanguage" />
       </aside>
     </div>
   </div>

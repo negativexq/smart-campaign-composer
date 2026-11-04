@@ -470,11 +470,27 @@ describe("delivery monitor", () => {
 });
 
 describe("templates", () => {
+  it("keeps images and the brand kit as tabs of one Templates page", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const body = url === "/api/session" ? { identity: "marketer@example.com" } : url === "/api/system" ? { checks: { database: "ok" } } : url === "/api/config" ? { llm_provider: "mock", llm_model: "m" } : url === "/api/assets" ? { assets: [] } : { notifications: [] };
+      return { ok: true, status: 200, json: async () => body } as Response;
+    }));
+    navigate("/templates/images");
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.find("[data-testid=template-tabs] [aria-current=page]").text()).toBe("Images");
+    expect(wrapper.find("[data-testid=asset-library]").exists()).toBe(true);
+    expect(wrapper.findAll("a").filter((link) => link.text() === "Brand kit").map((link) => link.attributes("href"))).toEqual(["/templates/brand"]);
+    wrapper.unmount();
+  });
+
   it("shows each design from the backend, its real use, and starts a campaign from it", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       const body = url === "/api/email-templates"
         ? { templates: [{ id: "classic", version: "aaa", campaigns: 3 }, { id: "banner", version: "bbb", campaigns: 1 }, { id: "offer", version: "ccc", campaigns: 0 }] }
-        : { subject: "s", html: `<p>${JSON.parse(String(init?.body)).email_template}</p>`, text: "t" };
+        : url === "/api/email-designs"
+          ? { designs: [] }
+          : { subject: "s", html: `<p>${JSON.parse(String(init?.body)).email_template}</p>`, text: "t" };
       return { ok: true, status: 200, json: async () => body } as Response;
     }));
     const wrapper = mount(TemplatesView);
@@ -486,6 +502,40 @@ describe("templates", () => {
     expect(banner.find("[data-testid=template-use]").text()).toContain("bbb");
     expect(banner.find("[data-testid=template-frame]").attributes("srcdoc")).toBe("<p>banner</p>");
     expect(banner.find("[data-testid=use-template]").attributes("href")).toBe("/campaigns/new?template=banner");
+  });
+
+  it("lists your own templates with a real preview, and deletes one only after asking", async () => {
+    const design = { id: "d1", name: "Winter", accent: "#112233", page: "#FFFFFF", button: "pill", corners: 8, font: "sans", blocks: [], version: "ver1", campaigns: 2, updated_at: "" };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") return { ok: true, status: 204, json: async () => null } as Response;
+      const body = url === "/api/email-templates"
+        ? { templates: [] }
+        : url === "/api/email-designs"
+          ? { designs: [design] }
+          : (() => {
+            const sent = JSON.parse(String(init?.body)).email_design;
+            // The real API refuses fields it does not expect, as saved ones like these.
+            if (sent && ("version" in sent || "campaigns" in sent || "updated_at" in sent)) return { error: "not valid" };
+            return { subject: "s", html: `<p>${sent?.name ?? "built-in"}</p>`, text: "t" };
+          })();
+      return { ok: true, status: 200, json: async () => body } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(TemplatesView);
+    await flushPromises();
+    await flushPromises();
+
+    const card = wrapper.find("[data-testid=design-d1]");
+    expect(card.find("[data-testid=template-frame]").attributes("srcdoc")).toBe("<p>Winter</p>");
+    expect(card.find("[data-testid=template-use]").text()).toContain("Used by 2 campaigns");
+    expect(card.find("[data-testid=use-template]").attributes("href")).toBe("/campaigns/new?template=custom:d1");
+
+    await card.find("[data-testid=delete-design]").trigger("click");
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+    await wrapper.find("[data-testid=confirm-delete-design]").trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith("/api/email-designs/d1", expect.objectContaining({ method: "DELETE" }));
+    expect(wrapper.find("[data-testid=no-designs]").exists()).toBe(true);
   });
 
   it("says so when the templates cannot be loaded", async () => {

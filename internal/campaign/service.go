@@ -79,10 +79,12 @@ type View struct {
 	Name       string `json:"name"`
 	NameSource string `json:"name_source"`
 	// EmailTemplate is the design chosen before any message was written.
-	EmailTemplate string   `json:"email_template"`
-	Brief         string   `json:"brief"`
-	Status        string   `json:"status"`
-	Channels      []string `json:"channels"`
+	EmailTemplate string `json:"email_template"`
+	// EmailDesign is the campaign's copy of a marketer's own design, when it started from one.
+	EmailDesign *content.Design `json:"email_design,omitempty"`
+	Brief       string          `json:"brief"`
+	Status      string          `json:"status"`
+	Channels    []string        `json:"channels"`
 	// ExcludedLanguages get no version of their own, and their readers get English.
 	ExcludedLanguages []string `json:"excluded_languages"`
 	Tone              string   `json:"tone"`
@@ -154,7 +156,7 @@ type NewCampaign struct {
 }
 
 func (n NewCampaign) validate() error {
-	if n.EmailTemplate != "" && !slices.Contains(content.EmailTemplates, n.EmailTemplate) {
+	if n.EmailTemplate != "" && !slices.Contains(content.EmailTemplates, n.EmailTemplate) && !content.IsCustomTemplate(n.EmailTemplate) {
 		return ErrInvalidOptions
 	}
 	if !slices.Contains([]string{"", "friendly", "formal", "urgent"}, n.Tone) {
@@ -193,6 +195,19 @@ func (s *Service) CreateWith(ctx context.Context, campaign NewCampaign) (string,
 	if err := campaign.validate(); err != nil {
 		return "", err
 	}
+	var design []byte
+	if content.IsCustomTemplate(campaign.EmailTemplate) {
+		chosen, err := s.designForTemplate(ctx, campaign.EmailTemplate)
+		if errors.Is(err, ErrDesignNotFound) {
+			return "", ErrInvalidOptions
+		}
+		if err != nil {
+			return "", err
+		}
+		if design, err = json.Marshal(chosen); err != nil {
+			return "", fmt.Errorf("encode design: %w", err)
+		}
+	}
 	var (
 		savedName string
 		savedSpec segment.Spec
@@ -213,9 +228,9 @@ func (s *Service) CreateWith(ctx context.Context, campaign NewCampaign) (string,
 
 	var id string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO campaigns (brief, name, created_by, channels, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::int, 50), $10) RETURNING id::text`,
-		brief, provisionalName(brief), personFrom(ctx), chosen, campaign.Tone, campaign.OfferPercent, campaign.NotMessagedWithinDays, campaign.ABTest, campaign.VariantAPercent, campaign.EmailTemplate).Scan(&id); err != nil {
+		INSERT INTO campaigns (brief, name, created_by, channels, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, email_design)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::int, 50), $10, $11) RETURNING id::text`,
+		brief, provisionalName(brief), personFrom(ctx), chosen, campaign.Tone, campaign.OfferPercent, campaign.NotMessagedWithinDays, campaign.ABTest, campaign.VariantAPercent, campaign.EmailTemplate, design).Scan(&id); err != nil {
 		return "", fmt.Errorf("insert campaign: %w", err)
 	}
 	if err := recordAudit(ctx, tx, id, eventCreated, map[string]any{"brief_characters": utf8.RuneCountInString(brief), "channels": chosen, "tone": campaign.Tone, "offer_percent": campaign.OfferPercent, "not_messaged_within_days": campaign.NotMessagedWithinDays, "email_template": campaign.EmailTemplate}); err != nil {
@@ -259,8 +274,8 @@ func (s *Service) Duplicate(ctx context.Context, id string) (View, error) {
 
 	var copied string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO campaigns (brief, name, name_source, created_by, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, status)
-		SELECT brief, $2, name_source, $3, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, $4
+		INSERT INTO campaigns (brief, name, name_source, created_by, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, email_design, status)
+		SELECT brief, $2, name_source, $3, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, email_design, $4
 		FROM campaigns WHERE id = $1
 		RETURNING id::text`, id, string(name)+suffix, personFrom(ctx), status).Scan(&copied); err != nil {
 		return View{}, fmt.Errorf("copy campaign: %w", err)
@@ -907,12 +922,12 @@ func (s *Service) loadFrom(ctx context.Context, q segment.Querier, id string) (V
 		snapshot     []byte
 	)
 	err := q.QueryRow(ctx, `
-		SELECT c.name, c.name_source, c.email_template, c.brief, c.status, c.channels, c.excluded_languages, c.tone, c.ab_test, c.variant_a_percent, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
+		SELECT c.name, c.name_source, c.email_template, c.email_design, c.brief, c.status, c.channels, c.excluded_languages, c.tone, c.ab_test, c.variant_a_percent, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.EmailTemplate, &view.Brief, &view.Status, &view.Channels, &view.ExcludedLanguages, &view.Tone, &view.ABTest, &view.VariantAPercent, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt, &snapshot)
+		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.EmailTemplate, &view.EmailDesign, &view.Brief, &view.Status, &view.Channels, &view.ExcludedLanguages, &view.Tone, &view.ABTest, &view.VariantAPercent, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt, &snapshot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}

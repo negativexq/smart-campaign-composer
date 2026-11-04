@@ -13,7 +13,7 @@ export type Messages = Record<MessageField, string>;
 export type ContentIssue = { field: string; reason: string; message: string };
 export type SampleRecipient = { id: number; label: string; first_name: string; language?: string };
 export type LanguageAudience = { language: string; total: number; sms: number; email: number; sms_name_length: number; email_name_length: number };
-export type MessageVersion = Messages & { edited: MessageField[]; language?: string; variant?: string };
+export type MessageVersion = Messages & { edited: MessageField[]; language?: string; variant?: string; email_design?: EmailDesign | null };
 /** One version of a test: its messages and their other languages. */
 export type VariantContent = MessageVersion & { translations?: MessageVersion[] };
 
@@ -86,6 +86,7 @@ export type Campaign = {
   name: string;
   name_source: "brief" | "ai" | "user";
   email_template?: string;
+  email_design?: EmailDesign | null;
   brief: string;
   status: string;
   channels: string[];
@@ -231,6 +232,69 @@ export function getCampaign(id: string): Promise<Campaign> {
   return request<Campaign>(`/api/campaigns/${encodeURIComponent(id)}`);
 }
 
+export type BlockType = "logo" | "image" | "heading" | "text" | "button" | "divider";
+export type EmailBlock = {
+  id: string;
+  type: BlockType;
+  slot?: "headline" | "body" | "cta";
+  text?: string;
+  label?: string;
+  url?: string;
+  asset_id?: string;
+  alt?: string;
+  width?: number;
+  link?: string;
+  align?: string;
+  style?: string;
+};
+export type EmailDesign = { id: string; name: string; accent: string; page: string; button: string; corners: number; font: string; footer?: string; blocks: EmailBlock[] };
+export type SavedEmailDesign = EmailDesign & { version: string; campaigns: number; updated_at: string };
+
+export async function getEmailDesigns(): Promise<SavedEmailDesign[]> {
+  return (await request<{ designs: SavedEmailDesign[] }>("/api/email-designs")).designs ?? [];
+}
+
+// A saved design also says how it is used, and the API refuses fields it does not expect.
+function designOnly(design: EmailDesign): EmailDesign {
+  const { id, name, accent, page, button, corners, font, footer, blocks } = design;
+  return { id, name, accent, page, button, corners, font, footer, blocks };
+}
+
+export function saveEmailDesign(id: string, design: EmailDesign): Promise<SavedEmailDesign> {
+  if (!id) return post<SavedEmailDesign>("/api/email-designs", designOnly(design));
+  return request<SavedEmailDesign>(`/api/email-designs/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(designOnly(design)) });
+}
+
+export async function deleteEmailDesign(id: string): Promise<void> {
+  await request<void>(`/api/email-designs/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export type Asset = { id: string; name: string; mime: string; bytes: number; width: number; height: number; in_use: boolean; url: string; created_at: string };
+
+export async function getAssets(): Promise<Asset[]> {
+  return (await request<{ assets: Asset[] }>("/api/assets")).assets ?? [];
+}
+
+export function uploadAsset(file: File): Promise<Asset> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<Asset>("/api/assets", { method: "POST", body: form });
+}
+
+export async function deleteAsset(id: string): Promise<void> {
+  await request<void>(`/api/assets/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export type Brand = { name: string; logo_asset_id: string; accent: string; page: string; button: string; font: string; footer: string };
+
+export function getBrand(): Promise<Brand> {
+  return request<Brand>("/api/brand");
+}
+
+export function saveBrand(brand: Brand): Promise<Brand> {
+  return request<Brand>("/api/brand", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(brand) });
+}
+
 export type EmailTemplateUse = { id: string; version: string; campaigns: number };
 
 export async function getEmailTemplates(): Promise<EmailTemplateUse[]> {
@@ -340,10 +404,16 @@ const EMAIL_FIELDS: MessageField[] = ["email_subject", "email_preheader", "email
 
 export type EmailPreviewResult = { subject: string; html: string; text: string };
 
-export function previewEmail(message: Partial<Messages>, firstName: string, language = ""): Promise<EmailPreviewResult> {
+export function previewEmail(message: Partial<Messages> & { email_design?: EmailDesign | null }, firstName: string, language = "", editing = false): Promise<EmailPreviewResult> {
   // Stored content also says who edited what, which the template has no use for.
   const fields = EMAIL_FIELDS.map((field) => [field, message[field] ?? ""]);
-  return post<EmailPreviewResult>("/api/email-preview", { ...Object.fromEntries(fields), ...(language ? { language } : {}), first_name: firstName });
+  return post<EmailPreviewResult>("/api/email-preview", {
+    ...Object.fromEntries(fields),
+    ...(message.email_design ? { email_design: designOnly(message.email_design) } : {}),
+    ...(language ? { language } : {}),
+    ...(editing ? { editing } : {}),
+    first_name: firstName,
+  });
 }
 
 export function saveContent(id: string, messages: Messages & { language?: string; variant?: string }): Promise<Campaign> {

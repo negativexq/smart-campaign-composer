@@ -34,6 +34,10 @@ The report follows each message from plan to arrival, separates provider accepta
 
 ![Overview: campaign counts, recent campaigns, activity and system health](docs/screenshots/overview.png)
 
+### Design your own email
+
+Templates are built from blocks in a three-panel editor: logo, image, heading, text, button and divider, with a live preview the backend draws for computer and phone. The AI fills the headline, message and button for each campaign; layout, images and links stay as the marketer set them. Images and a brand kit (logo, colors, button shape, font, footer details) are kept in one place, and a campaign keeps its own copy of the design it started from.
+
 ## How sending behaves
 
 - **Audience:** a one-time send goes to the people who were approved, and a repeating one finds who matches at each run. Consent is checked again either way.

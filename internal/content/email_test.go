@@ -494,3 +494,164 @@ func TestTemplateVersionStaysPutAfterRenderingAndDiffersByDesign(t *testing.T) {
 		t.Fatal("no choice should be the default design")
 	}
 }
+
+func customDesignContent(design content.Design) content.Content {
+	return content.Content{
+		EmailSubject: "Hello", EmailBody: "Your cart is waiting.", EmailHeadline: "Still here", EmailCTALabel: "Open", EmailCTAURL: "https://example.com",
+		EmailTemplate: content.CustomTemplateName("d1"), EmailDesign: &design,
+	}
+}
+
+const testAsset = "11111111-2222-3333-4444-555555555555"
+
+func blockDesign(blocks ...content.Block) content.Design {
+	return content.Design{Name: "Mine", Accent: "#0A7A5C", Page: "#EEF2F1", Button: "pill", Corners: 16, Font: "sans", Blocks: append([]content.Block{
+		{ID: "a", Type: "heading", Slot: content.SlotHeadline},
+		{ID: "b", Type: "text", Slot: content.SlotBody},
+		{ID: "c", Type: "button", Slot: content.SlotCTA},
+	}, blocks...)}
+}
+
+func TestBlocksShowInTheirOrderAndTheAIOnlyFillsTheSlots(t *testing.T) {
+	t.Parallel()
+	design := blockDesign()
+	logo := content.Block{ID: "logo", Type: "logo", AssetID: testAsset, Alt: "Acme <b>", Width: 30, Align: "center"}
+	fixed := content.Block{ID: "fixed", Type: "text", Text: "Hi {{first_name}}, <script>alert(1)</script>"}
+	design.Blocks = append([]content.Block{logo, design.Blocks[2], fixed, design.Blocks[1], design.Blocks[0]}, content.Block{ID: "line", Type: "divider"})
+	design.Footer = "Acme Ltd, Istanbul"
+
+	email, err := content.RenderEmailWith(customDesignContent(design), "Ayşe", "https://example.com/stop", content.RenderOptions{AssetBase: "https://mail.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"https://mail.example.com/api/assets/" + testAsset + "/file", "Acme &lt;b&gt;", "Hi Ayşe, &lt;script&gt;", "#0A7A5C", "Acme Ltd, Istanbul", "https://example.com/stop"} {
+		if !strings.Contains(email.HTML, want) {
+			t.Errorf("html misses %q:\n%s", want, email.HTML)
+		}
+	}
+	if strings.Contains(email.HTML, "<script>") || strings.Contains(email.HTML, "data-block") {
+		t.Errorf("html: %s", email.HTML)
+	}
+	button, fixedText, body, headline := strings.Index(email.HTML, ">Open<"), strings.Index(email.HTML, "Hi Ayşe"), strings.Index(email.HTML, "Your cart"), strings.Index(email.HTML, "Still here")
+	if button >= fixedText || fixedText >= body || body >= headline {
+		t.Errorf("blocks out of order: %d %d %d %d", button, fixedText, body, headline)
+	}
+	if !strings.HasPrefix(email.Text, "Open: https://example.com\n\nHi Ayşe") || !strings.Contains(email.Text, "Acme Ltd, Istanbul") || !strings.Contains(email.Text, "https://example.com/stop") {
+		t.Errorf("text: %s", email.Text)
+	}
+}
+
+func TestOnlyTheEditorSeesBlockMarksAndUnfinishedBlocks(t *testing.T) {
+	t.Parallel()
+	design := blockDesign(content.Block{ID: "hero", Type: "image", Width: 100})
+	design.Name = ""
+	editing, err := content.RenderEmailWith(customDesignContent(design), "Ayşe", "", content.RenderOptions{Editing: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(editing.HTML, `data-block="hero"`) || !strings.Contains(editing.HTML, "Choose a picture") {
+		t.Errorf("editing: %s", editing.HTML)
+	}
+	// A fixed width here would hold the whole email at 600px in the phone preview.
+	if !strings.Contains(editing.HTML, "width:100%;max-width:600px;box-sizing:border-box") {
+		t.Errorf("the empty picture cannot shrink: %s", editing.HTML)
+	}
+	// The editor's frame allows scripts so its clicks reach the page in every browser,
+	// and this is what keeps anything inside the email itself from running.
+	if !strings.Contains(editing.HTML, `content="script-src 'none'; object-src 'none'"`) {
+		t.Errorf("the editor's frame could run scripts: %s", editing.HTML)
+	}
+	sent, err := content.RenderEmail(customDesignContent(design), "Ayşe", "https://example.com/stop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sent.HTML, "Choose a picture") || strings.Contains(sent.HTML, "Content-Security-Policy") {
+		t.Errorf("sent: %s", sent.HTML)
+	}
+}
+
+func TestADesignKeepsTextReadableWhateverTheAccent(t *testing.T) {
+	t.Parallel()
+	design := blockDesign()
+	design.Accent, design.Blocks[0].Style = "#FFE680", "band"
+	email, err := content.RenderEmail(customDesignContent(design), "Ayşe", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(email.HTML, "overflow-wrap:anywhere;color:#172033") || strings.Contains(email.HTML, ";color:#FFFFFF") {
+		t.Errorf("pale accent should carry dark text:\n%s", email.HTML)
+	}
+}
+
+func TestABadDesignIsRefusedAndNeverRendered(t *testing.T) {
+	t.Parallel()
+	if problem := blockDesign().Check(); problem != "" {
+		t.Fatalf("good design refused: %s", problem)
+	}
+	for name, change := range map[string]func(*content.Design){
+		"no name":        func(d *content.Design) { d.Name = "" },
+		"css":            func(d *content.Design) { d.Accent = "red;background:url(x)" },
+		"corners":        func(d *content.Design) { d.Corners = 5 },
+		"no headline":    func(d *content.Design) { d.Blocks = d.Blocks[1:] },
+		"no button slot": func(d *content.Design) { d.Blocks = d.Blocks[:2] },
+		"two slots": func(d *content.Design) {
+			d.Blocks = append(d.Blocks, content.Block{ID: "z", Type: "text", Slot: content.SlotBody})
+		},
+		"same id": func(d *content.Design) { d.Blocks[1].ID = "a" },
+		"unknown type": func(d *content.Design) {
+			d.Blocks = append(d.Blocks, content.Block{ID: "z", Type: "html", Text: "<script>"})
+		},
+		"slot type": func(d *content.Design) { d.Blocks[0].Type = "text" },
+		"js link": func(d *content.Design) {
+			d.Blocks = append(d.Blocks, content.Block{ID: "z", Type: "button", Label: "Go", URL: "javascript:alert(1)"})
+		},
+		"image path": func(d *content.Design) {
+			d.Blocks = append(d.Blocks, content.Block{ID: "z", Type: "image", AssetID: "../../secret", Alt: "x", Width: 50})
+		},
+		"no picture": func(d *content.Design) {
+			d.Blocks = append(d.Blocks, content.Block{ID: "z", Type: "image", Alt: "x", Width: 50})
+		},
+		"no description": func(d *content.Design) {
+			d.Blocks = append(d.Blocks, content.Block{ID: "z", Type: "image", AssetID: testAsset, Width: 50})
+		},
+		"width": func(d *content.Design) {
+			d.Blocks = append(d.Blocks, content.Block{ID: "z", Type: "image", AssetID: testAsset, Alt: "x", Width: 500})
+		},
+		"variable": func(d *content.Design) {
+			d.Blocks = append(d.Blocks, content.Block{ID: "z", Type: "text", Text: "Hi {{email}}"})
+		},
+	} {
+		bad := blockDesign()
+		change(&bad)
+		if bad.Check() == "" {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	// A shape nothing can draw falls back to a built-in design, with its unsubscribe link.
+	bad := blockDesign()
+	bad.Accent = "red;background:url(x)"
+	email, err := content.RenderEmail(customDesignContent(bad), "Ayşe", "https://example.com/stop")
+	if err != nil || strings.Contains(email.HTML, "url(x)") || !strings.Contains(email.HTML, "https://example.com/stop") {
+		t.Errorf("bad design: %v\n%s", err, email.HTML)
+	}
+	// A message cannot claim a design it does not carry.
+	message := customDesignContent(blockDesign())
+	message.EmailDesign = nil
+	message.SMS, message.EmailSubject = "Hi", "Hi"
+	found := false
+	for _, issue := range content.CheckMessages(message, content.Limits{}) {
+		found = found || issue.Field == content.FieldEmailTemplate
+	}
+	if !found {
+		t.Fatal("a missing design was accepted")
+	}
+}
+
+func TestAFixedBlockCannotHideWordsInASlot(t *testing.T) {
+	t.Parallel()
+	design := blockDesign()
+	design.Blocks[1].Text = "hidden"
+	if strings.Contains(design.Clean().Blocks[1].Text, "hidden") {
+		t.Fatal("a slot kept the template's words")
+	}
+}

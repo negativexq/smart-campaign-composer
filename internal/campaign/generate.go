@@ -389,7 +389,7 @@ func (g *Generation) writeLanguages(ctx context.Context, emit func(GenerationEve
 	emit(GenerationEvent{Type: EventLanguageDone, Text: language})
 	// The design is one choice for the whole campaign.
 	if first != nil {
-		main.EmailTemplate = first.EmailTemplate
+		main.EmailTemplate, main.EmailDesign = first.EmailTemplate, first.EmailDesign
 	}
 	written, tried, used, err := g.writeTranslations(ctx, emit, main, g.languages[1:], first)
 	attempts += tried
@@ -462,7 +462,7 @@ func (g *Generation) writeTranslation(ctx context.Context, main StoredContent, l
 	version := pass.merged(generated)
 	version.Language, version.Variant = language, pass.variant
 	// The design is one choice for the whole campaign.
-	version.EmailTemplate = main.EmailTemplate
+	version.EmailTemplate, version.EmailDesign = main.EmailTemplate, main.EmailDesign
 	return version, attempts, usage, nil
 }
 
@@ -703,9 +703,9 @@ func issueReasons(invalid *content.ValidationError) []string {
 // alone, which keeps its text and its record of what a person changed.
 func (g *Generation) merged(generated content.Content) StoredContent {
 	stored := g.view.Content
-	generated.EmailTemplate = g.view.EmailTemplate
+	generated.EmailTemplate, generated.EmailDesign = g.view.EmailTemplate, g.view.EmailDesign
 	if stored != nil {
-		generated.EmailTemplate = stored.EmailTemplate
+		generated.EmailTemplate, generated.EmailDesign = stored.EmailTemplate, stored.EmailDesign
 	}
 	if g.channel == "" {
 		return StoredContent{Content: generated, Edited: []string{}, NotApplied: g.notApplied(generated)}
@@ -848,6 +848,18 @@ func (s *Service) SaveContent(ctx context.Context, id string, edited content.Con
 	if target == nil {
 		return View{}, ErrNotEditable
 	}
+	// Only the name comes from the request. The same design stays as the campaign's copy
+	// has it, and a newly chosen one is copied from the library.
+	edited.EmailDesign = nil
+	switch {
+	case edited.EmailTemplate == target.EmailTemplate:
+		edited.EmailDesign = target.EmailDesign
+	case content.IsCustomTemplate(edited.EmailTemplate):
+		edited.EmailDesign, err = s.designForTemplate(ctx, edited.EmailTemplate)
+		if err != nil && !errors.Is(err, ErrDesignNotFound) {
+			return View{}, err
+		}
+	}
 	limits := view.limitsFor(target.Language)
 	edited = limits.Keep(edited)
 	edited.Language, edited.Variant = target.Language, target.Variant
@@ -871,7 +883,7 @@ func (s *Service) SaveContent(ctx context.Context, id string, edited content.Con
 	// The design is one choice for the whole campaign.
 	for _, root := range stored.variants() {
 		for _, version := range root.all() {
-			version.EmailTemplate = edited.EmailTemplate
+			version.EmailTemplate, version.EmailDesign = edited.EmailTemplate, edited.EmailDesign
 		}
 	}
 	encoded, err := json.Marshal(stored)

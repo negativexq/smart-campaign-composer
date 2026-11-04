@@ -51,6 +51,12 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 		"GET /api/overview":                                      a.overview,
 		"GET /api/settings":                                      a.settings,
 		"GET /api/email-templates":                               a.emailTemplates,
+		"GET /api/brand":                                         a.brand,
+		"PUT /api/brand":                                         a.saveBrand,
+		"GET /api/email-designs":                                 a.emailDesigns,
+		"POST /api/email-designs":                                a.createEmailDesign,
+		"PUT /api/email-designs/{id}":                            a.updateEmailDesign,
+		"DELETE /api/email-designs/{id}":                         a.deleteEmailDesign,
 		"GET /api/delivery-monitor":                              a.deliveryMonitor,
 		"GET /api/analytics":                                     a.analytics,
 		"GET /api/channels":                                      a.channels,
@@ -105,6 +111,71 @@ func (a *api) settings(w http.ResponseWriter, r *http.Request) {
 		"rate_limit_per_second": a.sending.RatePerSecond, "max_attempts": a.sending.MaxAttempts,
 		"customers": customers,
 	})
+}
+
+func (a *api) emailDesigns(w http.ResponseWriter, r *http.Request) {
+	designs, err := a.campaigns.EmailDesigns(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"designs": designs})
+}
+
+func (a *api) brand(w http.ResponseWriter, r *http.Request) {
+	brand, err := a.campaigns.Brand(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, brand)
+}
+
+func (a *api) saveBrand(w http.ResponseWriter, r *http.Request) {
+	var brand content.Brand
+	if !decode(w, r, &brand) {
+		return
+	}
+	saved, err := a.campaigns.SaveBrand(r.Context(), brand)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, saved)
+}
+
+func (a *api) createEmailDesign(w http.ResponseWriter, r *http.Request) {
+	var design content.Design
+	if !decode(w, r, &design) {
+		return
+	}
+	saved, err := a.campaigns.SaveEmailDesign(r.Context(), "", design)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, saved)
+}
+
+func (a *api) updateEmailDesign(w http.ResponseWriter, r *http.Request) {
+	var design content.Design
+	if !decode(w, r, &design) {
+		return
+	}
+	saved, err := a.campaigns.SaveEmailDesign(r.Context(), r.PathValue("id"), design)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, saved)
+}
+
+func (a *api) deleteEmailDesign(w http.ResponseWriter, r *http.Request) {
+	if err := a.campaigns.DeleteEmailDesign(r.Context(), r.PathValue("id")); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *api) overview(w http.ResponseWriter, r *http.Request) {
@@ -735,6 +806,16 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusBadRequest, "Write a campaign name of up to 80 characters."
 	case errors.Is(err, campaign.ErrSegmentNotFound):
 		status, message = http.StatusNotFound, "This saved audience does not exist."
+	case errors.Is(err, campaign.ErrAssetNotFound):
+		status, message = http.StatusNotFound, "This image does not exist."
+	case errors.Is(err, campaign.ErrAssetInUse):
+		status, message = http.StatusConflict, "A template, the brand kit or a campaign still shows this image."
+	case errors.Is(err, campaign.ErrDesignNotFound):
+		status, message = http.StatusNotFound, "This email template does not exist."
+	case errors.Is(err, campaign.ErrDesignNameTaken):
+		status, message = http.StatusConflict, "You already have a template with this name."
+	case errors.As(err, new(*campaign.DesignError)):
+		status, message = http.StatusBadRequest, err.Error()
 	case errors.Is(err, campaign.ErrSegmentName):
 		status, message = http.StatusBadRequest, "Write an audience name of up to 80 characters."
 	case errors.Is(err, campaign.ErrSegmentNameTaken):

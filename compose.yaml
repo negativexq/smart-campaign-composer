@@ -52,6 +52,9 @@ services:
       WORKER_HEALTH_URL: http://worker:8080/healthz
       PROVIDER_HEALTH_URL: http://mock-provider:8080/healthz
       PROVIDER_WEBHOOK_SECRET: ${PROVIDER_WEBHOOK_SECRET:-local-mock-webhook-secret}
+      ASSET_DIR: /data/assets
+    volumes:
+      - asset-data:/data/assets
     ports:
       - "8081:8080"
     depends_on:
@@ -114,3 +117,4 @@ services:
 
 volumes:
   postgres-data:
+  asset-data:

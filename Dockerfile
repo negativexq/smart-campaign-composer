@@ -8,6 +8,6 @@ COPY migrations ./migrations
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/...
 
 FROM alpine:3.22
-RUN adduser -D -u 10001 app
+RUN adduser -D -u 10001 app && mkdir -p /data/assets && chown app /data/assets
 COPY --from=build /out/ /app/
 USER app

@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { EMAIL_TEMPLATES } from "../lib/emailTemplates";
+import type { EmailDesign } from "../api/campaigns";
+import { customTemplateName, EMAIL_TEMPLATES } from "../lib/emailTemplates";
 
-defineProps<{ modelValue: string; disabled?: boolean }>();
+defineProps<{ modelValue: string; disabled?: boolean; designs?: EmailDesign[] }>();
+// The picture follows how the template's headline stands out.
+const headlineStyle = (design: EmailDesign) => design.blocks.find((block) => block.slot === "headline")?.style || "plain";
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();
 </script>
 
@@ -27,6 +30,25 @@ const emit = defineEmits<{ "update:modelValue": [value: string] }>();
         </span>
         <span class="name small">{{ template.name }}</span>
         <span class="hint small muted">{{ template.hint }}</span>
+      </label>
+      <label v-for="design in designs ?? []" :key="design.id" class="option" :class="{ 'option--on': modelValue === customTemplateName(design.id) }">
+        <input
+          class="visually-hidden"
+          type="radio"
+          name="email-template"
+          :value="customTemplateName(design.id)"
+          :checked="modelValue === customTemplateName(design.id)"
+          :data-testid="`email-template-custom-${design.id}`"
+          @change="emit('update:modelValue', customTemplateName(design.id))"
+        />
+        <span class="sketch" :class="`sketch--custom-${headlineStyle(design)}`" :style="{ background: design.page, '--accent': design.accent }" aria-hidden="true">
+          <span class="sketch-head"></span>
+          <span class="sketch-line"></span>
+          <span class="sketch-line sketch-line--short"></span>
+          <span class="sketch-button"></span>
+        </span>
+        <span class="name small">{{ design.name }}</span>
+        <span class="hint small muted">Your template</span>
       </label>
     </div>
   </fieldset>
@@ -117,6 +139,35 @@ const emit = defineEmits<{ "update:modelValue": [value: string] }>();
   margin-top: 2px;
   background: #315be8;
   border-radius: 2px;
+}
+
+[class*="sketch--custom"] .sketch-line {
+  width: 100%;
+}
+
+[class*="sketch--custom"] .sketch-line--short {
+  width: 70%;
+}
+
+[class*="sketch--custom"] .sketch-button {
+  background: var(--accent);
+}
+
+.sketch--custom-band {
+  padding-top: 0;
+}
+
+.sketch--custom-band .sketch-head {
+  width: calc(100% + 16px);
+  height: 24px;
+  margin: 0 -8px 2px;
+  background: var(--accent);
+  border-radius: 0;
+}
+
+.sketch--custom-box .sketch-head {
+  height: 18px;
+  background: var(--accent);
 }
 
 .sketch--banner {

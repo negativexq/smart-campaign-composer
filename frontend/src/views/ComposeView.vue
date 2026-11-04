@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 
-import { createCampaign, errorMessage, getAudiences, type SavedAudience } from "../api/campaigns";
+import { createCampaign, errorMessage, getAudiences, getEmailDesigns, type SavedAudience } from "../api/campaigns";
 import BriefComposer from "../components/BriefComposer.vue";
 import ChannelPicker from "../components/ChannelPicker.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { ruleText } from "../lib/audience";
 import { defaultChannels } from "../lib/preferences";
-import { EMAIL_TEMPLATES } from "../lib/emailTemplates";
+import { EMAIL_TEMPLATES, isCustomTemplate } from "../lib/emailTemplates";
 import { navigate } from "../lib/navigation";
 import { requestAudience } from "../lib/pendingAudience";
 
@@ -20,7 +20,8 @@ const firstShare = ref<number | "">(50);
 const offer = ref<number | "">("");
 const quietDays = ref("");
 // Set by "Use template". It needs a channel to apply to, so email must stay chosen.
-const template = ref(EMAIL_TEMPLATES.find((item) => item.id === new URLSearchParams(window.location.search).get("template")) ?? null);
+const namedTemplate = new URLSearchParams(window.location.search).get("template") ?? "";
+const template = ref<{ id: string; name: string } | null>(EMAIL_TEMPLATES.find((item) => item.id === namedTemplate) ?? null);
 const busy = ref(false);
 const error = ref("");
 
@@ -29,6 +30,15 @@ const emit = defineEmits<{ savedAudience: [used: boolean] }>();
 watch(savedAudience, (saved) => emit("savedAudience", Boolean(saved)));
 
 // "Use in a new campaign" brings the rule itself, so the brief only says what to tell them.
+onMounted(async () => {
+  if (!isCustomTemplate(namedTemplate)) return;
+  try {
+    const design = (await getEmailDesigns()).find((item) => `custom:${item.id}` === namedTemplate);
+    if (design) template.value = { id: namedTemplate, name: design.name };
+  } catch (failure) {
+    error.value = errorMessage(failure);
+  }
+});
 onMounted(async () => {
   const id = new URLSearchParams(window.location.search).get("audience");
   if (!id) return;

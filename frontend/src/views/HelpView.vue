@@ -13,7 +13,7 @@ const steps = [
 ];
 const pages = [
   { href: "/audiences", name: "Audiences", text: "Rules you saved to use again, with their last count." },
-  { href: "/templates", name: "Templates", text: "The email designs a campaign can start from." },
+  { href: "/templates", name: "Templates", text: "Make your own email from blocks or start from a ready design, and keep your images and brand kit." },
   { href: "/analytics", name: "Analytics", text: "Totals across campaigns, and which ones failed most." },
   { href: "/delivery-monitor", name: "Delivery monitor", text: "Every message waiting, retrying or stuck, across all campaigns." },
   { href: "/channels", name: "Channels", text: "What each channel did in the last hour, and system health." },

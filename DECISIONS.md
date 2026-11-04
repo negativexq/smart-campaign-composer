@@ -102,7 +102,7 @@ A campaign uses SMS, email or both, and that choice is fixed once it exists. It 
 
 The model and the marketer write text only: subject, preview text, headline, body, button label and link. The backend puts that text into one table-based responsive template with `html/template`, so neither can add markup, and the plain text alternative comes from the same fields. Letting a model write HTML would need a sanitizer, would break differently in each mail client, and would make every campaign a new design to check. The cost is that campaigns cannot have their own layout or images.
 
-The preview calls the same renderer through an endpoint instead of copying it in the frontend, so what a marketer checks is what is sent. It is shown in a sandboxed frame with no scripts.
+The preview calls the same renderer through an endpoint instead of copying it in the frontend, so what a marketer checks is what is sent. It is shown in a sandboxed frame with no scripts. The template editor's frame also has `allow-scripts`, because Safari silently drops the page's click listeners on a frame without it; its render carries `script-src 'none'`, so nothing inside the email can run. Sent emails do not carry that line.
 
 A button link from the model must appear in the brief, the instruction or the current version, because a made-up address sends real people somewhere nobody chose. A person editing the message can set any full http or https link. The footer text is English even for Turkish messages, which has the same cause as the `there` fallback: campaigns have no language field yet.
 
@@ -390,3 +390,17 @@ Who receives a campaign and how we talk to them are separate decisions. After th
 The choice is stored as what is left out, so a language that enters the audience after a refinement gets its own version unless someone decides otherwise. Leaving a language out removes its versions, because nobody would read them. Adding one writes only that language and leaves approved-looking text elsewhere untouched. English limits count the longest name among everyone falling back to it. The worker needs no new rule: the stored versions already say what exists, and a person whose language is not among them gets English.
 
 Later languages depend only on the first, so they are written at once. Sequential writing would have grown by a model call's wait per language.
+
+## Templates are documents of blocks, drawn by our own renderer
+
+A marketer's template is JSON: logo, image, heading, text, button and divider blocks plus a few style choices. It never holds markup, so a template cannot add a script or remove the unsubscribe footer, which is not a block. `html/template` draws it, which means the app, the test inbox and a real send share one renderer. GrapesJS with MJML would have brought a richer editor, but also a Node compiler and a second idea of what a valid email is; Unlayer keeps storage and custom blocks behind paid plans. A small Vue editor is enough for the campaigns this product sends.
+
+Three blocks are slots: the headline, the message and the button. They can move but not be deleted, because they are where the approved words go, and removing one would drop text a person approved. The model still only fills those fields, so it cannot touch layout, images or links in the design. Words typed into other blocks stay the same in every campaign and are not translated; the editor says so.
+
+A campaign keeps its own copy of the design rather than pointing to a version row, the same way it keeps its audience. Editing a template never changes a campaign that took it. Approval records the design's name and a hash of how it looks.
+
+## Images are redrawn on upload and stay while anything shows them
+
+An upload is judged by its content, not its name or declared type: only PNG and JPEG decode, and the size is checked from the header before any pixels are read. The image is encoded again from its pixels, which removes metadata and anything hidden in the file; a photo's orientation tag is applied first so it does not turn sideways. SVG is refused because it can carry scripts.
+
+Files are named by their hash and never change, and equal uploads share one. An image cannot be deleted while a template, the brand kit or a campaign's content mentions it, so a sent email's picture does not disappear. The file endpoint needs no session, since people reading an email have none. Emails carry a URL built from `PUBLIC_URL`, so outside a local demo that must be a public HTTPS address. Files sit on a Docker volume behind a small `Store` interface that object storage can replace.

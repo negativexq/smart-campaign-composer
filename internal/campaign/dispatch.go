@@ -126,7 +126,10 @@ func (s *Service) Approve(ctx context.Context, id string) (View, error) {
 	// What the design looked like when approved, since designs live in code and can change.
 	if view.Content != nil && slices.Contains(view.Channels, "email") {
 		details["email_template"] = view.Content.EmailTemplate
-		details["email_template_version"] = content.EmailTemplateVersion(view.Content.EmailTemplate)
+		details["email_template_version"] = content.TemplateVersion(view.Content.Content)
+		if view.Content.EmailDesign != nil {
+			details["email_template_name"] = view.Content.EmailDesign.Name
+		}
 	}
 	if err := recordAudit(ctx, tx, id, eventApproved, details); err != nil {
 		return View{}, err

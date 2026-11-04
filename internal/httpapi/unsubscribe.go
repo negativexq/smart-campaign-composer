@@ -77,11 +77,12 @@ func (a *api) emailPreview(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		content.Content
 		FirstName string `json:"first_name"`
+		Editing   bool   `json:"editing"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	email, err := content.RenderEmail(body.Content, body.FirstName, "")
+	email, err := content.RenderEmailWith(body.Content, body.FirstName, "", content.RenderOptions{Editing: body.Editing})
 	if err != nil {
 		writeError(w, r, err)
 		return

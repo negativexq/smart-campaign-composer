@@ -26,6 +26,10 @@ import DesignView from "./views/DesignView.vue";
 import OverviewView from "./views/OverviewView.vue";
 import ReviewView from "./views/ReviewView.vue";
 import SignInView from "./views/SignInView.vue";
+import AssetsView from "./views/AssetsView.vue";
+import BrandKitView from "./views/BrandKitView.vue";
+import TemplateTabs from "./components/TemplateTabs.vue";
+import TemplateBuilderView from "./views/TemplateBuilderView.vue";
 import TemplatesView from "./views/TemplatesView.vue";
 
 const route = computed(() => {
@@ -38,7 +42,10 @@ const route = computed(() => {
   if (path === "/analytics") return { name: "analytics", id: "" };
   if (path === "/channels") return { name: "channels", id: "" };
   if (path === "/delivery-monitor") return { name: "monitor", id: "" };
-  if (path === "/templates") return { name: "templates", id: "" };
+  if (path === "/templates" || path === "/templates/images" || path === "/templates/brand") return { name: "templates", id: "" };
+  if (path === "/templates/new") return { name: "template-builder", id: "" };
+  const design = path.match(/^\/templates\/([^/]+)\/edit$/);
+  if (design) return { name: "template-builder", id: design[1] };
   if (path === "/campaigns") return { name: "campaigns", id: "" };
   if (path === "/campaigns/new") return { name: "new", id: "" };
   const edit = path.match(/^\/campaigns\/([^/]+)\/edit$/);
@@ -124,7 +131,14 @@ onBeforeUnmount(() => clearInterval(healthTimer));
   </AppShell>
 
   <AppShell v-else-if="route.name === 'templates'" active-path="/templates" title="Templates" :system-status="status">
-    <TemplatesView />
+    <TemplateTabs :active="currentPath" />
+    <AssetsView v-if="currentPath === '/templates/images'" />
+    <BrandKitView v-else-if="currentPath === '/templates/brand'" />
+    <TemplatesView v-else />
+  </AppShell>
+
+  <AppShell v-else-if="route.name === 'template-builder'" active-path="/templates" :title="route.id ? 'Edit template' : 'New template'" :system-status="status">
+    <TemplateBuilderView :key="route.id" :design-id="route.id || undefined" />
   </AppShell>
 
   <AppShell v-else-if="route.name === 'detail'" active-path="/campaigns" title="Campaign" :system-status="status">
