@@ -10,19 +10,25 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/color"
 	"image/jpeg"
 	"image/png"
 	"io"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/image/draw"
 )
 
 const (
 	// MaxBytes is the largest upload accepted.
 	MaxBytes = 5 << 20
 	// MaxSide is the longest side accepted, checked before the image is decoded.
-	MaxSide     = 6000
+	MaxSide = 6000
+	// MaxPixels bounds the memory one upload takes once its pixels are read. A file of
+	// one colour is tiny on the way in and still costs four bytes a pixel.
+	MaxPixels = 24_000_000
+	// MaxWidth is twice the email column, which stays sharp on high-density screens.
+	MaxWidth    = 1200
 	jpegQuality = 85
 )
 
@@ -51,22 +57,27 @@ func Process(raw []byte) (Image, error) {
 	if err != nil || (format != "png" && format != "jpeg") {
 		return Image{}, ErrNotAnImage
 	}
-	if config.Width > MaxSide || config.Height > MaxSide {
+	if config.Width > MaxSide || config.Height > MaxSide || config.Width*config.Height > MaxPixels {
 		return Image{}, ErrTooManyPixels
 	}
 	decoded, _, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
 		return Image{}, ErrNotAnImage
 	}
+	// The tag saying which way up a photo goes is about to be dropped.
+	turn := 0
+	if format == "jpeg" {
+		turn = orientation(raw)
+	}
+	// Narrowing first leaves far fewer pixels to turn.
+	decoded = upright(narrowed(decoded, turn), turn)
 	var out bytes.Buffer
 	result := Image{MIME: "image/png", Extension: ".png"}
 	if format == "jpeg" {
-		// The tag saying which way up a photo goes is about to be dropped.
-		decoded = upright(decoded, orientation(raw))
 		result = Image{MIME: "image/jpeg", Extension: ".jpg"}
 		err = jpeg.Encode(&out, decoded, &jpeg.Options{Quality: jpegQuality})
 	} else {
-		err = (&png.Encoder{CompressionLevel: png.BestCompression}).Encode(&out, decoded)
+		err = png.Encode(&out, decoded)
 	}
 	if err != nil {
 		return Image{}, fmt.Errorf("encode image: %w", err)
@@ -131,6 +142,22 @@ func exifOrientation(segment []byte) int {
 	return 0
 }
 
+// narrowed brings an image down to MaxWidth, measured the way up it will be shown.
+func narrowed(source image.Image, orientation int) image.Image {
+	bounds := source.Bounds()
+	width, height := bounds.Dx(), bounds.Dy()
+	shown := width
+	if orientation >= 5 {
+		shown = height
+	}
+	if shown <= MaxWidth {
+		return source
+	}
+	out := image.NewRGBA(image.Rect(0, 0, max(1, width*MaxWidth/shown), max(1, height*MaxWidth/shown)))
+	draw.CatmullRom.Scale(out, out.Bounds(), source, bounds, draw.Src, nil)
+	return out
+}
+
 // upright turns an image the way its EXIF orientation says.
 func upright(source image.Image, orientation int) image.Image {
 	if orientation <= 1 {
@@ -152,11 +179,17 @@ func upright(source image.Image, orientation int) image.Image {
 	if orientation >= 5 {
 		outWidth, outHeight = height, width
 	}
+	flat, ok := source.(*image.RGBA)
+	if !ok {
+		flat = image.NewRGBA(image.Rect(0, 0, width, height))
+		draw.Draw(flat, flat.Bounds(), source, bounds.Min, draw.Src)
+	}
+	start := flat.Bounds().Min
 	out := image.NewRGBA(image.Rect(0, 0, outWidth, outHeight))
 	for y := range height {
 		for x := range width {
 			toX, toY := place(x, y)
-			out.Set(toX, toY, color.RGBAModel.Convert(source.At(bounds.Min.X+x, bounds.Min.Y+y)))
+			copy(out.Pix[out.PixOffset(toX, toY):], flat.Pix[flat.PixOffset(start.X+x, start.Y+y):][:4])
 		}
 	}
 	return out

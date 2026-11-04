@@ -94,7 +94,7 @@ func uploadAsset(w http.ResponseWriter, r *http.Request, campaigns *campaign.Ser
 		writeError(w, r, &campaign.DesignError{Message: "Only PNG and JPEG images can be used in emails here."})
 		return
 	case errors.Is(err, asset.ErrTooManyPixels):
-		writeError(w, r, &campaign.DesignError{Message: "Choose an image no wider or taller than 6000 pixels."})
+		writeError(w, r, &campaign.DesignError{Message: "Choose an image of up to 24 megapixels, no wider or taller than 6000 pixels."})
 		return
 	case err != nil:
 		writeError(w, r, err)
