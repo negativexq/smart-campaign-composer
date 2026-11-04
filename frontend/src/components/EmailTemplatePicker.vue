@@ -165,6 +165,18 @@ const emit = defineEmits<{ "update:modelValue": [value: string] }>();
   border-radius: 0;
 }
 
+.sketch--custom-display .sketch-head {
+  height: 20px;
+  background: var(--accent);
+}
+
+.sketch--custom-rule .sketch-head {
+  width: 40%;
+  height: 4px;
+  margin-bottom: 6px;
+  background: var(--accent);
+}
+
 .sketch--custom-box .sketch-head {
   height: 18px;
   background: var(--accent);

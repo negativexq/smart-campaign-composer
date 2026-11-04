@@ -186,6 +186,14 @@ describe("review", () => {
     expect(wrapper.text()).not.toContain("Differs from the brief");
   });
 
+  it("shows a missing button as its own notice, not as a discount problem", async () => {
+    const { wrapper } = await open({ ...ready, content_warnings: [{ field: "email_cta_url", reason: "no_button", message: "This email has no button." }] });
+    expect(wrapper.text()).toContain("No button");
+    expect(wrapper.text()).toContain("This email has no button.");
+    expect(wrapper.text()).not.toContain("Differs from the brief");
+    expect(wrapper.text()).not.toContain("Discount");
+  });
+
   it("approves and sends, then opens the campaign", async () => {
     const { wrapper, fetchMock } = await open();
     await wrapper.find("[data-testid=approve]").trigger("click");

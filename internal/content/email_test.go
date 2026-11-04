@@ -541,6 +541,32 @@ func TestBlocksShowInTheirOrderAndTheAIOnlyFillsTheSlots(t *testing.T) {
 	}
 }
 
+func TestHeadlineStylesEachDrawTheirOwnLook(t *testing.T) {
+	t.Parallel()
+	for style, want := range map[string]string{
+		"display": `class="headline-display"`,
+		"rule":    "width:48px;height:4px;margin:0 auto 16px",
+	} {
+		design := blockDesign()
+		design.Blocks[0].Style, design.Blocks[0].Align = style, "center"
+		if problem := design.Check(); problem != "" {
+			t.Fatalf("%s: %s", style, problem)
+		}
+		email, err := content.RenderEmailWith(customDesignContent(design), "Ayşe", "https://example.com/stop", content.RenderOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(email.HTML, want) {
+			t.Errorf("%s: %s", style, email.HTML)
+		}
+	}
+	design := blockDesign()
+	design.Blocks[0].Style = "neon"
+	if design.Check() == "" {
+		t.Error("an unknown headline style was accepted")
+	}
+}
+
 func TestOnlyTheEditorSeesBlockMarksAndUnfinishedBlocks(t *testing.T) {
 	t.Parallel()
 	design := blockDesign(content.Block{ID: "hero", Type: "image", Width: 100})

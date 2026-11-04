@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EmailDesign } from "../api/campaigns";
 import AssetLibrary from "../components/AssetLibrary.vue";
+import { LAYOUTS, samplesFor } from "../lib/emailTemplates";
 import BrandKitView from "./BrandKitView.vue";
 import TemplateBuilderView from "./TemplateBuilderView.vue";
 
@@ -128,6 +129,29 @@ describe("template studio", () => {
     expect(wrapper.find("[data-testid=properties] h2").text()).toBe("Logo");
     expect(wrapper.findComponent(AssetLibrary).exists()).toBe(false);
     wrapper.unmount();
+  });
+
+  it("gives templates sample words that fit their names and do not repeat", () => {
+    const names = ["Flash Sale", "Event Invite", "Yaz Kampanyası", "Autumn Letter", "Kış", "Classic", "Offer"];
+    const samples = samplesFor(names);
+    expect(new Set(samples.map((item) => item.email_headline)).size).toBe(names.length);
+    expect(samples[0].email_headline).toContain("off");
+    expect(samples[1].email_headline).toContain("invited");
+    expect(samplesFor(names)).toEqual(samples);
+    // Two of a kind differ too, and more templates than samples still all get words.
+    const many = samplesFor(Array.from({ length: 25 }, () => "Sale"));
+    expect(many).toHaveLength(25);
+    expect(many.every((item) => item.email_headline)).toBe(true);
+    expect(many[0].email_headline).not.toBe(many[1].email_headline);
+  });
+
+  it("offers layouts that differ, each keeping the three blocks a campaign fills", () => {
+    const shapes = LAYOUTS.map((layout) => {
+      const blocks = layout.blocks();
+      expect(blocks.map((block) => block.slot).filter(Boolean).sort()).toEqual(["body", "cta", "headline"]);
+      return blocks.map((block) => `${block.slot ?? block.type}:${block.style ?? ""}:${block.align ?? ""}`).join(">");
+    });
+    expect(new Set(shapes).size).toBe(LAYOUTS.length);
   });
 
   it("adds, reorders and removes blocks, and the backend draws each change", async () => {

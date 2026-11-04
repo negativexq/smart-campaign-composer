@@ -417,6 +417,68 @@ func TestRegenerationPassesCurrentContentAndInstruction(t *testing.T) {
 	}
 }
 
+func TestAMissingButtonIsPointedOutOnceAndOnlyWhileItCanBeFixed(t *testing.T) {
+	t.Parallel()
+	h, _, id := newContentHarness(t, step{output: `{"sms":"Hi","email_subject":"Hi","email_body":"Hello"}`})
+	ctx := context.Background()
+	view, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	count := func(view campaign.View) int {
+		found := 0
+		for _, warning := range view.ContentWarnings {
+			if warning.Reason == content.ReasonNoButton {
+				found++
+			}
+		}
+		return found
+	}
+	if count(view) != 1 {
+		t.Fatalf("warnings: %+v", view.ContentWarnings)
+	}
+
+	versions := append([]campaign.StoredContent{*view.Content}, view.Content.Translations...)
+	if len(versions) < 2 {
+		t.Fatalf("this needs more than one language: %+v", versions)
+	}
+	save := func(version campaign.StoredContent, label, link string) campaign.View {
+		t.Helper()
+		message := version.Content
+		message.EmailCTALabel, message.EmailCTAURL = label, link
+		saved, err := h.service.SaveContent(ctx, id, message)
+		if err != nil {
+			t.Fatalf("save: %v", err)
+		}
+		return saved
+	}
+	// Each language has its own button, so one still lacking it keeps the warning.
+	if partly := save(versions[0], "Shop", "https://example.com"); count(partly) != 1 {
+		t.Fatalf("a language still has no button: %+v", partly.ContentWarnings)
+	}
+	var saved campaign.View
+	for _, version := range versions[1:] {
+		saved = save(version, "Shop", "https://example.com")
+	}
+	if count(saved) != 0 {
+		t.Fatalf("the button is there now: %+v", saved.ContentWarnings)
+	}
+
+	for _, version := range versions {
+		saved = save(version, "", "")
+	}
+	if count(saved) != 1 {
+		t.Fatalf("warnings: %+v", saved.ContentWarnings)
+	}
+	approved, err := h.service.Approve(ctx, id)
+	if err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if count(approved) != 0 {
+		t.Fatalf("an approved email can no longer change: %+v", approved.ContentWarnings)
+	}
+}
+
 func TestAnInstructionCanChangeTheDiscount(t *testing.T) {
 	t.Parallel()
 	const withForty = `{"sms":"40% off","email_subject":"40% off","email_body":"40% off"}`

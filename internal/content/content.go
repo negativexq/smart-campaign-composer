@@ -347,6 +347,19 @@ func Render(template, firstName string) string {
 	})
 }
 
+// ReasonNoButton marks an email that will go out without a button.
+const ReasonNoButton = "no_button"
+
+// CheckButton points out an email with no button. A model only adds one when the brief
+// has a link, so without this a template's button would disappear without a word. An email
+// may still go without one, so this is for a person to judge.
+func CheckButton(c Content) []Issue {
+	if strings.TrimSpace(c.EmailBody) == "" || strings.TrimSpace(c.EmailCTALabel) != "" || strings.TrimSpace(c.EmailCTAURL) != "" {
+		return nil
+	}
+	return []Issue{{FieldEmailCTAURL, ReasonNoButton, "This email has no button, because the brief has no link. Add one in the email's Button section, or put a link in the brief and write it again."}}
+}
+
 // CheckDiscounts compares percentages in the messages with those in source.
 // Each message written must carry the offer and none may mention another one. A
 // channel with no text is left out here, and CheckMessages decides if it may be.

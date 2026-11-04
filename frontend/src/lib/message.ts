@@ -85,5 +85,6 @@ export function uniqueWarnings<T extends Warning>(warnings: T[]): T[] {
 }
 
 export function warningTitle(warning: Warning): string {
+  if (warning.reason === "no_button") return "No button";
   return warning.reason === "not_applied" ? "Not done" : "Differs from the brief";
 }

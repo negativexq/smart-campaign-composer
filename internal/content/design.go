@@ -222,7 +222,7 @@ func (b Block) checkShape() string {
 		return "This template has a block that is not known."
 	case !slices.Contains([]string{"", "left", "center", "right"}, b.Align):
 		return "Choose how the block lines up."
-	case !slices.Contains([]string{"", "plain", "band", "box"}, b.Style):
+	case !slices.Contains([]string{"", "plain", "band", "box", "display", "rule"}, b.Style):
 		return "Choose a headline style."
 	case b.AssetID != "" && !assetID.MatchString(b.AssetID):
 		return "Choose the image from your images."

@@ -114,8 +114,8 @@ const checks = computed<Check[]>(() => {
   ];
   // A campaign without a discount has nothing to check here.
   const hasDiscount = Boolean(current.offer_percent) || /%\s*\d|\d\s*%/.test(current.brief);
-  // What the model left undone is its own notice, whatever it was about.
-  const differs = current.content_warnings.filter((warning) => warning.reason !== "not_applied");
+  // What the model left undone and a missing button are their own notices, not about discounts.
+  const differs = current.content_warnings.filter((warning) => warning.reason !== "not_applied" && warning.reason !== "no_button");
   if (differs.length || hasDiscount) {
     list.push({
       label: "Discount",

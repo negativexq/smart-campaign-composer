@@ -157,6 +157,25 @@ func TestVariableSpacingIsAllowed(t *testing.T) {
 	}
 }
 
+func TestAnEmailWithoutAButtonIsPointedOut(t *testing.T) {
+	t.Parallel()
+	for name, test := range map[string]struct {
+		message content.Content
+		warned  bool
+	}{
+		"no button":       {content.Content{EmailBody: "Hello"}, true},
+		"only blanks":     {content.Content{EmailBody: "Hello", EmailCTALabel: " ", EmailCTAURL: " "}, true},
+		"has a button":    {content.Content{EmailBody: "Hello", EmailCTALabel: "Shop", EmailCTAURL: "https://example.com"}, false},
+		"half a button":   {content.Content{EmailBody: "Hello", EmailCTALabel: "Shop"}, false},
+		"no email at all": {content.Content{SMS: "Hello"}, false},
+	} {
+		issues := content.CheckButton(test.message)
+		if test.warned != (len(issues) == 1 && issues[0].Reason == content.ReasonNoButton) || (!test.warned && len(issues) != 0) {
+			t.Errorf("%s: %+v", name, issues)
+		}
+	}
+}
+
 func TestDiscountsMustMatchTheBrief(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

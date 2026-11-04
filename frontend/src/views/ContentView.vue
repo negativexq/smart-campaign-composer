@@ -28,6 +28,7 @@ import { channelLabel, firstMessagePath } from "../lib/campaignSteps";
 import { isDraftStatus } from "../lib/campaignStatus";
 import { audienceLanguages, recipientsFor, listNames, languageName, longestNameFor, missingLanguages, missingSecondVersion, variantCount, variantPeople, variantShare, versionFor } from "../lib/languages";
 import { customTemplateName, EMAIL_TEMPLATES, isCustomTemplate } from "../lib/emailTemplates";
+import { warningTitle } from "../lib/message";
 import { navigate } from "../lib/navigation";
 
 const EMAIL_FIELDS: MessageField[] = ["email_subject", "email_preheader", "email_headline", "email_body", "email_cta_label", "email_cta_url"];
@@ -98,6 +99,7 @@ const fields = computed<MessageField[]>(() => (props.channel === "sms" ? ["sms"]
 const nameLength = computed(() => (campaign.value ? longestNameFor(campaign.value, selectedLanguage.value, props.channel) : undefined));
 const reachable = computed(() => (props.channel === "sms" ? campaign.value?.audience.sms : campaign.value?.audience.email) ?? 0);
 const warnings = computed(() => campaign.value?.content_warnings.filter((warning) => fields.value.includes(warning.field as MessageField)) ?? []);
+const noButton = computed(() => warnings.value.some((warning) => warning.reason === "no_button"));
 const otherChannel = computed(() => campaign.value?.channels.find((channel) => channel !== props.channel));
 const previous = computed(() =>
   props.channel === "email" && otherChannel.value
@@ -351,7 +353,7 @@ onBeforeUnmount(() => controller?.abort());
     </ValidationNotice>
     <ValidationNotice v-if="saveError" tone="error" title="Your changes were not saved">{{ saveError }}</ValidationNotice>
     <template v-if="!generating && !dirty">
-      <ValidationNotice v-for="warning in warnings" :key="warning.field + warning.reason" tone="warning" :title="warning.reason === 'not_applied' ? 'Not done' : 'Differs from the brief'">
+      <ValidationNotice v-for="warning in warnings" :key="warning.field + warning.reason" tone="warning" :title="warningTitle(warning)">
         {{ warning.message }}
       </ValidationNotice>
     </template>
@@ -430,7 +432,7 @@ onBeforeUnmount(() => controller?.abort());
             <MessageEditor v-model="messages.email_preheader" plain no-variables label="Preview text" :limit="120" :rows="2" :state="editorState('email_preheader')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_preheader')" />
             <MessageEditor v-model="messages.email_headline" plain no-variables label="Headline" :limit="80" :rows="1" :state="editorState('email_headline')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_headline')" />
             <MessageEditor v-model="messages.email_body" plain label="Body" :limit="5000" :rows="8" :state="editorState('email_body')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_body')" />
-            <details class="more" :open="buttonHasProblem || undefined" data-testid="email-button">
+            <details class="more" :open="buttonHasProblem || noButton || undefined" data-testid="email-button">
               <summary class="more-toggle">
                 <span>Button</span>
                 <span class="muted small">{{ messages.email_cta_label || "None" }}</span>

@@ -5,7 +5,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { errorMessage, getBrand, getEmailDesigns, previewEmail, saveEmailDesign, type BlockType, type Brand, type EmailBlock, type EmailDesign } from "../api/campaigns";
 import AssetLibrary from "../components/AssetLibrary.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
-import { BLOCK_TYPES, blockLabel, brandedDesign, LAYOUTS, moved, newBlock, SAMPLE_EMAIL } from "../lib/emailTemplates";
+import { BLOCK_TYPES, blockLabel, brandedDesign, LAYOUTS, moved, newBlock, SAMPLE_EMAIL, samplesFor } from "../lib/emailTemplates";
 import { navigate } from "../lib/navigation";
 
 const props = defineProps<{ designId?: string }>();
@@ -19,6 +19,7 @@ const ALIGNS = ["left", "center", "right"];
 const design = ref<EmailDesign>(brandedDesign());
 const brand = ref<Brand | null>(null);
 const selectedId = ref("");
+const sampleWords = ref(SAMPLE_EMAIL);
 const side = ref<"blocks" | "settings">("blocks");
 const settingsPanel = ref<HTMLElement | null>(null);
 const choosingPicture = ref(false);
@@ -100,6 +101,7 @@ function useLayout(id: string) {
   const layout = LAYOUTS.find((item) => item.id === id);
   if (!layout) return;
   design.value.blocks = layout.blocks(brand.value);
+  [sampleWords.value] = samplesFor([layout.id]);
   select("");
 }
 
@@ -128,7 +130,7 @@ async function refreshPreview() {
   const request = ++latestPreview;
   try {
     // The backend draws it, so this is what people would actually receive.
-    const email = await previewEmail({ ...SAMPLE_EMAIL, email_template: "custom:preview", email_design: { ...design.value, name: design.value.name.trim() || "Preview" } }, "Ayşe", "", true);
+    const email = await previewEmail({ ...sampleWords.value, email_template: "custom:preview", email_design: { ...design.value, name: design.value.name.trim() || "Preview" } }, "Ayşe", "", true);
     if (request !== latestPreview) return;
     draw(email.html);
     previewError.value = false;
@@ -217,6 +219,7 @@ onMounted(async () => {
       if (found) {
         const { version: _version, campaigns: _campaigns, updated_at: _updated, ...stored } = found;
         design.value = stored;
+        [sampleWords.value] = samplesFor([stored.name]);
       } else {
         error.value = "This template does not exist any more.";
       }
@@ -375,6 +378,8 @@ onBeforeUnmount(() => {
                 <option value="plain">Plain</option>
                 <option value="band">Color band</option>
                 <option value="box">Box</option>
+                <option value="display">Big display</option>
+                <option value="rule">Accent rule</option>
               </select>
             </div>
 

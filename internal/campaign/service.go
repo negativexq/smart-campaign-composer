@@ -897,8 +897,23 @@ func (s *Service) get(ctx context.Context, q segment.Querier, id string) (View, 
 				}
 			}
 		}
+		if slices.Contains([]string{statusDraft, statusGenerating, statusReady}, view.Status) {
+			view.ContentWarnings = append(view.ContentWarnings, missingButton(view.Content)...)
+		}
 	}
 	return view, nil
+}
+
+// missingButton says it once however many languages lack the button, since one link fixes all.
+func missingButton(stored *StoredContent) []content.Issue {
+	for _, root := range stored.variants() {
+		for _, version := range root.all() {
+			if issues := content.CheckButton(version.Content); len(issues) > 0 {
+				return issues
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) load(ctx context.Context, id string) (View, error) {

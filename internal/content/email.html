@@ -12,6 +12,7 @@
   .sheet { width: 100% !important; table-layout: fixed !important; border-radius: 0 !important; border-width: 0 !important; }
   .pad { padding: 28px 20px !important; }
   .headline { font-size: 24px !important; line-height: 30px !important; }
+  .headline-display { font-size: 32px !important; line-height: 38px !important; }
   table.cta { width: 100% !important; }
   .cta a { display: block !important; text-align: center !important; }
   .side { padding-left: 20px !important; padding-right: 20px !important; }
@@ -133,6 +134,15 @@
         <h1 class="headline" style="margin:0;font-size:30px;line-height:38px;font-weight:700;overflow-wrap:anywhere;color:{{$.Design.AccentInk}}">{{.Text}}</h1>
       </td></tr>
       </table>
+    </td>
+    {{- else if eq .Style "display"}}
+    <td class="side" style="{{template "font" $}}padding:28px 40px 12px;text-align:{{.Align}}">
+      <h1 class="headline-display" style="margin:0;font-size:44px;line-height:50px;font-weight:800;letter-spacing:-0.5px;overflow-wrap:anywhere;color:{{$.Design.AccentInk}}">{{.Text}}</h1>
+    </td>
+    {{- else if eq .Style "rule"}}
+    <td class="side" style="{{template "font" $}}padding:24px 40px 12px;text-align:{{.Align}}">
+      <div style="width:48px;height:4px;margin:{{if eq .Align "center"}}0 auto 16px{{else if eq .Align "right"}}0 0 16px auto{{else}}0 0 16px{{end}};background-color:{{$.Design.Accent}};font-size:0;line-height:0">&nbsp;</div>
+      <h1 class="headline" style="margin:0;font-size:26px;line-height:34px;font-weight:600;overflow-wrap:anywhere;color:#172033">{{.Text}}</h1>
     </td>
     {{- else}}
     <td class="side" style="{{template "font" $}}padding:12px 40px;text-align:{{.Align}}">

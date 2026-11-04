@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
+	"github.com/negativexq/smart-campaign-composer/internal/content"
 )
 
 const plainBrief = "Remind users in Istanbul who added to their cart in the last 30 days and did not buy"
@@ -44,8 +45,10 @@ func TestAnOfferFromTheFormIsWrittenAndChecked(t *testing.T) {
 	if !strings.Contains(messages["sms"].(string), "30%") || !strings.Contains(messages["email_body"].(string), "30%") {
 		t.Fatalf("messages: %v", messages)
 	}
-	if got := view["content_warnings"].([]any); len(got) != 0 {
-		t.Fatalf("the offer is the one asked for: %v", got)
+	for _, got := range view["content_warnings"].([]any) {
+		if got.(map[string]any)["reason"] != content.ReasonNoButton {
+			t.Fatalf("the offer is the one asked for: %v", got)
+		}
 	}
 
 	// Editing it to something else is pointed out, as with an offer from the brief.

@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 
 import { deleteEmailDesign, errorMessage, getEmailDesigns, getEmailTemplates, previewEmail, type EmailTemplateUse, type SavedEmailDesign } from "../api/campaigns";
 import ValidationNotice from "../components/ValidationNotice.vue";
-import { customTemplateName, EMAIL_TEMPLATES, SAMPLE_EMAIL } from "../lib/emailTemplates";
+import { customTemplateName, EMAIL_TEMPLATES, samplesFor } from "../lib/emailTemplates";
 
 const uses = ref<EmailTemplateUse[] | null>(null);
 const designs = ref<SavedEmailDesign[]>([]);
@@ -20,7 +20,7 @@ const usedBy = (count = 0) => (count === 1 ? "Used by 1 campaign" : `Used by ${c
 
 // Rendered by the backend, so a card shows what people would actually receive.
 async function drawPreview(id: string, fields: Parameters<typeof previewEmail>[0]) {
-  const email = await previewEmail({ ...SAMPLE_EMAIL, ...fields }, "Ayşe").catch(() => null);
+  const email = await previewEmail(fields, "Ayşe").catch(() => null);
   if (email) previews.value[id] = email.html;
 }
 
@@ -45,9 +45,10 @@ onMounted(async () => {
     error.value = errorMessage(failure);
     return;
   }
+  const samples = samplesFor([...designs.value.map((design) => design.name), ...EMAIL_TEMPLATES.map((template) => template.name)]);
   await Promise.all([
-    ...EMAIL_TEMPLATES.map((template) => drawPreview(template.id, { email_template: template.id })),
-    ...designs.value.map((design) => drawPreview(customTemplateName(design.id), { email_template: customTemplateName(design.id), email_design: design })),
+    ...designs.value.map((design, index) => drawPreview(customTemplateName(design.id), { ...samples[index], email_template: customTemplateName(design.id), email_design: design })),
+    ...EMAIL_TEMPLATES.map((template, index) => drawPreview(template.id, { ...samples[designs.value.length + index], email_template: template.id })),
   ]);
 });
 </script>

@@ -412,6 +412,16 @@ describe("content page", () => {
     expect((wrapper.find("[data-testid=email-template-offer]").element as HTMLInputElement).checked).toBe(true);
   });
 
+  it("says when an email has no button and opens the place to add one", async () => {
+    stub({ ...ready, content_warnings: [{ field: "email_cta_url", reason: "no_button", message: "This email has no button." }] });
+    const email = open("email");
+    await flushPromises();
+
+    expect(email.text()).toContain("No button");
+    expect(email.find("[data-testid=email-button]").attributes("open")).toBeDefined();
+    expect(email.text()).not.toContain("Differs from the brief");
+  });
+
   it("says when an instruction was not done", async () => {
     stub({ ...ready, content_warnings: [{ field: "sms", reason: "not_applied", message: "Your instruction mentions 3, but this message does not." }] });
     const sms = open("sms");
