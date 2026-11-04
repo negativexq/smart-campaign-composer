@@ -173,7 +173,7 @@ func TestDeliveriesFilterByWhatHappened(t *testing.T) {
 	}{
 		{"had a 429 even though it was accepted later", campaign.DeliveryFilter{Outcome: "rate_limited"}, []string{"accepted"}},
 		{"ended for this reason", campaign.DeliveryFilter{Reason: "timeout"}, []string{"unknown"}},
-		{"called more than once", campaign.DeliveryFilter{Retried: true}, []string{"accepted", "failed"}},
+		{"called more than once", campaign.DeliveryFilter{Calls: "2+"}, []string{"accepted", "failed"}},
 		{"called in this window", campaign.DeliveryFilter{From: at(20 * time.Second), To: at(21 * time.Second)}, []string{"accepted", "failed"}},
 		{"window end is exclusive", campaign.DeliveryFilter{From: at(0), To: at(20 * time.Second)}, []string{"accepted"}},
 		{"this outcome in this window", campaign.DeliveryFilter{Outcome: "server_error", From: at(40 * time.Second)}, []string{"failed"}},
@@ -201,5 +201,64 @@ func TestDeliveriesFilterByWhatHappened(t *testing.T) {
 	}
 	if _, err := h.service.Deliveries(context.Background(), id, campaign.DeliveryFilter{Outcome: "nope"}); !errors.Is(err, campaign.ErrUnknownFilter) {
 		t.Fatalf("bad outcome: %v", err)
+	}
+}
+
+func TestDeliveriesAreFoundByCallsAndCity(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, id, named := sentCampaign(t)
+	count := func(filter campaign.DeliveryFilter) map[string]bool {
+		t.Helper()
+		rows, err := h.service.Deliveries(ctx, id, filter)
+		if err != nil {
+			t.Fatalf("deliveries %+v: %v", filter, err)
+		}
+		found := map[string]bool{}
+		for _, row := range rows {
+			found[row.ID] = true
+		}
+		return found
+	}
+	// The accepted one got a 429 first: two calls, though only one used up an attempt.
+	rows, err := h.service.Deliveries(ctx, id, campaign.DeliveryFilter{Calls: "2", Limit: 500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Calls != 2 {
+			t.Fatalf("the list says %d calls under a filter for two", row.Calls)
+		}
+	}
+	once := count(campaign.DeliveryFilter{Calls: "1", Limit: 500})
+	if len(once) != 1 || !once[named["unknown"]] {
+		t.Fatalf("called once: %v", once)
+	}
+	twice := count(campaign.DeliveryFilter{Calls: "2", Limit: 500})
+	if len(twice) != 2 || !twice[named["accepted"]] || !twice[named["failed"]] {
+		t.Fatalf("called twice: %v", twice)
+	}
+	if more := count(campaign.DeliveryFilter{Calls: "2+", Limit: 500}); len(more) != 2 {
+		t.Fatalf("two or more: %v", more)
+	}
+	if none := count(campaign.DeliveryFilter{Calls: "3+", Limit: 500}); len(none) != 0 {
+		t.Fatalf("three or more: %v", none)
+	}
+	if never := count(campaign.DeliveryFilter{Calls: "0", Limit: 500}); never[named["accepted"]] {
+		t.Fatalf("never called: %v", never)
+	}
+	if _, err := h.service.Deliveries(ctx, id, campaign.DeliveryFilter{Calls: "some"}); !errors.Is(err, campaign.ErrUnknownFilter) {
+		t.Fatalf("bad calls: %v", err)
+	}
+
+	cities, err := h.service.DeliveryCities(ctx, id)
+	if err != nil || len(cities) == 0 {
+		t.Fatalf("cities: %v %v", cities, err)
+	}
+	if kept := count(campaign.DeliveryFilter{City: cities[0], Limit: 500}); len(kept) == 0 {
+		t.Fatalf("city %s kept nobody", cities[0])
+	}
+	if kept := count(campaign.DeliveryFilter{City: "Nowhere", Limit: 500}); len(kept) != 0 {
+		t.Fatalf("unknown city kept: %v", kept)
 	}
 }

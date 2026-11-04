@@ -140,10 +140,24 @@ type Counts struct {
 }
 
 // Overview is the workspace landing data.
+// mockProviderName is who both channels send through.
+const mockProviderName = "Mock provider"
+
 type Overview struct {
 	Counts   Counts          `json:"counts"`
 	Recent   []Summary       `json:"recent_campaigns"`
 	Activity []ActivityEntry `json:"recent_activity"`
+	Channels []ChannelUse    `json:"channels"`
+}
+
+// ChannelUse is what provider calls show about a channel. Being able to reach the
+// provider is another question, answered by the system check.
+type ChannelUse struct {
+	Channel        string     `json:"channel"`
+	Provider       string     `json:"provider"`
+	LastAcceptedAt *time.Time `json:"last_accepted_at"`
+	Calls          int        `json:"calls_last_hour"`
+	NotAccepted    int        `json:"not_accepted_last_hour"`
 }
 
 // Overview summarizes the workspace.
@@ -165,6 +179,9 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 		return Overview{}, err
 	}
 	if overview.Activity, err = s.queryActivity(ctx, nil, recentActivity); err != nil {
+		return Overview{}, err
+	}
+	if overview.Channels, err = s.channelUse(ctx); err != nil {
 		return Overview{}, err
 	}
 	return overview, nil
@@ -220,4 +237,26 @@ func (s *Service) queryActivity(ctx context.Context, id *pgtype.UUID, limit int)
 		return nil, fmt.Errorf("read activity: %w", err)
 	}
 	return entries, nil
+}
+
+func (s *Service) channelUse(ctx context.Context) ([]ChannelUse, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT ch.channel, $2::text,
+		       (SELECT a.occurred_at FROM delivery_attempts a JOIN campaign_deliveries d ON d.id = a.delivery_id
+		        WHERE d.channel = ch.channel AND a.outcome = 'accepted' ORDER BY a.occurred_at DESC LIMIT 1),
+		       recent.calls, recent.not_accepted
+		FROM unnest($1::text[]) AS ch (channel)
+		CROSS JOIN LATERAL (
+			SELECT count(*) AS calls, count(*) FILTER (WHERE a.outcome <> 'accepted') AS not_accepted
+			FROM delivery_attempts a JOIN campaign_deliveries d ON d.id = a.delivery_id
+			WHERE d.channel = ch.channel AND a.occurred_at >= $3
+		) recent`, channels, mockProviderName, s.now().Add(-time.Hour))
+	if err != nil {
+		return nil, fmt.Errorf("channel use: %w", err)
+	}
+	use, err := pgx.CollectRows(rows, pgx.RowToStructByPos[ChannelUse])
+	if err != nil {
+		return nil, fmt.Errorf("channel use: %w", err)
+	}
+	return use, nil
 }

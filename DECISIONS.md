@@ -335,6 +335,10 @@ Duplicating a campaign keeps its brief, options, audience rule and messages, and
 
 The CSV holds every delivery the filters keep, not the page on screen, and it leaves contact details out because a report read elsewhere does not need them. Who exported is recorded in the campaign's activity. Accepted is written as accepted and simulated arrival is labelled simulated in the column names, so the file does not claim more than the screens do. Customer text that starts like a formula is neutralized before a spreadsheet can run it.
 
+## Channels show what their calls did
+
+SMS and email go through one mock provider at one address, so a separate "connected" light for each channel would be two copies of one fact. The overview says the provider is reachable once for both, says that they go up and down together, and gives each channel what really differs: when it last had a message accepted, and how many calls it made and had refused in the last hour. No WhatsApp row or connection screen stands in for work that does not exist.
+
 ## What was asked and not done is shown
 
 A model can pass over part of a request without breaking any rule, and the screen then looks as if the work was done. Asking the model to admit it is not enough, so there are two sources. The model reports in `not_applied`, and the backend compares the result with the request itself: a refinement that changed neither the rule nor the brief says so, and a number or city named in a request but missing from the result is listed. These are notes, not blockers, because only the person knows whether the outcome is acceptable. Writing or editing that channel again clears its note.

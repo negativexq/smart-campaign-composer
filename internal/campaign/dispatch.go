@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -28,6 +31,7 @@ const (
 	reasonWithoutConsent = "no_consent"
 
 	eventExported        = "deliveries.exported"
+	maxCallsFilter       = 1000
 	defaultDeliveryLimit = 200
 	maxDeliveryLimit     = 500
 )
@@ -337,8 +341,11 @@ type DeliveryFilter struct {
 	Outcome string
 	From    *time.Time
 	To      *time.Time
-	// Retried keeps deliveries with more than one provider call.
-	Retried bool
+	// Calls keeps deliveries by how many provider calls they had: "2" for exactly two,
+	// "2+" for two or more.
+	Calls string
+	// City keeps people from one city.
+	City string
 	// Opened is "yes" or "no" to keep those a provider did or did not report opened.
 	Opened string
 	// Arrival keeps those a provider reported "delivered" or "bounced", or "waiting"
@@ -355,13 +362,16 @@ var arrivals = []string{"delivered", "bounced", "waiting"}
 // Delivery is one person on one channel. Contact details stay out of it, since
 // reading the report does not require them.
 type Delivery struct {
-	ID                string     `json:"id"`
-	UserID            int64      `json:"user_id"`
-	FirstName         string     `json:"first_name"`
-	Channel           string     `json:"channel"`
-	Status            string     `json:"status"`
-	Variant           string     `json:"variant"`
-	Attempts          int        `json:"attempts"`
+	ID        string `json:"id"`
+	UserID    int64  `json:"user_id"`
+	FirstName string `json:"first_name"`
+	City      string `json:"city"`
+	Channel   string `json:"channel"`
+	Status    string `json:"status"`
+	Variant   string `json:"variant"`
+	Attempts  int    `json:"attempts"`
+	// Calls counts every call to the provider. Attempts leaves out those answered 429.
+	Calls             int        `json:"calls"`
 	ResponseCode      *int       `json:"response_code"`
 	Reason            string     `json:"reason"`
 	ProviderMessageID string     `json:"provider_message_id"`
@@ -374,6 +384,41 @@ type Delivery struct {
 }
 
 // Deliveries lists a campaign's deliveries by person.
+// callRange reads a calls filter as the fewest and most calls it keeps. No filter gives
+// a negative fewest.
+func callRange(calls string) (int, int, error) {
+	if calls == "" {
+		return -1, 0, nil
+	}
+	exact, orMore := strings.CutSuffix(calls, "+")
+	count, err := strconv.Atoi(exact)
+	if err != nil || count < 0 || count > maxCallsFilter {
+		return 0, 0, ErrUnknownFilter
+	}
+	if orMore {
+		return count, math.MaxInt32, nil
+	}
+	return count, count, nil
+}
+
+// DeliveryCities lists the cities a campaign's deliveries went to, for filtering by.
+func (s *Service) DeliveryCities(ctx context.Context, id string) ([]string, error) {
+	if _, err := s.load(ctx, id); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT DISTINCT u.city FROM campaign_deliveries d JOIN users u ON u.id = d.user_id
+		WHERE d.campaign_id = $1 ORDER BY u.city`, id)
+	if err != nil {
+		return nil, fmt.Errorf("delivery cities: %w", err)
+	}
+	cities, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("delivery cities: %w", err)
+	}
+	return cities, nil
+}
+
 // ExportDeliveries hands over every delivery the filter keeps, not one page, and leaves
 // a record of who took them. It stops at the first error from write.
 func (s *Service) ExportDeliveries(ctx context.Context, id string, filter DeliveryFilter, write func(Delivery) error) error {
@@ -434,6 +479,10 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 	if filter.Variant != "" && filter.Variant != "A" && filter.Variant != "B" {
 		return nil, ErrUnknownFilter
 	}
+	fewestCalls, mostCalls, err := callRange(filter.Calls)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := s.load(ctx, id); err != nil {
 		return nil, err
 	}
@@ -444,7 +493,8 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 	limit = min(limit, maxDeliveryLimit)
 
 	rows, err := s.db.Query(ctx, `
-		SELECT d.id::text, d.user_id, u.first_name, d.channel, d.status, COALESCE(d.variant, ''), d.attempts, last.response_code,
+		SELECT d.id::text, d.user_id, u.first_name, u.city, d.channel, d.status, COALESCE(d.variant, ''), d.attempts,
+		       (SELECT count(*) FROM delivery_attempts a WHERE a.delivery_id = d.id), last.response_code,
 		       COALESCE(d.last_error, ''), COALESCE(d.provider_message_id, ''), d.next_attempt_at, d.sent_at, arrival.delivered_at, arrival.bounced_at, opened.occurred_at, d.updated_at
 		FROM campaign_deliveries d
 		JOIN users u ON u.id = d.user_id
@@ -459,7 +509,8 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 		  AND ($12 = '' OR ($12 = 'delivered' AND arrival.delivered_at IS NOT NULL) OR ($12 = 'bounced' AND arrival.bounced_at IS NOT NULL)
 		       OR ($12 = 'waiting' AND d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL))
 		  AND ($13 = '' OR d.variant = $13)
-		  AND (NOT $7 OR (SELECT count(*) FROM delivery_attempts a WHERE a.delivery_id = d.id) > 1)
+		  AND ($14 = '' OR u.city = $14)
+		  AND ($7::int < 0 OR (SELECT count(*) FROM delivery_attempts a WHERE a.delivery_id = d.id) BETWEEN $7::int AND $15::int)
 		  AND (($8 = '' AND $9::timestamptz IS NULL AND $10::timestamptz IS NULL) OR EXISTS (
 			SELECT 1 FROM delivery_attempts a
 			WHERE a.delivery_id = d.id AND ($8 = '' OR a.outcome = $8)
@@ -467,13 +518,13 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 		  ))
 		ORDER BY d.user_id, d.channel
 		LIMIT $4 OFFSET $5`, id, filter.Status, filter.Channel, limit, max(filter.Offset, 0),
-		filter.Reason, filter.Retried, filter.Outcome, filter.From, filter.To, filter.Opened, filter.Arrival, filter.Variant)
+		filter.Reason, fewestCalls, filter.Outcome, filter.From, filter.To, filter.Opened, filter.Arrival, filter.Variant, filter.City, mostCalls)
 	if err != nil {
 		return nil, fmt.Errorf("list deliveries: %w", err)
 	}
 	deliveries, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Delivery, error) {
 		var d Delivery
-		err := row.Scan(&d.ID, &d.UserID, &d.FirstName, &d.Channel, &d.Status, &d.Variant, &d.Attempts, &d.ResponseCode,
+		err := row.Scan(&d.ID, &d.UserID, &d.FirstName, &d.City, &d.Channel, &d.Status, &d.Variant, &d.Attempts, &d.Calls, &d.ResponseCode,
 			&d.Reason, &d.ProviderMessageID, &d.NextAttemptAt, &d.SentAt, &d.DeliveredAt, &d.BouncedAt, &d.OpenedAt, &d.UpdatedAt)
 		return d, err
 	})

@@ -4,6 +4,7 @@ import { onMounted, ref } from "vue";
 import { errorMessage, getOverview, type Overview } from "../api/campaigns";
 import ActivityTimeline from "../components/ActivityTimeline.vue";
 import CampaignTable from "../components/CampaignTable.vue";
+import ChannelsCard from "../components/ChannelsCard.vue";
 import MetricCard from "../components/MetricCard.vue";
 import SystemHealthCard from "../components/SystemHealthCard.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
@@ -63,6 +64,7 @@ onMounted(async () => {
     <section class="section">
       <h2>System</h2>
       <SystemHealthCard />
+      <ChannelsCard v-if="overview.channels?.length" :channels="overview.channels" />
     </section>
   </div>
 </template>

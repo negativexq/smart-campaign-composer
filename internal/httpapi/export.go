@@ -12,8 +12,8 @@ import (
 
 // Contact details stay out: a report for reading elsewhere has no need for them.
 var csvHeader = []string{
-	"user_id", "first_name", "channel", "version", "status", "reason", "attempts", "last_response_code",
-	"accepted_at", "delivered_at_simulated", "bounced_at_simulated", "opened_at_test_inbox",
+	"user_id", "first_name", "channel", "version", "status", "reason", "provider_calls", "last_response_code",
+	"accepted_at", "delivered_at_simulated", "bounced_at_simulated", "opened_at_test_inbox", "city",
 }
 
 func (a *api) deliveriesCSV(w http.ResponseWriter, r *http.Request) {
@@ -66,8 +66,8 @@ func csvRow(d campaign.Delivery) []string {
 		code = strconv.Itoa(*d.ResponseCode)
 	}
 	return []string{
-		strconv.FormatInt(d.UserID, 10), safeCell(d.FirstName), d.Channel, d.Variant, status, d.Reason, strconv.Itoa(d.Attempts), code,
-		csvTime(d.SentAt), csvTime(d.DeliveredAt), csvTime(d.BouncedAt), csvTime(d.OpenedAt),
+		strconv.FormatInt(d.UserID, 10), safeCell(d.FirstName), d.Channel, d.Variant, status, d.Reason, strconv.Itoa(d.Calls), code,
+		csvTime(d.SentAt), csvTime(d.DeliveredAt), csvTime(d.BouncedAt), csvTime(d.OpenedAt), safeCell(d.City),
 	}
 }
 

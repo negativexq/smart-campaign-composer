@@ -923,6 +923,11 @@ func (v *View) limitsFor(language string) content.Limits {
 
 // blockersFor lists what must change before this audience can be approved.
 func blockersFor(proposal segment.Proposal, counts segment.Counts) []blocker {
+	// A rule with no conditions reaches nobody on purpose, so there is nothing to widen,
+	// and what the model wrote about it is its reasoning, not something the brief asked.
+	if proposal.Segment.IsEmpty() {
+		return []blocker{{reasonEmpty, "No filter could be set from this brief, so it reaches nobody. Say who should receive it, for example a city or a recent purchase."}}
+	}
 	blockers := []blocker{}
 	for _, condition := range proposal.UnsupportedConditions {
 		blockers = append(blockers, blocker{reasonUnsupported, fmt.Sprintf(

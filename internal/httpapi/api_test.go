@@ -260,10 +260,10 @@ func TestReportAndDeliveryFiltersThroughTheAPI(t *testing.T) {
 		t.Fatalf("unknown campaign: %d", status)
 	}
 	base := "/api/campaigns/" + id + "/deliveries?"
-	if status, _ := call(t, api, http.MethodGet, base+"outcome=rate_limited&retried=true&from=2026-11-03T12:00:00Z&to=2026-11-03T12:00:10Z", ""); status != http.StatusOK {
+	if status, _ := call(t, api, http.MethodGet, base+"outcome=rate_limited&calls=2%2B&from=2026-11-03T12:00:00Z&to=2026-11-03T12:00:10Z", ""); status != http.StatusOK {
 		t.Fatalf("filters: %d", status)
 	}
-	for _, bad := range []string{"outcome=nope", "from=yesterday", "to=soon"} {
+	for _, bad := range []string{"outcome=nope", "from=yesterday", "to=soon", "calls=many", "calls=-1", "calls=99999"} {
 		if status, _ := call(t, api, http.MethodGet, base+bad, ""); status != http.StatusBadRequest {
 			t.Fatalf("%s: %d", bad, status)
 		}

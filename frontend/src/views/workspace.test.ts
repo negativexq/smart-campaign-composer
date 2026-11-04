@@ -96,6 +96,23 @@ describe("overview", () => {
     expect(wrapper.text()).toContain("Audience refined");
   });
 
+  it("shows what each channel's calls did and that one provider serves both", async () => {
+    const { wrapper } = await open("/", {
+      "/api/overview": {
+        ...emptyOverview,
+        channels: [
+          { channel: "sms", provider: "Mock provider", last_accepted_at: "2026-11-03T12:00:00Z", calls_last_hour: 12, not_accepted_last_hour: 3 },
+          { channel: "email", provider: "Mock provider", last_accepted_at: null, calls_last_hour: 0, not_accepted_last_hour: 0 },
+        ],
+      },
+    });
+    const sms = wrapper.find("[data-testid=channel-sms]").text();
+    expect(sms).toContain("Mock provider");
+    expect(sms).toContain("12");
+    expect(wrapper.find("[data-testid=channel-email]").text()).toContain("Nothing yet");
+    expect(wrapper.find("[data-testid=channels]").text()).toContain("go up and down together");
+  });
+
   it("guides a new workspace to its first campaign instead of showing zeros", async () => {
     const { wrapper } = await open("/", { "/api/overview": emptyOverview });
 

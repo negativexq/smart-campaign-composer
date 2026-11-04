@@ -311,6 +311,11 @@ func TestBlockers(t *testing.T) {
 			`{"segment":{"city":"Ankara","language":"en"},"assumptions":[],"unsupported_conditions":[]}`,
 			"No users match", "empty_audience",
 		},
+		{
+			"no conditions at all", "Send everyone something nice",
+			`{"segment":{},"assumptions":[],"unsupported_conditions":["The audience was not stated, so no filter was set."]}`,
+			"No filter could be set", "empty_audience",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

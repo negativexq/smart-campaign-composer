@@ -30,13 +30,22 @@ export type DeliveryQuery = {
   outcome: string;
   from: string;
   to: string;
-  retried: boolean;
+  calls: string;
+  city: string;
   opened: "" | "yes" | "no";
   arrival: "" | "delivered" | "bounced" | "waiting";
   variant: "" | "A" | "B";
 };
 
-export const noFilter = (): DeliveryQuery => ({ status: "", channel: "", reason: "", outcome: "", from: "", to: "", retried: false, opened: "", arrival: "", variant: "" });
+export const CALLS: Record<string, string> = {
+  "0": "Never called",
+  "1": "Called once",
+  "2": "Called twice",
+  "2+": "Called more than once",
+  "3+": "Called three times or more",
+};
+
+export const noFilter = (): DeliveryQuery => ({ status: "", channel: "", reason: "", outcome: "", from: "", to: "", calls: "", city: "", opened: "", arrival: "", variant: "" });
 
 export const ARRIVALS: Record<DeliveryQuery["arrival"] & string, string> = {
   "": "",
@@ -126,7 +135,8 @@ export function describeQuery(query: DeliveryQuery): string {
   if (query.status) parts.push(deliveryStatusMeta[query.status as DeliveryStatus]?.label ?? query.status);
   if (query.reason) parts.push(`Ended as: ${REASONS[query.reason] ?? query.reason}`);
   if (query.outcome) parts.push(`Had a call: ${OUTCOMES[query.outcome] ?? query.outcome}`);
-  if (query.retried) parts.push("Called more than once");
+  if (query.calls) parts.push(CALLS[query.calls] ?? query.calls);
+  if (query.city) parts.push(query.city);
   if (query.arrival) parts.push(ARRIVALS[query.arrival]);
   if (query.opened) parts.push(query.opened === "yes" ? "Opened or read" : "Not opened yet");
   if (query.from && query.to) parts.push(`Called between ${formatBucket(query.from, 1)} and ${formatBucket(query.to, 1)}`);

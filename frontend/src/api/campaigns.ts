@@ -60,6 +60,7 @@ export type Delivery = {
   status: string;
   variant?: string;
   attempts: number;
+  calls?: number;
   response_code: number | null;
   reason: string;
   provider_message_id: string;
@@ -138,6 +139,15 @@ export type Overview = {
   counts: { total: number; drafts: number; active: number; completed: number; failed: number };
   recent_campaigns: CampaignSummary[];
   recent_activity: ActivityEntry[];
+  channels?: ChannelUse[];
+};
+
+export type ChannelUse = {
+  channel: string;
+  provider: string;
+  last_accepted_at: string | null;
+  calls_last_hour: number;
+  not_accepted_last_hour: number;
 };
 
 export type CampaignGroup = "" | "drafts" | "active" | "completed" | "failed";
@@ -281,6 +291,10 @@ function deliveryParams(filter: Partial<DeliveryQuery>, start: Record<string, st
 export function deliveriesCsvUrl(id: string, filter: Partial<DeliveryQuery>): string {
   const params = deliveryParams(filter).toString();
   return `/api/campaigns/${encodeURIComponent(id)}/deliveries.csv${params ? `?${params}` : ""}`;
+}
+
+export async function getDeliveryCities(id: string): Promise<string[]> {
+  return (await request<{ cities: string[] }>(`/api/campaigns/${encodeURIComponent(id)}/delivery-cities`)).cities;
 }
 
 export function duplicateCampaign(id: string): Promise<Campaign> {

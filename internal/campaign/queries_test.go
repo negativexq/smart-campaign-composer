@@ -254,3 +254,37 @@ func TestListFiltersByChannelAndAgeAndSorts(t *testing.T) {
 		}
 	}
 }
+
+func TestOverviewShowsWhatEachChannelsCallsDid(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, id, named := sentCampaign(t)
+	if _, err := h.pool.Exec(ctx, `UPDATE delivery_attempts SET occurred_at = '2000-01-01' WHERE campaign_id = $1 AND outcome = 'timeout'`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE delivery_attempts SET occurred_at = now() WHERE campaign_id = $1 AND outcome <> 'timeout'`, id); err != nil {
+		t.Fatal(err)
+	}
+	overview, err := h.service.Overview(ctx)
+	if err != nil {
+		t.Fatalf("overview: %v", err)
+	}
+	if len(overview.Channels) != 2 {
+		t.Fatalf("channels: %+v", overview.Channels)
+	}
+	calls, notAccepted, accepted := 0, 0, 0
+	for _, channel := range overview.Channels {
+		if channel.Provider == "" {
+			t.Fatalf("no provider: %+v", channel)
+		}
+		calls += channel.Calls
+		notAccepted += channel.NotAccepted
+		if channel.LastAcceptedAt != nil {
+			accepted++
+		}
+	}
+	// Four calls in the last hour, one of them accepted. The timeout is older.
+	if calls != 4 || notAccepted != 3 || accepted == 0 {
+		t.Fatalf("calls %d, not accepted %d, %+v (%v)", calls, notAccepted, overview.Channels, named)
+	}
+}

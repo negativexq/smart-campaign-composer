@@ -60,6 +60,7 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 		"GET /api/campaigns/{id}/events":                         a.events,
 		"GET /api/campaigns/{id}/deliveries":                     a.deliveries,
 		"GET /api/campaigns/{id}/deliveries.csv":                 a.deliveriesCSV,
+		"GET /api/campaigns/{id}/delivery-cities":                a.deliveryCities,
 		"POST /api/campaigns/{id}/duplicate":                     a.duplicate,
 		"GET /api/campaigns/{id}/report":                         a.report,
 		"GET /api/campaigns/{id}/deliveries/{delivery}/attempts": a.deliveryAttempts,
@@ -437,7 +438,7 @@ func deliveryFilter(query url.Values) (campaign.DeliveryFilter, error) {
 	}
 	return campaign.DeliveryFilter{
 		Status: query.Get("status"), Channel: query.Get("channel"), Reason: query.Get("reason"), Outcome: query.Get("outcome"),
-		From: from, To: to, Retried: query.Get("retried") == "true", Opened: query.Get("opened"), Arrival: query.Get("arrival"), Variant: query.Get("variant"), Limit: limit, Offset: offset,
+		From: from, To: to, Calls: query.Get("calls"), City: query.Get("city"), Opened: query.Get("opened"), Arrival: query.Get("arrival"), Variant: query.Get("variant"), Limit: limit, Offset: offset,
 	}, nil
 }
 
@@ -453,6 +454,15 @@ func (a *api) deliveries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deliveries": deliveries})
+}
+
+func (a *api) deliveryCities(w http.ResponseWriter, r *http.Request) {
+	cities, err := a.campaigns.DeliveryCities(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cities": cities})
 }
 
 func (a *api) duplicate(w http.ResponseWriter, r *http.Request) {

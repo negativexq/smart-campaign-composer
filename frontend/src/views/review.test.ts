@@ -396,6 +396,30 @@ describe("campaign page after approval", () => {
     expect(wrapper.find("[data-testid=deliveries-empty]").exists()).toBe(true);
   });
 
+  it("filters deliveries by provider calls and by city", async () => {
+    const row = { id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 1, response_code: 202, reason: "", next_attempt_at: "2026-11-03T12:00:00Z", sent_at: null, updated_at: "2026-11-03T12:00:00Z" };
+    const fetchMock = stub({
+      ...routes({ ...ready, status: "COMPLETED" }, progress),
+      "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [row] } },
+      "GET /api/campaigns/c1/delivery-cities": { body: { cities: ["Ankara", "Bursa"] } },
+      "GET /api/campaigns/c1/report": { body: { reasons: [], problems: [], timeline: { bucket_seconds: 0, buckets: [] }, engagement: [] } },
+      "GET /api/campaigns/c1/deliveries?limit=100&calls=2%2B": { body: { deliveries: [] } },
+      "GET /api/campaigns/c1/deliveries?limit=100&calls=2%2B&city=Bursa": { body: { deliveries: [row] } },
+    });
+    const wrapper = mount(CampaignDetailView, { props: { campaignId: "c1" } });
+    await flushPromises();
+    await wrapper.find("#tab-deliveries").trigger("click");
+    await flushPromises();
+    await wrapper.find("[data-testid=filter-calls]").setValue("2+");
+    await flushPromises();
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/campaigns/c1/deliveries?limit=100&calls=2%2B")).toBe(true);
+    await wrapper.find("[data-testid=filter-city]").setValue("Bursa");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=active-filter]").text()).toContain("Called more than once · Bursa");
+    expect(wrapper.find("[data-testid=delivery-row]").exists()).toBe(true);
+    expect(wrapper.find("[data-testid=export-csv]").attributes("href")).toBe("/api/campaigns/c1/deliveries.csv?calls=2%2B&city=Bursa");
+  });
+
   it("exports what the filters keep and copies the campaign", async () => {
     stub({
       ...routes({ ...ready, status: "COMPLETED" }, progress),

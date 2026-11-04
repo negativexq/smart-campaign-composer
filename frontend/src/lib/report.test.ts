@@ -45,7 +45,7 @@ describe("filters", () => {
   });
 
   it("describes a filter in words", () => {
-    expect(describeQuery({ ...noFilter(), channel: "email", reason: "timeout", retried: true })).toBe(
+    expect(describeQuery({ ...noFilter(), channel: "email", reason: "timeout", calls: "2+" })).toBe(
       "Email · Ended as: No response from the provider · Called more than once",
     );
   });

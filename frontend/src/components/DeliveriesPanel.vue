@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from "vue";
 
-import { deliveriesCsvUrl, errorMessage, getDeliveries, getDeliveryAttempts, type Delivery, type DeliveryAttempt, type Progress } from "../api/campaigns";
+import { deliveriesCsvUrl, errorMessage, getDeliveries, getDeliveryCities, getDeliveryAttempts, type Delivery, type DeliveryAttempt, type Progress } from "../api/campaigns";
 import { DELIVERY_STATUSES, deliveryStatusMeta, type DeliveryStatus } from "../lib/deliveryStatus";
 import { formatDateTime } from "../lib/format";
-import { ARRIVALS, OUTCOMES, REASONS, arrivalOf, describeQuery, isFiltered, matches, noFilter, type DeliveryQuery } from "../lib/report";
+import { ARRIVALS, CALLS, OUTCOMES, REASONS, arrivalOf, describeQuery, isFiltered, matches, noFilter, type DeliveryQuery } from "../lib/report";
 import DeliveryReport from "./DeliveryReport.vue";
 import StatusBadge from "./StatusBadge.vue";
 import ValidationNotice from "./ValidationNotice.vue";
@@ -17,6 +17,7 @@ const props = defineProps<{ campaignId: string; channels: string[]; abTest?: boo
 
 const rows = ref<Delivery[] | null>(null);
 const query = ref<DeliveryQuery>(noFilter());
+const cities = ref<string[]>([]);
 const tableStart = ref<HTMLElement | null>(null);
 const error = ref("");
 const hasMore = ref(false);
@@ -70,8 +71,19 @@ function clearFilters() {
   changeFilter();
 }
 
-watch(() => props.refreshKey, () => load(Math.max(rows.value?.length ?? 0, PAGE)));
-onMounted(() => load(PAGE));
+// Without the list there is simply no city filter; the deliveries still show.
+async function loadCities() {
+  cities.value = await getDeliveryCities(props.campaignId).catch(() => []);
+}
+
+watch(() => props.refreshKey, () => {
+  load(Math.max(rows.value?.length ?? 0, PAGE));
+  if (!cities.value.length) loadCities();
+});
+onMounted(() => {
+  load(PAGE);
+  loadCities();
+});
 </script>
 
 <template>
@@ -141,9 +153,19 @@ onMounted(() => load(PAGE));
           <option value="no">Not yet</option>
         </select>
       </label>
-      <label class="check small">
-        <input v-model="query.retried" type="checkbox" data-testid="filter-retried" @change="changeFilter" />
-        Called more than once
+      <label class="filter">
+        <span class="small muted">Provider calls</span>
+        <select v-model="query.calls" class="field select" data-testid="filter-calls" @change="changeFilter">
+          <option value="">Any</option>
+          <option v-for="(label, value) in CALLS" :key="value" :value="value">{{ label }}</option>
+        </select>
+      </label>
+      <label v-if="cities.length > 1" class="filter">
+        <span class="small muted">City</span>
+        <select v-model="query.city" class="field select" data-testid="filter-city" @change="changeFilter">
+          <option value="">Any</option>
+          <option v-for="city in cities" :key="city" :value="city">{{ city }}</option>
+        </select>
       </label>
     </div>
 
@@ -170,7 +192,7 @@ onMounted(() => load(PAGE));
             <th scope="col">Channel</th>
             <th v-if="abTest" scope="col">Version</th>
             <th scope="col">Status</th>
-            <th scope="col" class="num">Attempts</th>
+            <th scope="col" class="num">Calls</th>
             <th scope="col" class="num">Response</th>
             <th scope="col">Arrival</th>
             <th scope="col">Opened</th>
@@ -185,7 +207,7 @@ onMounted(() => load(PAGE));
               <td>{{ row.channel === "sms" ? "SMS" : "Email" }}</td>
               <td v-if="abTest" data-testid="delivery-variant">{{ row.variant || "—" }}</td>
               <td><StatusBadge :status="row.status as DeliveryStatus" /></td>
-              <td class="num mono">{{ row.attempts }}</td>
+              <td class="num mono" data-testid="delivery-calls">{{ row.calls ?? row.attempts }}</td>
               <td class="num mono">{{ row.response_code ?? "—" }}</td>
               <td class="small" data-testid="delivery-arrival">{{ arrivalOf(row)?.label ?? "—" }}</td>
               <td class="small" data-testid="delivery-opened">{{ row.opened_at ? formatDateTime(row.opened_at) : "—" }}</td>
@@ -238,17 +260,13 @@ onMounted(() => load(PAGE));
   gap: var(--space-3);
 }
 
-.check {
-  display: inline-flex;
-  align-items: center;
-  align-self: flex-end;
-  gap: var(--space-2);
-  min-height: 40px;
-}
-
 .export {
   display: flex;
   justify-content: flex-end;
+}
+
+.export .button {
+  text-decoration: none;
 }
 
 .active {
