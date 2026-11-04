@@ -13,7 +13,9 @@ export type Messages = Record<MessageField, string>;
 export type ContentIssue = { field: string; reason: string; message: string };
 export type SampleRecipient = { id: number; label: string; first_name: string; language?: string };
 export type LanguageAudience = { language: string; total: number; sms: number; email: number; sms_name_length: number; email_name_length: number };
-export type MessageVersion = Messages & { edited: MessageField[]; language?: string };
+export type MessageVersion = Messages & { edited: MessageField[]; language?: string; variant?: string };
+/** One version of a test: its messages and their other languages. */
+export type VariantContent = MessageVersion & { translations?: MessageVersion[] };
 
 export type ScheduleSpec = {
   kind: "once" | "interval" | "weekly";
@@ -56,6 +58,7 @@ export type Delivery = {
   first_name: string;
   channel: string;
   status: string;
+  variant?: string;
   attempts: number;
   response_code: number | null;
   reason: string;
@@ -96,7 +99,10 @@ export type Campaign = {
   provider?: string;
   model?: string;
   blockers: string[];
-  content?: MessageVersion & { translations?: MessageVersion[] };
+  content?: VariantContent & { variant_b?: VariantContent };
+  ab_test?: boolean;
+  variant_a_percent?: number;
+  variant_audience?: { variant: string; language: string; total: number; sms: number; email: number }[];
   languages?: LanguageAudience[] | null;
   content_limits: { sms_name_length: number; email_name_length: number };
   content_warnings: ContentIssue[];
@@ -174,7 +180,7 @@ function post<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-export type CampaignOptions = { tone?: string; offer_percent?: number; not_messaged_within_days?: number };
+export type CampaignOptions = { tone?: string; offer_percent?: number; not_messaged_within_days?: number; ab_test?: boolean; variant_a_percent?: number };
 
 export async function createCampaign(brief: string, channels: string[], options: CampaignOptions = {}): Promise<string> {
   return (await post<{ id: string }>("/api/campaigns", { brief, channels, ...options })).id;
@@ -227,7 +233,7 @@ export function previewEmail(message: Partial<Messages>, firstName: string, lang
   return post<EmailPreviewResult>("/api/email-preview", { ...Object.fromEntries(fields), ...(language ? { language } : {}), first_name: firstName });
 }
 
-export function saveContent(id: string, messages: Messages & { language?: string }): Promise<Campaign> {
+export function saveContent(id: string, messages: Messages & { language?: string; variant?: string }): Promise<Campaign> {
   return request<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/content`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -292,12 +298,24 @@ export type ReportLifecycle = {
   arrived_unknown: number;
 };
 
+export type ReportVariant = {
+  variant: string;
+  channel: string;
+  planned: number;
+  accepted: number;
+  delivered: number;
+  bounced: number;
+  waiting: number;
+  opened: number;
+};
+
 export type Report = {
   reasons: { reason: string; deliveries: number }[];
   problems: { outcome: string; deliveries: number; attempts: number }[];
   timeline: { bucket_seconds: number; buckets: TimelineBucket[] };
   engagement: { channel: string; accepted: number; opened: number }[];
   lifecycle?: ReportLifecycle[];
+  variants?: ReportVariant[];
 };
 
 export async function getReport(id: string): Promise<Report> {
@@ -338,6 +356,7 @@ export type GenerationHandlers = {
   onDelta: (field: MessageField, text: string) => void;
   onReset: () => void;
   onLanguage?: (language: string) => void;
+  onVariant?: (variant: string) => void;
 };
 
 // Streams a generation and resolves with the validated campaign. The streamed
@@ -377,6 +396,7 @@ export async function generateContent(
         if (event === "delta") handlers.onDelta(payload.field, payload.text);
         if (event === "reset") handlers.onReset();
         if (event === "language") handlers.onLanguage?.(payload.language);
+        if (event === "variant") handlers.onVariant?.(payload.variant);
         if (event === "done") return payload as Campaign;
         if (event === "error") throw new ApiError(payload.error, 0);
       }

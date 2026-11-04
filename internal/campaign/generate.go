@@ -30,6 +30,8 @@ const (
 	// EventLanguage says which language is being written after the first one, whose
 	// text is not shown as it comes because the screen shows the main version.
 	EventLanguage = "language"
+	// EventVariant says the second version of a test is being written.
+	EventVariant = "variant"
 
 	statusGenerating = "GENERATING"
 	statusReady      = "READY_FOR_REVIEW"
@@ -43,8 +45,9 @@ const (
 	eventGenFailed    = "content.generation_failed"
 	outcomeCancelled  = "cancelled"
 	abandonedInterval = "5 minutes"
-	// abandonedAfter must outlast every attempt of one generation, so a running
-	// generation is never taken over.
+	// abandonedAfter must outlast every attempt of one version, and each version says
+	// the generation is alive, so a running generation is never taken over however
+	// many versions it writes.
 	abandonedAfter = 5 * time.Minute
 )
 
@@ -56,7 +59,8 @@ var (
 	ErrContentRejected    = errors.New("content failed validation")
 	ErrInvalidInstruction = errors.New("instruction is too long")
 	ErrChannelDiscount    = errors.New("channels would promise different discounts")
-	ErrLanguageDiscount   = errors.New("languages would promise different discounts")
+	ErrLanguageDiscount   = errors.New("languages or versions would promise different discounts")
+	ErrMissingVariant     = errors.New("a test needs its second version written")
 	ErrMissingLanguage    = errors.New("part of the audience reads a language with no messages")
 )
 
@@ -77,6 +81,25 @@ type StoredContent struct {
 	// Translations holds the versions for the other languages in the audience. The
 	// embedded Content is the version for its largest language.
 	Translations []StoredContent `json:"translations,omitempty"`
+	// VariantB is the second version of a campaign that compares two, with its own
+	// translations.
+	VariantB *StoredContent `json:"variant_b,omitempty"`
+}
+
+// forVariant finds one version of a test. The stored root is version A.
+func (c *StoredContent) forVariant(variant string) *StoredContent {
+	if c != nil && variant == content.VariantB {
+		return c.VariantB
+	}
+	return c
+}
+
+// variants lists the versions that exist, A first.
+func (c *StoredContent) variants() []*StoredContent {
+	if c.VariantB != nil {
+		return []*StoredContent{c, c.VariantB}
+	}
+	return []*StoredContent{c}
 }
 
 // version finds what was written for a language, or nothing.
@@ -97,8 +120,13 @@ func (c *StoredContent) version(language string) *StoredContent {
 
 // withVersion puts a changed version back in its place.
 func (c StoredContent) withVersion(changed StoredContent) StoredContent {
+	if changed.Variant == content.VariantB && c.Variant != content.VariantB && c.VariantB != nil {
+		second := c.VariantB.withVersion(changed)
+		c.VariantB = &second
+		return c
+	}
 	if c.Language == changed.Language {
-		changed.Translations = c.Translations
+		changed.Translations, changed.VariantB = c.Translations, c.VariantB
 		return changed
 	}
 	c.Translations = slices.Clone(c.Translations)
@@ -146,6 +174,10 @@ type Generation struct {
 	// language and reference describe the version one pass is writing.
 	language  string
 	reference []byte
+	// variant, otherVariant and other describe the second version of a test.
+	variant      string
+	otherVariant []byte
+	other        *StoredContent
 }
 
 // StartGeneration checks the campaign can get content and claims it, so that
@@ -213,7 +245,7 @@ func (g *Generation) Run(ctx context.Context, emit func(GenerationEvent)) (view 
 		span.End()
 	}()
 
-	stored, attempts, usage, err := g.writeLanguages(ctx, emit)
+	stored, attempts, usage, err := g.writeVariants(ctx, emit)
 	// The outcome is recorded even when the client has just gone away.
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), saveTimeout)
 	defer cancel()
@@ -232,27 +264,57 @@ func (g *Generation) Run(ctx context.Context, emit func(GenerationEvent)) (view 
 	return s.Get(saveCtx, g.view.ID)
 }
 
+// writeVariants writes the campaign's messages, twice when it compares two versions.
+// Like the languages, the second version is kept only if everything passes.
+func (g *Generation) writeVariants(ctx context.Context, emit func(GenerationEvent)) (StoredContent, int, ai.Usage, error) {
+	main, attempts, usage, err := g.writeLanguages(ctx, emit, nil)
+	if err != nil || !g.view.ABTest {
+		return main, attempts, usage, err
+	}
+	emit(GenerationEvent{Type: EventVariant, Text: content.VariantB})
+	second, tried, used, err := g.writeLanguages(ctx, emit, &main)
+	attempts += tried
+	usage.InputTokens += used.InputTokens
+	usage.OutputTokens += used.OutputTokens
+	if err != nil {
+		return StoredContent{}, attempts, usage, err
+	}
+	main.VariantB = &second
+	return main, attempts, usage, nil
+}
+
 // writeLanguages writes one version per language, each checked on its own. Later
 // languages say what the first one says. Nothing is kept unless all of them pass, so
-// an audience is never left with some people's messages out of date.
-func (g *Generation) writeLanguages(ctx context.Context, emit func(GenerationEvent)) (StoredContent, int, ai.Usage, error) {
+// an audience is never left with some people's messages out of date. With first set
+// it writes the second version of a test, which has to differ from it.
+func (g *Generation) writeLanguages(ctx context.Context, emit func(GenerationEvent), first *StoredContent) (StoredContent, int, ai.Usage, error) {
 	var (
 		main     StoredContent
 		attempts int
 		usage    ai.Usage
 	)
+	silent := func(GenerationEvent) {}
 	for index, language := range g.languages {
-		pass := g.forLanguage(language)
+		pass := g.forLanguage(language, first)
 		passEmit := emit
+		if index > 0 || first != nil {
+			passEmit = silent
+		}
 		if index > 0 {
 			emit(GenerationEvent{Type: EventLanguage, Text: language})
-			passEmit = func(GenerationEvent) {}
 			reference, err := json.Marshal(pass.limits().Keep(main.Content))
 			if err != nil {
 				return StoredContent{}, attempts, usage, fmt.Errorf("encode reference: %w", err)
 			}
 			pass.reference = reference
+		} else if first != nil {
+			other, err := json.Marshal(pass.limits().Keep(first.Content))
+			if err != nil {
+				return StoredContent{}, attempts, usage, fmt.Errorf("encode other variant: %w", err)
+			}
+			pass.otherVariant = other
 		}
+		g.stillRunning(ctx)
 		generated, tried, used, err := pass.generate(ctx, passEmit)
 		attempts += tried
 		usage.InputTokens += used.InputTokens
@@ -261,25 +323,41 @@ func (g *Generation) writeLanguages(ctx context.Context, emit func(GenerationEve
 			return StoredContent{}, attempts, usage, err
 		}
 		version := pass.merged(generated)
-		version.Language = language
+		version.Language, version.Variant = language, pass.variant
+		// The design is one choice for the whole campaign.
+		if first != nil {
+			version.EmailTemplate = first.EmailTemplate
+		} else if index > 0 {
+			version.EmailTemplate = main.EmailTemplate
+		}
 		if index == 0 {
 			main = version
 			continue
 		}
-		// The design is one choice for the whole campaign.
-		version.EmailTemplate = main.EmailTemplate
 		main.Translations = append(main.Translations, version)
 	}
 	return main, attempts, usage, nil
 }
 
-// forLanguage is this generation seen from one language's version and limits.
-func (g *Generation) forLanguage(language string) *Generation {
+// stillRunning keeps a long generation from looking abandoned. If it fails the worst
+// case is the takeover this exists to make unlikely, so it does not stop the writing.
+func (g *Generation) stillRunning(ctx context.Context) {
+	if _, err := g.service.db.Exec(ctx, `UPDATE campaigns SET updated_at = now() WHERE id = $1 AND status = $2`, g.view.ID, statusGenerating); err != nil {
+		slog.WarnContext(ctx, "mark generation alive", "error", err)
+	}
+}
+
+// forLanguage is this generation seen from one version's language and limits.
+func (g *Generation) forLanguage(language string, first *StoredContent) *Generation {
 	pass := *g
 	pass.language = language
-	pass.view.Content = g.view.Content.version(language)
+	if first != nil {
+		pass.variant = content.VariantB
+		pass.other = first.version(language)
+	}
+	pass.view.Content = g.view.Content.forVariant(pass.variant).version(language)
 	pass.view.ContentLimits = g.view.limitsFor(language)
-	// A language with nothing written yet gets every channel.
+	// A version with nothing written yet gets every channel.
 	if pass.view.Content == nil {
 		pass.channel = ""
 	}
@@ -347,13 +425,14 @@ func (g *Generation) request() (ai.ContentRequest, error) {
 		channels = []string{g.channel}
 	}
 	request := ai.ContentRequest{
-		Language:    segment.LanguageName(g.language),
-		Reference:   g.reference,
-		Brief:       g.view.writingBrief(),
-		Tone:        g.view.Tone,
-		Schema:      content.JSONSchema(channels...),
-		Limits:      g.limits(),
-		Instruction: g.instruction,
+		Language:     segment.LanguageName(g.language),
+		Reference:    g.reference,
+		OtherVariant: g.otherVariant,
+		Brief:        g.view.writingBrief(),
+		Tone:         g.view.Tone,
+		Schema:       content.JSONSchema(channels...),
+		Limits:       g.limits(),
+		Instruction:  g.instruction,
 	}
 	for _, condition := range g.view.Conditions {
 		request.Conditions = append(request.Conditions, condition.Label+" "+condition.Value)
@@ -432,6 +511,8 @@ func (g *Generation) validate(ctx context.Context, output []byte, offerSource st
 			err = &content.ValidationError{Issues: issues}
 		} else if issues := content.CheckTargeting(generated, g.view.Proposal.Segment.Windows(), g.view.writingBrief()+"\n"+g.instruction); len(issues) > 0 {
 			err = &content.ValidationError{Issues: issues}
+		} else if issues := g.sameAsOther(generated); len(issues) > 0 {
+			err = &content.ValidationError{Issues: issues}
 		}
 	}
 	if err == nil {
@@ -462,7 +543,25 @@ func (g *Generation) linkSource() string {
 	if g.view.Content != nil {
 		source += "\n" + g.view.Content.EmailCTAURL
 	}
-	return source + "\n" + string(g.reference)
+	return source + "\n" + string(g.reference) + "\n" + string(g.otherVariant)
+}
+
+// sameAsOther refuses a second version that says what the first says, since comparing
+// a message with itself tells nobody anything.
+func (g *Generation) sameAsOther(generated content.Content) []content.Issue {
+	if g.other == nil {
+		return nil
+	}
+	limits := g.limits()
+	const reason = "same_as_other_variant"
+	var issues []content.Issue
+	if !limits.SkipSMS && generated.SMS == g.other.SMS {
+		issues = append(issues, content.Issue{Field: content.FieldSMS, Reason: reason, Message: "SMS is the same as the other version; write it differently."})
+	}
+	if !limits.SkipEmail && generated.EmailSubject == g.other.EmailSubject && generated.EmailBody == g.other.EmailBody {
+		issues = append(issues, content.Issue{Field: content.FieldEmailBody, Reason: reason, Message: "Email is the same as the other version; write it differently."})
+	}
+	return issues
 }
 
 func issueReasons(invalid *content.ValidationError) []string {
@@ -614,15 +713,16 @@ func (s *Service) SaveContent(ctx context.Context, id string, edited content.Con
 	if view.Status != statusReady || view.Content == nil {
 		return View{}, ErrNotEditable
 	}
-	target := view.Content
-	if edited.Language != "" {
-		if target = view.Content.version(edited.Language); target == nil {
-			return View{}, ErrNotEditable
-		}
+	target := view.Content.forVariant(edited.Variant)
+	if target != nil && edited.Language != "" {
+		target = target.version(edited.Language)
+	}
+	if target == nil {
+		return View{}, ErrNotEditable
 	}
 	limits := view.limitsFor(target.Language)
 	edited = limits.Keep(edited)
-	edited.Language = target.Language
+	edited.Language, edited.Variant = target.Language, target.Variant
 	if issues := content.CheckMessages(edited, limits); len(issues) > 0 {
 		return View{}, &content.ValidationError{Issues: issues}
 	}
@@ -641,8 +741,10 @@ func (s *Service) SaveContent(ctx context.Context, id string, edited content.Con
 	}
 	stored := view.Content.withVersion(StoredContent{Content: edited, Edited: mergeEdited(target.Edited, changed), NotApplied: notes})
 	// The design is one choice for the whole campaign.
-	for _, version := range stored.all() {
-		version.EmailTemplate = edited.EmailTemplate
+	for _, root := range stored.variants() {
+		for _, version := range root.all() {
+			version.EmailTemplate = edited.EmailTemplate
+		}
 	}
 	encoded, err := json.Marshal(stored)
 	if err != nil {

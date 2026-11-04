@@ -32,10 +32,14 @@ type contentProvider struct {
 	lastOutput       string
 	translationCalls []ai.ContentRequest
 	translationSteps []step
+	beforeTranslate  func(request ai.ContentRequest)
 }
 
 // translate answers a pass that has another language's version to follow.
 func (p *contentProvider) translate(ctx context.Context, request ai.ContentRequest) (ai.Response, error) {
+	if p.beforeTranslate != nil {
+		p.beforeTranslate(request)
+	}
 	p.contentMu.Lock()
 	defer p.contentMu.Unlock()
 	p.translationCalls = append(p.translationCalls, request)
@@ -55,7 +59,7 @@ func (p *contentProvider) translate(ctx context.Context, request ai.ContentReque
 }
 
 func (p *contentProvider) StreamContent(ctx context.Context, request ai.ContentRequest, handler ai.StreamHandler) (ai.Response, error) {
-	if len(request.Reference) > 0 {
+	if len(request.Reference) > 0 || len(request.OtherVariant) > 0 {
 		return p.translate(ctx, request)
 	}
 	p.contentMu.Lock()
@@ -887,5 +891,365 @@ func TestEditingOneLanguageLeavesTheOthers(t *testing.T) {
 	}
 	if english := view.Content.Translations[0]; english.SMS != edited.SMS || strings.Join(english.Edited, ",") != "sms" {
 		t.Fatalf("english: %+v", english)
+	}
+}
+
+// Version A's English, then version B in Turkish and English.
+func secondVersionSteps() []step {
+	return []step{
+		{output: `{"sms":"Hey {{first_name}}","email_subject":"Hey {{first_name}}","email_body":"Still here."}`},
+		{output: `{"sms":"Merhaba B {{first_name}}","email_subject":"Selam {{first_name}}","email_body":"Sepetin duruyor."}`},
+		{output: `{"sms":"Hello B {{first_name}}","email_subject":"Hello B {{first_name}}","email_body":"Your basket is here."}`},
+	}
+}
+
+func newTestHarness(t *testing.T, steps ...step) (*harness, *contentProvider, string) {
+	t.Helper()
+	h, provider, _ := newContentHarness(t, steps...)
+	ctx := context.Background()
+	id, err := h.service.CreateWith(ctx, campaign.NewCampaign{Brief: secretBrief, ABTest: true})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	provider.steps = []step{{output: validProposal}, {output: withUpdatedBrief(validProposal, secretBrief)}}
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	return h, provider, id
+}
+
+func TestATestWritesASecondVersionForEveryLanguage(t *testing.T) {
+	t.Parallel()
+	h, provider, id := newTestHarness(t, step{output: validContent})
+	provider.translationSteps = secondVersionSteps()
+	view, log, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !view.ABTest {
+		t.Fatal("the option was not kept")
+	}
+	second := view.Content.VariantB
+	if second == nil || second.SMS != "Merhaba B {{first_name}}" || second.Variant != "B" || second.Language != "tr" {
+		t.Fatalf("second version: %+v", second)
+	}
+	if len(second.Translations) != 1 || second.Translations[0].SMS != "Hello B {{first_name}}" || second.Translations[0].Variant != "B" {
+		t.Fatalf("second version's languages: %+v", second.Translations)
+	}
+	first := provider.translationCalls[1]
+	if !strings.Contains(string(first.OtherVariant), "Hi {{first_name}}") {
+		t.Fatalf("the writer did not see the other version: %s", first.OtherVariant)
+	}
+	if log.count(campaign.EventVariant) != 1 {
+		t.Fatalf("events: %+v", log.events)
+	}
+	if strings.Contains(log.text("sms"), "Merhaba B") {
+		t.Fatalf("the second version must not stream over the first: %s", log.text("sms"))
+	}
+	reloaded, err := h.service.Get(context.Background(), id)
+	if err != nil || reloaded.Content.VariantB == nil || !reloaded.ABTest {
+		t.Fatalf("not stored: %+v %v", reloaded.Content, err)
+	}
+}
+
+func TestASecondVersionSayingTheSameThingIsWrittenAgain(t *testing.T) {
+	t.Parallel()
+	h, provider, id := newTestHarness(t, step{output: validContent})
+	steps := secondVersionSteps()
+	provider.translationSteps = []step{steps[0], {output: validContent}, steps[1], steps[2]}
+	view, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if view.Content.VariantB.SMS == view.Content.SMS {
+		t.Fatalf("both versions say: %s", view.Content.SMS)
+	}
+	if len(provider.translationCalls) != 4 {
+		t.Fatalf("calls: %d", len(provider.translationCalls))
+	}
+}
+
+func TestAFailedSecondVersionKeepsNothing(t *testing.T) {
+	t.Parallel()
+	h, provider, id := newTestHarness(t, step{output: validContent})
+	provider.translationSteps = []step{secondVersionSteps()[0]}
+	for range 5 {
+		provider.translationSteps = append(provider.translationSteps, step{err: errors.New("provider down")})
+	}
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err == nil {
+		t.Fatal("a missing second version must fail the whole generation")
+	}
+	view, err := h.service.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Content != nil {
+		t.Fatalf("half of the test was kept: %+v", view.Content)
+	}
+}
+
+func TestEditingOneVersionLeavesTheOther(t *testing.T) {
+	t.Parallel()
+	h, provider, id := newTestHarness(t, step{output: validContent})
+	provider.translationSteps = secondVersionSteps()
+	generated, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	edited := generated.Content.VariantB.Translations[0].Content
+	edited.SMS = "Only in B {{first_name}}"
+	view, err := h.service.SaveContent(context.Background(), id, edited)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if view.Content.VariantB.Translations[0].SMS != edited.SMS {
+		t.Fatalf("not saved: %+v", view.Content.VariantB)
+	}
+	if view.Content.SMS != generated.Content.SMS || view.Content.Translations[0].SMS != generated.Content.Translations[0].SMS || view.Content.VariantB.SMS != generated.Content.VariantB.SMS {
+		t.Fatalf("another version changed: %+v", view.Content)
+	}
+	first := generated.Content.Content
+	first.SMS = "Only in A {{first_name}}"
+	view, err = h.service.SaveContent(context.Background(), id, first)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if view.Content.SMS != first.SMS || view.Content.VariantB == nil || view.Content.VariantB.Translations[0].SMS != edited.SMS {
+		t.Fatalf("saving A lost B: %+v", view.Content)
+	}
+}
+
+func TestATestCannotBeApprovedWithoutOrWithADifferentOffer(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, provider, id := newTestHarness(t, step{output: validContent})
+	provider.translationSteps = secondVersionSteps()
+	generated, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	edited := generated.Content.VariantB.Content
+	edited.SMS = "%20 indirim {{first_name}}"
+	if _, err := h.service.SaveContent(ctx, id, edited); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrLanguageDiscount) {
+		t.Fatalf("different offers: %v", err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE campaign_versions SET content = content - 'variant_b' WHERE campaign_id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrMissingVariant) {
+		t.Fatalf("no second version: %v", err)
+	}
+}
+
+func TestEachPersonStaysOnOneSideOfATest(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, provider, id := newTestHarness(t, step{output: validContent})
+	provider.translationSteps = secondVersionSteps()
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	before, err := h.service.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Approve(ctx, id); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if _, err := h.service.Dispatch(ctx, id); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(before.VariantAudience) == 0 {
+		t.Fatal("no sides counted")
+	}
+	picked := before.VariantAudience[0].Variant
+	for _, side := range before.VariantAudience {
+		var people, reachable int
+		if err := h.pool.QueryRow(ctx, `
+			SELECT count(DISTINCT d.user_id), count(*) FILTER (WHERE d.status <> 'SKIPPED' AND d.channel = 'sms')
+			FROM campaign_deliveries d JOIN users u ON u.id = d.user_id
+			WHERE d.campaign_id = $1 AND d.variant = $2 AND u.language = $3`, id, side.Variant, side.Language).Scan(&people, &reachable); err != nil {
+			t.Fatal(err)
+		}
+		if people != side.Total || reachable != side.SMS {
+			t.Fatalf("approval counted %+v, sending used %d people and %d SMS", side, people, reachable)
+		}
+	}
+	sides := map[string]bool{}
+	for _, side := range before.VariantAudience {
+		sides[side.Variant] = true
+	}
+	var mixed, groups, empty int
+	if err := h.pool.QueryRow(ctx, `
+		SELECT count(DISTINCT variant), count(*) FILTER (WHERE variant IS NULL)
+		FROM campaign_deliveries WHERE campaign_id = $1`, id).Scan(&groups, &empty); err != nil {
+		t.Fatal(err)
+	}
+	if groups != len(sides) || empty != 0 {
+		t.Fatalf("groups %d, without a side %d", groups, empty)
+	}
+	if err := h.pool.QueryRow(ctx, `
+		SELECT count(*) FROM (SELECT user_id, count(DISTINCT variant) AS sides FROM campaign_deliveries WHERE campaign_id = $1 GROUP BY user_id) people
+		WHERE sides > 1`, id).Scan(&mixed); err != nil {
+		t.Fatal(err)
+	}
+	if mixed != 0 {
+		t.Fatalf("%d people got both versions", mixed)
+	}
+
+	only, err := h.service.Deliveries(ctx, id, campaign.DeliveryFilter{Variant: picked, Limit: 1000})
+	if err != nil || len(only) == 0 {
+		t.Fatalf("filter: %d %v", len(only), err)
+	}
+	for _, delivery := range only {
+		if delivery.Variant != picked {
+			t.Fatalf("filter returned: %+v", delivery)
+		}
+	}
+	if _, err := h.service.Deliveries(ctx, id, campaign.DeliveryFilter{Variant: "C"}); !errors.Is(err, campaign.ErrUnknownFilter) {
+		t.Fatalf("unknown side: %v", err)
+	}
+
+	if _, err := h.pool.Exec(ctx, `UPDATE campaign_deliveries SET status = 'SENT' WHERE id = $1`, only[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	report, err := h.service.Report(ctx, id)
+	if err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	accepted, planned := 0, 0
+	for _, row := range report.Variants {
+		planned += row.Planned
+		if row.Variant == picked && row.Channel == only[0].Channel {
+			accepted += row.Accepted
+		}
+	}
+	if accepted != 1 || planned == 0 {
+		t.Fatalf("report: %+v", report.Variants)
+	}
+}
+
+func TestACampaignWithOneVersionHasNoSides(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, _, id := newContentHarness(t, step{output: validContent})
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if _, err := h.service.Approve(ctx, id); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if _, err := h.service.Dispatch(ctx, id); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	report, err := h.service.Report(ctx, id)
+	if err != nil || len(report.Variants) != 0 {
+		t.Fatalf("report: %+v %v", report.Variants, err)
+	}
+}
+
+func TestALongGenerationKeepsSayingItIsAlive(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, provider, id := newTestHarness(t, step{output: validContent})
+	provider.translationSteps = secondVersionSteps()
+	provider.beforeOutput = func(ai.StreamHandler) {
+		if _, err := h.pool.Exec(ctx, `UPDATE campaigns SET updated_at = now() - interval '10 minutes' WHERE id = $1`, id); err != nil {
+			t.Error(err)
+		}
+	}
+	var stale bool
+	provider.beforeTranslate = func(request ai.ContentRequest) {
+		if len(request.OtherVariant) == 0 {
+			return
+		}
+		if err := h.pool.QueryRow(ctx, `SELECT updated_at < now() - interval '5 minutes' FROM campaigns WHERE id = $1`, id).Scan(&stale); err != nil {
+			t.Error(err)
+		}
+	}
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if stale {
+		t.Fatal("a running generation looked abandoned")
+	}
+}
+
+func TestTheShareEnteredDecidesTheSplit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, provider, _ := newContentHarness(t, step{output: validContent})
+	share := 20
+	id, err := h.service.CreateWith(ctx, campaign.NewCampaign{Brief: secretBrief, ABTest: true, VariantAPercent: &share})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	provider.steps = []step{{output: validProposal}, {output: withUpdatedBrief(validProposal, secretBrief)}}
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{}); err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	provider.translationSteps = secondVersionSteps()
+	view, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if view.VariantAPercent != 20 {
+		t.Fatalf("share: %d", view.VariantAPercent)
+	}
+	// The audience here is small and the hash is the campaign's own, so a side can be
+	// empty at any one share. A larger share can only ever take in more people.
+	onA := func(share int) int {
+		t.Helper()
+		if _, err := h.pool.Exec(ctx, `UPDATE campaigns SET variant_a_percent = $2 WHERE id = $1`, id, share); err != nil {
+			t.Fatal(err)
+		}
+		current, err := h.service.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		people := 0
+		for _, side := range current.VariantAudience {
+			if side.Variant == "A" {
+				people += side.Total
+			}
+		}
+		return people
+	}
+	few, chosen, most := onA(1), onA(20), onA(99)
+	if few > chosen || chosen > most || few >= most {
+		t.Fatalf("people on A at 1%%, 20%% and 99%%: %d, %d, %d", few, chosen, most)
+	}
+	if onA(20) != chosen {
+		t.Fatal("the same share moved people")
+	}
+	if _, err := h.service.Approve(ctx, id); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if _, err := h.service.Dispatch(ctx, id); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	var sent int
+	if err := h.pool.QueryRow(ctx, `SELECT count(DISTINCT user_id) FROM campaign_deliveries WHERE campaign_id = $1 AND variant = 'A'`, id).Scan(&sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent != chosen {
+		t.Fatalf("approval counted %d, sending used %d", chosen, sent)
+	}
+}
+
+func TestAShareMustLeaveSomeoneOnBothSides(t *testing.T) {
+	t.Parallel()
+	h, _, _ := newContentHarness(t, step{output: validContent})
+	for _, share := range []int{0, 100, -5} {
+		if _, err := h.service.CreateWith(context.Background(), campaign.NewCampaign{Brief: secretBrief, ABTest: true, VariantAPercent: &share}); !errors.Is(err, campaign.ErrInvalidOptions) {
+			t.Fatalf("share %d: %v", share, err)
+		}
+	}
+	share := 30
+	if _, err := h.service.CreateWith(context.Background(), campaign.NewCampaign{Brief: secretBrief, VariantAPercent: &share}); !errors.Is(err, campaign.ErrInvalidOptions) {
+		t.Fatalf("a share without a test: %v", err)
 	}
 }

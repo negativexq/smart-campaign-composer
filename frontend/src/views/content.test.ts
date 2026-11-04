@@ -67,6 +67,71 @@ function open(channel: "sms" | "email" = "sms") {
 }
 
 describe("content page", () => {
+  describe("with two versions to compare", () => {
+    const test: Campaign = {
+      ...ready,
+      ab_test: true,
+      content: { ...stored, language: "tr", sms: "A {{first_name}}", variant_b: { ...stored, language: "tr", variant: "B", sms: "B {{first_name}}" } },
+    };
+
+    it("opens version A and moves to version B", async () => {
+      stub(test);
+      const wrapper = open();
+      await flushPromises();
+      expect((wrapper.find("textarea").element as HTMLTextAreaElement).value).toBe("A {{first_name}}");
+      await wrapper.find("[data-testid=variant-B]").trigger("click");
+      await flushPromises();
+      expect((wrapper.find("textarea").element as HTMLTextAreaElement).value).toBe("B {{first_name}}");
+    });
+
+    it("saves an edit as that version's", async () => {
+      const fetchMock = stub(test, undefined, () => ({ ok: true, status: 200, json: async () => test }));
+      const wrapper = open();
+      await flushPromises();
+      await wrapper.find("[data-testid=variant-B]").trigger("click");
+      await flushPromises();
+      await wrapper.find("textarea").setValue("Edited {{first_name}}");
+      await wrapper.find("[data-testid=variant-A]").trigger("click");
+      await flushPromises();
+      const saved = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "PUT");
+      expect(JSON.parse(String((saved?.[1] as RequestInit).body))).toMatchObject({ variant: "B", sms: "Edited {{first_name}}" });
+    });
+
+    it("counts each language's people inside the version", async () => {
+      stub({
+        ...test,
+        languages: [
+          { language: "tr", total: 10, sms: 9, email: 9, sms_name_length: 7, email_name_length: 7 },
+          { language: "en", total: 3, sms: 3, email: 3, sms_name_length: 7, email_name_length: 7 },
+        ],
+        content: { ...test.content!, translations: [{ ...stored, language: "en" }], variant_b: { ...test.content!.variant_b!, translations: [{ ...stored, language: "en", variant: "B" }] } },
+        variant_a_percent: 30,
+        variant_audience: [
+          { variant: "A", language: "tr", total: 3, sms: 2, email: 3 },
+          { variant: "A", language: "en", total: 1, sms: 1, email: 1 },
+          { variant: "B", language: "tr", total: 7, sms: 7, email: 6 },
+          { variant: "B", language: "en", total: 2, sms: 2, email: 2 },
+        ],
+      });
+      const wrapper = open();
+      await flushPromises();
+      expect(wrapper.find("[data-testid=variant-A]").text()).toContain("30% · 3 people");
+      expect(wrapper.find("[data-testid=language-tr]").text()).toContain("2 people");
+      await wrapper.find("[data-testid=variant-B]").trigger("click");
+      await flushPromises();
+      expect(wrapper.find("[data-testid=variant-B]").text()).toContain("70% · 9 people");
+      expect(wrapper.find("[data-testid=language-tr]").text()).toContain("7 people");
+    });
+
+    it("says when the second version is not written", async () => {
+      stub({ ...test, content: { ...stored, language: "tr" } });
+      const wrapper = open();
+      await flushPromises();
+      expect(wrapper.find("[data-testid=variant-tabs]").exists()).toBe(false);
+      expect(wrapper.text()).toContain("the second is not written yet");
+    });
+  });
+
   describe("with two languages", () => {
     const english = { ...stored, language: "en", sms: "Hello {{first_name}}" };
     const twoLanguages: Campaign = {

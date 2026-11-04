@@ -89,6 +89,11 @@ type rig struct {
 
 func newRig(t *testing.T, respond func(int, delivery.Message) (delivery.Result, error)) *rig {
 	t.Helper()
+	return newRigFor(t, campaign.NewCampaign{Brief: brief}, respond)
+}
+
+func newRigFor(t *testing.T, chosen campaign.NewCampaign, respond func(int, delivery.Message) (delivery.Result, error)) *rig {
+	t.Helper()
 	ctx := context.Background()
 	pool := testsupport.NewDatabase(t)
 	now := time.Now()
@@ -100,7 +105,7 @@ func newRig(t *testing.T, respond func(int, delivery.Message) (delivery.Result, 
 	mock.StreamDelay = 0
 	service := campaign.NewService(pool, mock, metrics, noop.NewTracerProvider().Tracer("test"), time.Now)
 
-	id, err := service.Create(ctx, brief)
+	id, err := service.CreateWith(ctx, chosen)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -873,5 +878,42 @@ func TestEachPersonReadsTheirOwnLanguage(t *testing.T) {
 	}
 	if !seen["tr"] || !seen["en"] {
 		t.Fatalf("languages sent: %v", seen)
+	}
+}
+
+func TestEachPersonReadsTheirSideOfATest(t *testing.T) {
+	t.Parallel()
+	r := newRigFor(t, campaign.NewCampaign{Brief: brief, ABTest: true}, always(accepted, nil))
+	r.drain(t)
+
+	sides := map[string]string{}
+	rows, err := r.pool.Query(context.Background(), `
+		SELECT CASE d.channel WHEN 'sms' THEN u.phone ELSE u.email END, d.variant
+		FROM campaign_deliveries d JOIN users u ON u.id = d.user_id WHERE d.campaign_id = $1`, r.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var to, side string
+		if err := rows.Scan(&to, &side); err != nil {
+			t.Fatal(err)
+		}
+		sides[to] = side
+	}
+
+	texts := map[string]map[string]bool{"A": {}, "B": {}}
+	for _, message := range r.sender.calls {
+		if message.Channel == "sms" {
+			texts[sides[message.To]][message.Body] = true
+		}
+	}
+	if len(texts["A"]) == 0 || len(texts["B"]) == 0 {
+		t.Fatalf("sides sent: %d, %d", len(texts["A"]), len(texts["B"]))
+	}
+	for body := range texts["A"] {
+		if texts["B"][body] {
+			t.Fatalf("both sides read: %s", body)
+		}
 	}
 }

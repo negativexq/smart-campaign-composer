@@ -234,6 +234,28 @@ describe("campaign options", () => {
     expect(sentBody(fetchMock)).toMatchObject({ tone: "formal", offer_percent: 30, not_messaged_within_days: 7 });
   });
 
+  it("sends the share entered for version A", async () => {
+    const fetchMock = composeStub();
+    const wrapper = mount(ComposeView);
+    await wrapper.find("#brief").setValue("Spring sale");
+    await wrapper.find("#campaign-ab-test").setValue(true);
+    await wrapper.find("#campaign-first-share").setValue(30);
+    expect(wrapper.find("[data-testid=ab-test-note]").text()).toContain("other 70%");
+    expect(wrapper.find("[data-testid=options-summary]").text()).toContain("30/70");
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+    expect(sentBody(fetchMock)).toMatchObject({ ab_test: true, variant_a_percent: 30 });
+  });
+
+  it("does not continue with a share that leaves a side empty", async () => {
+    composeStub();
+    const wrapper = mount(ComposeView);
+    await wrapper.find("#brief").setValue("Spring sale");
+    await wrapper.find("#campaign-ab-test").setValue(true);
+    await wrapper.find("#campaign-first-share").setValue(100);
+    expect(wrapper.text()).toContain("from 1 to 99");
+  });
+
   it("keeps options closed and asks for no discount unless one is added", async () => {
     const fetchMock = composeStub();
     const wrapper = mount(ComposeView);

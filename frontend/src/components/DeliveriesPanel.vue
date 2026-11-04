@@ -13,7 +13,7 @@ const PAGE = 100;
 const REASON_OPTIONS = ["no_consent", "consent_withdrawn", "server_error", "rejected", "timeout", "lease_expired"];
 const PROBLEM_OPTIONS = ["rate_limited", "server_error", "rejected", "timeout"];
 
-const props = defineProps<{ campaignId: string; channels: string[]; refreshKey?: number; progress?: Progress | null }>();
+const props = defineProps<{ campaignId: string; channels: string[]; abTest?: boolean; refreshKey?: number; progress?: Progress | null }>();
 
 const rows = ref<Delivery[] | null>(null);
 const query = ref<DeliveryQuery>(noFilter());
@@ -116,6 +116,14 @@ onMounted(() => load(PAGE));
           <option v-for="item in PROBLEM_OPTIONS" :key="item" :value="item">{{ OUTCOMES[item] }}</option>
         </select>
       </label>
+      <label v-if="abTest" class="filter">
+        <span class="small muted">Version</span>
+        <select v-model="query.variant" class="field select" data-testid="filter-variant" @change="changeFilter">
+          <option value="">Any</option>
+          <option value="A">Version A</option>
+          <option value="B">Version B</option>
+        </select>
+      </label>
       <label class="filter">
         <span class="small muted">Arrival</span>
         <select v-model="query.arrival" class="field select" data-testid="filter-arrival" @change="changeFilter">
@@ -154,6 +162,7 @@ onMounted(() => load(PAGE));
           <tr>
             <th scope="col">Recipient</th>
             <th scope="col">Channel</th>
+            <th v-if="abTest" scope="col">Version</th>
             <th scope="col">Status</th>
             <th scope="col" class="num">Attempts</th>
             <th scope="col" class="num">Response</th>
@@ -168,6 +177,7 @@ onMounted(() => load(PAGE));
             <tr data-testid="delivery-row">
               <th scope="row">{{ row.first_name || "No first name" }} <span class="muted small mono">#{{ row.user_id }}</span></th>
               <td>{{ row.channel === "sms" ? "SMS" : "Email" }}</td>
+              <td v-if="abTest" data-testid="delivery-variant">{{ row.variant || "—" }}</td>
               <td><StatusBadge :status="row.status as DeliveryStatus" /></td>
               <td class="num mono">{{ row.attempts }}</td>
               <td class="num mono">{{ row.response_code ?? "—" }}</td>
@@ -181,7 +191,7 @@ onMounted(() => load(PAGE));
               </td>
             </tr>
             <tr v-if="openId === row.id" class="history">
-              <td colspan="9">
+              <td :colspan="abTest ? 10 : 9">
                 <p v-if="!attempts[row.id]" class="muted small">Loading...</p>
                 <p v-else-if="!attempts[row.id].length" class="muted small">No calls to the provider yet.</p>
                 <ol v-else class="attempts" data-testid="attempt-list">

@@ -239,7 +239,7 @@ func (w *Worker) claim(ctx context.Context) ([]claim, error) {
 		FROM next, users u, campaign_versions v
 		WHERE d.id = next.id AND u.id = d.user_id AND v.id = d.campaign_version_id
 		RETURNING d.id::text, d.claim_token::text, d.campaign_id::text, d.channel, d.idempotency_key, d.user_id, d.attempts, d.trace_context,
-		          u.first_name, u.email, u.phone, u.language,
+		          u.first_name, u.email, u.phone, u.language, COALESCE(d.variant, ''),
 		          COALESCE((SELECT allowed FROM consents WHERE user_id = d.user_id AND channel = d.channel), false),
 		          v.content`, w.config.BatchSize, w.config.Lease.Seconds())
 	if err != nil {
@@ -250,19 +250,17 @@ func (w *Worker) claim(ctx context.Context) ([]claim, error) {
 			item     claim
 			encoded  []byte
 			language string
+			variant  string
 		)
 		if err := row.Scan(&item.id, &item.token, &item.campaignID, &item.channel, &item.key, &item.userID, &item.attempts, &item.traceContext,
-			&item.firstName, &item.email, &item.phone, &language, &item.consented, &encoded); err != nil {
+			&item.firstName, &item.email, &item.phone, &language, &variant, &item.consented, &encoded); err != nil {
 			return claim{}, err
 		}
-		var stored struct {
-			content.Content
-			Translations []content.Content `json:"translations"`
-		}
+		var stored content.Versions
 		if err := json.Unmarshal(encoded, &stored); err != nil {
 			return claim{}, fmt.Errorf("decode approved content: %w", err)
 		}
-		item.content = content.ForLanguage(stored.Content, stored.Translations, language)
+		item.content = stored.ForPerson(variant, language)
 		return item, nil
 	})
 	if err != nil {

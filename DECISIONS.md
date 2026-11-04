@@ -323,6 +323,12 @@ A delivery attempt is our call to the provider. An event is the provider telling
 - A report that never comes leaves the message waiting, and the screen says waiting. The report page stops asking after a minute with no change. The mock loses unsent reports when it restarts, so waiting can be the final answer.
 - A bounce is not retried and does not stop later campaigns from trying that person. A real product would suppress hard bounces; the mock has no hard and soft bounces to tell apart.
 
+## A test compares two wordings and names no winner
+
+A campaign can ask for two versions of its messages. The marketer enters who gets version A, 30 for a 30/70 split, and each person lands on one side from a hash of the campaign and the person, so a retry, a later scheduled run or a second channel never moves them. Only the wording differs: both versions must promise the same offer, which approval checks, because a test of two discounts would be a pricing decision nobody made. Both versions are written, checked and stored together, for every language, and a second version that says the same thing as the first is sent back to the model.
+
+The report shows each side's numbers and declares nothing. Delivered and bounced are simulated and random here and opens come only from the test inbox, so a winner would be a coin toss with a badge on it. Sending the winner to the rest and significance testing wait for a real outcome to measure. The cost is plain: each version per language is its own model call, so two languages take four.
+
 ## What was asked and not done is shown
 
 A model can pass over part of a request without breaking any rule, and the screen then looks as if the work was done. Asking the model to admit it is not enough, so there are two sources. The model reports in `not_applied`, and the backend compares the result with the request itself: a refinement that changed neither the rule nor the brief says so, and a number or city named in a request but missing from the result is listed. These are notes, not blockers, because only the person knows whether the outcome is acceptable. Writing or editing that channel again clears its note.

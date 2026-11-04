@@ -159,7 +159,7 @@ func (s *Service) Dispatch(ctx context.Context, id string) (view View, err error
 		return View{}, err
 	}
 
-	queued, skipped, err := insertDeliveries(ctx, tx, id, stored.Version, stored.Channels, stored.Proposal.Segment, stored.AudienceAsOf, traceParent(ctx))
+	queued, skipped, err := insertDeliveries(ctx, tx, id, stored.Version, stored.Channels, testShare(stored.ABTest, stored.VariantAPercent), stored.Proposal.Segment, stored.AudienceAsOf, traceParent(ctx))
 	if err != nil {
 		return View{}, err
 	}
@@ -182,25 +182,42 @@ func traceParent(ctx context.Context) string {
 	return carrier.Get("traceparent")
 }
 
-func insertDeliveries(ctx context.Context, tx pgx.Tx, id string, version int, channels []string, spec segment.Spec, asOf time.Time, parent string) (queued, skipped int, err error) {
+// variantOf is the side of a test someone lands on: always the same one, on every
+// channel and run, so what approval counts is what sending does. Each person holds a
+// fixed place from 0 to 99, and the share entered for version A is a cut through them.
+func variantOf(campaign, percent string) string {
+	return `CASE WHEN ('x' || substr(md5(` + campaign + `::uuid::text || ':' || u.id), 1, 8))::bit(32)::bigint % 100 < ` + percent + `::int THEN 'A' ELSE 'B' END`
+}
+
+// testShare is what insertDeliveries needs to split people: nothing without a test.
+func testShare(abTest bool, percent int) int {
+	if abTest {
+		return percent
+	}
+	return 0
+}
+
+func insertDeliveries(ctx context.Context, tx pgx.Tx, id string, version int, channels []string, variantAPercent int, spec segment.Spec, asOf time.Time, parent string) (queued, skipped int, err error) {
 	where, args := segment.Compile(spec, asOf)
 	campaignParam := fmt.Sprintf("$%d", len(args)+1)
 	versionParam := fmt.Sprintf("$%d", len(args)+2)
 	traceParam := fmt.Sprintf("$%d", len(args)+3)
 	channelsParam := fmt.Sprintf("$%d", len(args)+4)
-	args = append(args, id, version, parent, channels)
+	testParam := fmt.Sprintf("$%d", len(args)+5)
+	args = append(args, id, version, parent, channels, variantAPercent)
 
 	// The compiled conditions are the fixed fragments from segment.Compile, and
 	// all of their values stay parameters.
 	err = tx.QueryRow(ctx, `
 		WITH inserted AS (
-			INSERT INTO campaign_deliveries (campaign_id, campaign_version_id, user_id, channel, idempotency_key, status, last_error, trace_context)
+			INSERT INTO campaign_deliveries (campaign_id, campaign_version_id, user_id, channel, idempotency_key, status, last_error, trace_context, variant)
 			SELECT `+campaignParam+`::uuid,
 			       (SELECT v.id FROM campaign_versions v WHERE v.campaign_id = `+campaignParam+`::uuid AND v.version = `+versionParam+`::int),
 			       u.id, ch.channel, `+campaignParam+`::uuid::text || ':' || u.id || ':' || ch.channel,
 			       CASE WHEN consent.allowed THEN 'QUEUED' ELSE 'SKIPPED' END,
 			       CASE WHEN consent.allowed THEN NULL ELSE '`+reasonWithoutConsent+`' END,
-			       NULLIF(`+traceParam+`::text, '')
+			       NULLIF(`+traceParam+`::text, ''),
+			       CASE WHEN `+testParam+`::int > 0 THEN `+variantOf(campaignParam, testParam)+` END
 			FROM users u
 			CROSS JOIN unnest(`+channelsParam+`::text[]) AS ch (channel)
 			LEFT JOIN consents consent ON consent.user_id = u.id AND consent.channel = ch.channel
@@ -326,6 +343,8 @@ type DeliveryFilter struct {
 	// Arrival keeps those a provider reported "delivered" or "bounced", or "waiting"
 	// for accepted messages with no report yet.
 	Arrival string
+	// Variant keeps those who got one version of a test.
+	Variant string
 	Limit   int
 	Offset  int
 }
@@ -340,6 +359,7 @@ type Delivery struct {
 	FirstName         string     `json:"first_name"`
 	Channel           string     `json:"channel"`
 	Status            string     `json:"status"`
+	Variant           string     `json:"variant"`
 	Attempts          int        `json:"attempts"`
 	ResponseCode      *int       `json:"response_code"`
 	Reason            string     `json:"reason"`
@@ -369,6 +389,9 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 	if filter.Arrival != "" && !slices.Contains(arrivals, filter.Arrival) {
 		return nil, ErrUnknownFilter
 	}
+	if filter.Variant != "" && filter.Variant != "A" && filter.Variant != "B" {
+		return nil, ErrUnknownFilter
+	}
 	if _, err := s.load(ctx, id); err != nil {
 		return nil, err
 	}
@@ -379,7 +402,7 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 	limit = min(limit, maxDeliveryLimit)
 
 	rows, err := s.db.Query(ctx, `
-		SELECT d.id::text, d.user_id, u.first_name, d.channel, d.status, d.attempts, last.response_code,
+		SELECT d.id::text, d.user_id, u.first_name, d.channel, d.status, COALESCE(d.variant, ''), d.attempts, last.response_code,
 		       COALESCE(d.last_error, ''), COALESCE(d.provider_message_id, ''), d.next_attempt_at, d.sent_at, arrival.delivered_at, arrival.bounced_at, opened.occurred_at, d.updated_at
 		FROM campaign_deliveries d
 		JOIN users u ON u.id = d.user_id
@@ -393,6 +416,7 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 		  AND ($11 = '' OR ($11 = 'yes') = (opened.delivery_id IS NOT NULL))
 		  AND ($12 = '' OR ($12 = 'delivered' AND arrival.delivered_at IS NOT NULL) OR ($12 = 'bounced' AND arrival.bounced_at IS NOT NULL)
 		       OR ($12 = 'waiting' AND d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL))
+		  AND ($13 = '' OR d.variant = $13)
 		  AND (NOT $7 OR (SELECT count(*) FROM delivery_attempts a WHERE a.delivery_id = d.id) > 1)
 		  AND (($8 = '' AND $9::timestamptz IS NULL AND $10::timestamptz IS NULL) OR EXISTS (
 			SELECT 1 FROM delivery_attempts a
@@ -401,13 +425,13 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 		  ))
 		ORDER BY d.user_id, d.channel
 		LIMIT $4 OFFSET $5`, id, filter.Status, filter.Channel, limit, max(filter.Offset, 0),
-		filter.Reason, filter.Retried, filter.Outcome, filter.From, filter.To, filter.Opened, filter.Arrival)
+		filter.Reason, filter.Retried, filter.Outcome, filter.From, filter.To, filter.Opened, filter.Arrival, filter.Variant)
 	if err != nil {
 		return nil, fmt.Errorf("list deliveries: %w", err)
 	}
 	deliveries, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Delivery, error) {
 		var d Delivery
-		err := row.Scan(&d.ID, &d.UserID, &d.FirstName, &d.Channel, &d.Status, &d.Attempts, &d.ResponseCode,
+		err := row.Scan(&d.ID, &d.UserID, &d.FirstName, &d.Channel, &d.Status, &d.Variant, &d.Attempts, &d.ResponseCode,
 			&d.Reason, &d.ProviderMessageID, &d.NextAttemptAt, &d.SentAt, &d.DeliveredAt, &d.BouncedAt, &d.OpenedAt, &d.UpdatedAt)
 		return d, err
 	})
@@ -457,8 +481,8 @@ func (s *Service) DeliveryAttempts(ctx context.Context, id, deliveryID string) (
 	return attempts, nil
 }
 
-// checkVersions holds every language's messages to the rules, and to each other: a
-// person's language must not change what they are offered.
+// checkVersions holds every message to the rules, and to each other: neither a
+// person's language nor their side of a test may change what they are offered.
 func checkVersions(view *View) error {
 	languages := view.writingLanguages()
 	// A draft from before languages were kept covers only the audience's largest one.
@@ -468,17 +492,22 @@ func checkVersions(view *View) error {
 		}
 		return checkVersion(view, view.Content)
 	}
-	for _, language := range languages {
-		if view.Content.version(language) == nil {
-			return ErrMissingLanguage
-		}
+	if view.ABTest && view.Content.VariantB == nil {
+		return ErrMissingVariant
 	}
-	for _, version := range view.Content.all() {
-		if err := checkVersion(view, version); err != nil {
-			return err
+	for _, root := range view.Content.variants() {
+		for _, language := range languages {
+			if root.version(language) == nil {
+				return ErrMissingLanguage
+			}
 		}
-		if content.OffersDiffer(view.Content.Content, version.Content) {
-			return ErrLanguageDiscount
+		for _, version := range root.all() {
+			if err := checkVersion(view, version); err != nil {
+				return err
+			}
+			if content.OffersDiffer(view.Content.Content, version.Content) {
+				return ErrLanguageDiscount
+			}
 		}
 	}
 	return nil

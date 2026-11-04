@@ -70,6 +70,7 @@ onMounted(load);
 onBeforeUnmount(() => clearTimeout(timer));
 
 const lifecycle = computed(() => report.value?.lifecycle ?? []);
+const variants = computed(() => report.value?.variants ?? []);
 const arrivedUnknown = computed(() => lifecycle.value.reduce((sum, row) => sum + row.arrived_unknown, 0));
 const stepsOf = (row: ReportLifecycle): { key: string; count: number; selection: Partial<DeliveryQuery> }[] => [
   { key: "accepted", count: row.accepted, selection: { channel: row.channel, status: "SENT" } },
@@ -172,6 +173,52 @@ const isPicked = (selection: Partial<DeliveryQuery> | null) => Boolean(selection
         {{ arrivedUnknown.toLocaleString("en-US") }} {{ arrivedUnknown === 1 ? "message" : "messages" }} with no answer to our calls {{ arrivedUnknown === 1 ? "was" : "were" }} reported delivered later.
         <button class="link small" type="button" data-testid="show-arrived-unknown" @click="pick({ status: 'UNKNOWN', arrival: 'delivered' })">Show them</button>
       </p>
+    </article>
+
+    <article v-if="variants.length" class="card chart" data-testid="variants">
+      <header class="chart-head">
+        <div>
+          <h3 class="title">Versions compared</h3>
+          <p class="small muted">What happened to each version. No winner is named: arrival here is simulated and random, and nothing measures what people did after reading.</p>
+        </div>
+      </header>
+      <div class="lifecycle-wrap">
+        <table class="table lifecycle-table">
+          <thead>
+            <tr>
+              <th scope="col">Channel</th>
+              <th scope="col">Version</th>
+              <th scope="col" class="num">Planned</th>
+              <th scope="col" class="num">Accepted</th>
+              <th scope="col" class="num">Delivered</th>
+              <th scope="col" class="num">Bounced</th>
+              <th scope="col" class="num">Waiting</th>
+              <th scope="col" class="num">Opened</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in variants" :key="row.channel + row.variant" :data-testid="`variant-${row.channel}-${row.variant}`">
+              <th scope="row">{{ formatChannel(row.channel) }}</th>
+              <td>
+                <button
+                  class="step"
+                  :class="{ 'is-picked': isPicked({ channel: row.channel, variant: row.variant as DeliveryQuery['variant'] }) }"
+                  type="button"
+                  :aria-label="`Show ${formatChannel(row.channel)} deliveries of version ${row.variant}`"
+                  :data-testid="`pick-variant-${row.channel}-${row.variant}`"
+                  @click="pick({ channel: row.channel, variant: row.variant as DeliveryQuery['variant'] })"
+                >{{ row.variant }}</button>
+              </td>
+              <td class="num mono">{{ row.planned.toLocaleString("en-US") }}</td>
+              <td class="num mono">{{ row.accepted.toLocaleString("en-US") }}</td>
+              <td class="num mono">{{ row.delivered.toLocaleString("en-US") }}</td>
+              <td class="num mono">{{ row.bounced.toLocaleString("en-US") }}</td>
+              <td class="num mono">{{ row.waiting.toLocaleString("en-US") }}</td>
+              <td class="num mono">{{ row.opened.toLocaleString("en-US") }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </article>
 
     <article class="card chart" data-testid="channel-chart">

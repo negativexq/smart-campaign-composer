@@ -12,6 +12,8 @@ const brief = ref("");
 const channels = ref(["sms", "email"]);
 const tone = ref("");
 const hasOffer = ref(false);
+const abTest = ref(false);
+const firstShare = ref<number | "">(50);
 const offer = ref<number | "">("");
 const quietDays = ref("");
 const busy = ref(false);
@@ -22,10 +24,13 @@ const suggestions = [
   "Tell Ankara customers who bought in the last 60 days about free shipping this weekend.",
 ];
 
+const validShare = computed(() => Number.isInteger(firstShare.value) && Number(firstShare.value) >= 1 && Number(firstShare.value) <= 99);
+
 const unavailableReason = computed(() => {
   if (busy.value) return "Finding your audience...";
   if (!channels.value.length) return "Choose at least one channel.";
   if (hasOffer.value && (offer.value === "" || !Number.isInteger(offer.value) || offer.value < 1 || offer.value > 100)) return "Enter a discount from 1 to 100.";
+  if (abTest.value && !validShare.value) return "Enter a share for version A from 1 to 99.";
   return undefined;
 });
 
@@ -34,6 +39,7 @@ const optionsSummary = computed(() => {
   const chosen = [
     tone.value && tone.value[0].toUpperCase() + tone.value.slice(1),
     hasOffer.value && offer.value !== "" && `${offer.value}% discount`,
+    abTest.value && validShare.value && `Two versions, ${firstShare.value}/${100 - Number(firstShare.value)}`,
     quietDays.value && `Leaves out people messaged in the last ${quietDays.value} days`,
   ].filter(Boolean);
   return chosen.length ? chosen.join(" · ") : "Optional";
@@ -47,6 +53,7 @@ async function findAudience() {
       ...(tone.value ? { tone: tone.value } : {}),
       ...(hasOffer.value && offer.value !== "" ? { offer_percent: offer.value } : {}),
       ...(quietDays.value ? { not_messaged_within_days: Number(quietDays.value) } : {}),
+      ...(abTest.value ? { ab_test: true, variant_a_percent: Number(firstShare.value) } : {}),
     });
     requestAudience(id);
     navigate(`/campaigns/${id}/edit`);
@@ -99,6 +106,17 @@ async function findAudience() {
             <div v-if="hasOffer" class="option">
               <label class="small muted" for="campaign-offer">Discount (%)</label>
               <input id="campaign-offer" v-model.number="offer" class="field control" type="number" min="1" max="100" step="1" />
+            </div>
+            <label class="check small" for="campaign-ab-test">
+              <input id="campaign-ab-test" v-model="abTest" type="checkbox" data-testid="ab-test" />
+              Test two versions of the message
+            </label>
+            <div v-if="abTest" class="option">
+              <label class="small muted" for="campaign-first-share">People who get version A (%)</label>
+              <input id="campaign-first-share" v-model.number="firstShare" class="field control" type="number" min="1" max="99" step="1" data-testid="ab-share" />
+              <p class="muted small" data-testid="ab-test-note">
+                <template v-if="validShare">The other {{ 100 - Number(firstShare) }}% get version B. </template>The offer stays the same; only the wording differs.
+              </p>
             </div>
           </fieldset>
           <fieldset class="options" :disabled="busy" data-testid="audience-options">

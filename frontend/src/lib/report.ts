@@ -33,9 +33,10 @@ export type DeliveryQuery = {
   retried: boolean;
   opened: "" | "yes" | "no";
   arrival: "" | "delivered" | "bounced" | "waiting";
+  variant: "" | "A" | "B";
 };
 
-export const noFilter = (): DeliveryQuery => ({ status: "", channel: "", reason: "", outcome: "", from: "", to: "", retried: false, opened: "", arrival: "" });
+export const noFilter = (): DeliveryQuery => ({ status: "", channel: "", reason: "", outcome: "", from: "", to: "", retried: false, opened: "", arrival: "", variant: "" });
 
 export const ARRIVALS: Record<DeliveryQuery["arrival"] & string, string> = {
   "": "",
@@ -121,6 +122,7 @@ export function bucketQuery(bucket: TimelineBucket, bucketSeconds: number): Part
 export function describeQuery(query: DeliveryQuery): string {
   const parts: string[] = [];
   if (query.channel) parts.push(formatChannel(query.channel));
+  if (query.variant) parts.push(`Version ${query.variant}`);
   if (query.status) parts.push(deliveryStatusMeta[query.status as DeliveryStatus]?.label ?? query.status);
   if (query.reason) parts.push(`Ended as: ${REASONS[query.reason] ?? query.reason}`);
   if (query.outcome) parts.push(`Had a call: ${OUTCOMES[query.outcome] ?? query.outcome}`);

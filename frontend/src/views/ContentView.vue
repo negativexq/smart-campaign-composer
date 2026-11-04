@@ -23,7 +23,7 @@ import PhonePreview from "../components/PhonePreview.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { channelLabel, firstMessagePath } from "../lib/campaignSteps";
 import { isDraftStatus } from "../lib/campaignStatus";
-import { audienceLanguages, languageName, longestNameFor, missingLanguages, versionFor } from "../lib/languages";
+import { audienceLanguages, languageName, longestNameFor, missingLanguages, missingSecondVersion, variantCount, variantPeople, variantShare, versionFor } from "../lib/languages";
 import { EMAIL_TEMPLATES } from "../lib/emailTemplates";
 import { navigate } from "../lib/navigation";
 
@@ -45,15 +45,28 @@ const instruction = ref("");
 const messages = reactive<Messages>({ sms: "", email_subject: "", email_preheader: "", email_headline: "", email_body: "", email_cta_label: "", email_cta_url: "", email_template: "" });
 const selectedLanguage = ref("");
 const writingLanguage = ref("");
+const selectedVariant = ref("A");
+const writingVariant = ref("");
 let controller: AbortController | null = null;
 
-const stored = computed(() => (campaign.value ? versionFor(campaign.value, selectedLanguage.value) : undefined));
+const stored = computed(() => (campaign.value ? versionFor(campaign.value, selectedLanguage.value, selectedVariant.value) : undefined));
+const isTest = computed(() => Boolean(campaign.value?.content?.variant_b));
+const noSecondVersion = computed(() => (campaign.value ? missingSecondVersion(campaign.value) : false));
 const languageTabs = computed(() => {
   const current = campaign.value;
   if (!current?.content?.language) return [];
   return audienceLanguages(current, props.channel)
-    .filter((audience) => versionFor(current, audience.language))
-    .map((audience) => ({ language: audience.language, name: languageName(audience.language), people: props.channel === "sms" ? audience.sms : audience.email }));
+    .filter((audience) => versionFor(current, audience.language, selectedVariant.value))
+    .map((audience) => ({
+      language: audience.language,
+      name: languageName(audience.language),
+      // Under a version, the people of that version.
+      people: isTest.value
+        ? variantCount(current, selectedVariant.value, { language: audience.language, channel: props.channel })
+        : props.channel === "sms"
+          ? audience.sms
+          : audience.email,
+    }));
 });
 const missing = computed(() => (campaign.value ? missingLanguages(campaign.value, props.channel).map(languageName) : []));
 const shownRecipients = computed(() => {
@@ -86,9 +99,15 @@ const template = computed({
 });
 const buttonHasProblem = computed(() => Boolean(issueFor("email_cta_label") || issueFor("email_cta_url")));
 
+const writingText = computed(() => {
+  const language = writingLanguage.value && languageName(writingLanguage.value);
+  if (writingVariant.value) return language ? `Writing version ${writingVariant.value} in ${language}` : `Writing version ${writingVariant.value}`;
+  return language ? `Writing the ${language} version` : "Writing";
+});
+
 // The one state of this message. "Validated" only ever comes from the backend.
 const state = computed(() => {
-  if (generating.value) return { icon: LoaderCircle, text: writingLanguage.value ? `Writing the ${languageName(writingLanguage.value)} version` : "Writing", tone: "ai" };
+  if (generating.value) return { icon: LoaderCircle, text: writingText.value, tone: "ai" };
   if (fields.value.some((field) => issueFor(field))) return { icon: CircleAlert, text: "Needs changes", tone: "error" };
   if (dirty.value) return { icon: PencilLine, text: "Unsaved changes", tone: "muted" };
   if (stored.value) return { icon: CheckCircle2, text: "Validated", tone: "success" };
@@ -106,6 +125,7 @@ function fill(content: Partial<Messages> | undefined) {
 // Opens the language most of this channel's people read.
 function showFirstLanguage() {
   const current = campaign.value;
+  selectedVariant.value = "A";
   selectedLanguage.value = languageTabs.value[0]?.language ?? current?.content?.language ?? "";
   fill(stored.value);
 }
@@ -115,6 +135,15 @@ async function selectLanguage(language: string) {
   if (language === selectedLanguage.value || !(await save())) return;
   selectedLanguage.value = language;
   issues.value = [];
+  fill(stored.value);
+}
+
+// The other version opens in the same language, so the two read side by side in turn.
+async function selectVariant(variant: string) {
+  if (variant === selectedVariant.value || !(await save())) return;
+  selectedVariant.value = variant;
+  issues.value = [];
+  if (!stored.value) selectedLanguage.value = languageTabs.value[0]?.language ?? "";
   fill(stored.value);
 }
 
@@ -135,6 +164,7 @@ function editorState(field: MessageField) {
 async function generate(input: { instruction?: string } = {}) {
   controller = new AbortController();
   // The first version written is the one that shows as it comes.
+  selectedVariant.value = "A";
   selectedLanguage.value = campaign.value?.content?.language ?? "";
   const before = stored.value;
   // A template picked just now is not saved yet, and new text should not undo it.
@@ -144,6 +174,7 @@ async function generate(input: { instruction?: string } = {}) {
   saveError.value = "";
   stopped.value = false;
   writingLanguage.value = "";
+  writingVariant.value = "";
   issues.value = [];
   fill(before);
   clearOwnFields();
@@ -157,6 +188,10 @@ async function generate(input: { instruction?: string } = {}) {
         },
         onReset: clearOwnFields,
         onLanguage: (language) => (writingLanguage.value = language),
+        onVariant: (variant) => {
+          writingVariant.value = variant;
+          writingLanguage.value = "";
+        },
       },
       controller.signal,
     );
@@ -185,7 +220,11 @@ async function save() {
   saveError.value = "";
   issues.value = [];
   try {
-    campaign.value = await saveContent(props.campaignId, { ...messages, ...(selectedLanguage.value ? { language: selectedLanguage.value } : {}) });
+    campaign.value = await saveContent(props.campaignId, {
+      ...messages,
+      ...(selectedLanguage.value ? { language: selectedLanguage.value } : {}),
+      ...(selectedVariant.value === "B" ? { variant: "B" } : {}),
+    });
     fill(stored.value);
     return true;
   } catch (failure) {
@@ -272,6 +311,27 @@ onBeforeUnmount(() => controller?.abort());
       Part of this audience reads {{ missing.join(" and ") }}. Regenerate to write for them.
     </ValidationNotice>
 
+    <ValidationNotice v-if="!generating && noSecondVersion" tone="warning" title="This test has one version">
+      It compares two versions, and the second is not written yet. Regenerate to write it.
+    </ValidationNotice>
+
+    <div v-if="isTest" class="languages" role="tablist" aria-label="Message version" data-testid="variant-tabs">
+      <button
+        v-for="variant in ['A', 'B']"
+        :key="variant"
+        class="language"
+        :class="{ 'language--active': variant === selectedVariant }"
+        type="button"
+        role="tab"
+        :aria-selected="variant === selectedVariant"
+        :disabled="generating || saving"
+        :data-testid="`variant-${variant}`"
+        @click="selectVariant(variant)"
+      >
+        Version {{ variant }} <span class="muted small">{{ variantShare(campaign, variant) }}% · {{ variantPeople(campaign, variant, { channel }) }}</span>
+      </button>
+    </div>
+
     <div v-if="languageTabs.length > 1" class="languages" role="tablist" aria-label="Message language" data-testid="language-tabs">
       <button
         v-for="tab in languageTabs"
@@ -344,7 +404,7 @@ onBeforeUnmount(() => controller?.abort());
             </button>
           </div>
           <p v-if="stored" class="muted small" data-testid="regenerate-scope">
-            Replaces this {{ name }}, including your edits.<template v-if="otherChannel"> The {{ channelLabel(otherChannel) }} stays as it is.</template>
+            Replaces {{ isTest ? `both versions of this ${name}` : `this ${name}` }}, including your edits.<template v-if="otherChannel"> The {{ channelLabel(otherChannel) }} stays as it is.</template>
           </p>
         </form>
 
@@ -356,8 +416,8 @@ onBeforeUnmount(() => controller?.abort());
       </div>
 
       <aside v-if="recipients.length" class="previews" aria-label="Message preview">
-        <PhonePreview v-if="channel === 'sms'" :key="selectedLanguage" :message="messages.sms" :recipients="shownRecipients" :language="selectedLanguage" />
-        <EmailPreview v-else :key="selectedLanguage" :message="messages" :recipients="shownRecipients" :language="selectedLanguage" />
+        <PhonePreview v-if="channel === 'sms'" :key="selectedVariant + selectedLanguage" :message="messages.sms" :recipients="shownRecipients" :language="selectedLanguage" />
+        <EmailPreview v-else :key="selectedVariant + selectedLanguage" :message="messages" :recipients="shownRecipients" :language="selectedLanguage" />
       </aside>
     </div>
   </div>

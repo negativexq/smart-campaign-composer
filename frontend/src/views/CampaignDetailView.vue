@@ -72,8 +72,13 @@ function originOf(field: MessageField, version: MessageVersion) {
 const versions = computed(() => {
   const current = campaign.value;
   if (!current?.content) return [];
-  const known = languageVersions(current);
-  return known.length > 1 ? known : [{ language: current.content.language ?? "", name: "", version: current.content as MessageVersion }];
+  const test = Boolean(current.content.variant_b);
+  return (test ? ["A", "B"] : ["A"]).flatMap((variant) => {
+    const known = languageVersions(current, variant);
+    const root = (variant === "B" ? current.content?.variant_b : current.content) as MessageVersion;
+    const list = known.length > 1 ? known : [{ language: root.language ?? "", name: "", version: root }];
+    return list.map((entry) => ({ ...entry, variant, name: [test && `Version ${variant}`, entry.name].filter(Boolean).join(" · ") }));
+  });
 });
 
 async function refresh() {
@@ -256,7 +261,7 @@ onBeforeUnmount(() => stopWatching?.());
         {{ warning.message }}
       </ValidationNotice>
       <p v-if="campaignDiscount(campaign)" class="muted small" data-testid="content-discount">Discount in these messages: <strong>{{ campaignDiscount(campaign) }}</strong></p>
-      <template v-for="entry in versions" :key="entry.language">
+      <template v-for="entry in versions" :key="entry.variant + entry.language">
         <article v-if="campaign.channels.includes('sms')" class="message card" data-testid="content-sms">
           <div class="message-head"><h2>SMS<template v-if="entry.name"> · {{ entry.name }}</template></h2><OriginTag :origin="originOf('sms', entry.version)" /></div>
           <p class="message-text">{{ entry.version.sms }}</p>
@@ -269,7 +274,7 @@ onBeforeUnmount(() => stopWatching?.());
     </section>
 
     <section v-else-if="tab === 'deliveries'" id="panel-deliveries" class="panel" role="tabpanel" aria-labelledby="tab-deliveries">
-      <DeliveriesPanel :campaign-id="campaignId" :channels="campaign.channels" :refresh-key="refreshKey" :progress="progress" />
+      <DeliveriesPanel :campaign-id="campaignId" :channels="campaign.channels" :ab-test="campaign.ab_test" :refresh-key="refreshKey" :progress="progress" />
     </section>
 
     <section v-else id="panel-activity" class="panel" role="tabpanel" aria-labelledby="tab-activity">

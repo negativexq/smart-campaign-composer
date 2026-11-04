@@ -9,13 +9,14 @@ import {
   getCampaign,
   scheduleCampaign,
   type Campaign,
+  type MessageVersion,
 } from "../api/campaigns";
 import EmailPreview from "../components/EmailPreview.vue";
 import MetricCard from "../components/MetricCard.vue";
 import SchedulePicker from "../components/SchedulePicker.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
 import { channelLabel, lastChannel, lastMessagePath } from "../lib/campaignSteps";
-import { languageVersions, missingLanguages, languageName } from "../lib/languages";
+import { languageVersions, missingLanguages, emptySide, missingSecondVersion, languageName, variantCount, variantPeople, variantShare } from "../lib/languages";
 import { uniqueWarnings, warningTitle } from "../lib/message";
 import { navigate } from "../lib/navigation";
 import { buildSchedule, emptyScheduleForm, scheduleProblem } from "../lib/schedule";
@@ -39,6 +40,32 @@ const versions = computed(() => {
   const known = languageVersions(current);
   return known.length ? known : [{ language: "", name: "", sms: current.audience.sms, email: current.audience.email, version: current.content }];
 });
+// A test puts its second version on the page the same way.
+const secondVersions = computed(() => {
+  const current = campaign.value;
+  const second = current?.content?.variant_b;
+  if (!current || !second) return [];
+  const known = languageVersions(current, "B");
+  return known.length ? known : [{ language: "", name: "", sms: current.audience.sms, email: current.audience.email, version: second as MessageVersion }];
+});
+const groups = computed(() =>
+  secondVersions.value.length
+    ? [
+        { variant: "A", label: "Version A", entries: versions.value },
+        { variant: "B", label: "Version B", entries: secondVersions.value },
+      ]
+    : [{ variant: "", label: "", entries: versions.value }],
+);
+const noSecondVersion = computed(() => (campaign.value ? missingSecondVersion(campaign.value) : false));
+// What one version sends to one language's readers.
+function peopleIn(variant: string, entry: { language: string; sms: number; email: number }) {
+  const current = campaign.value;
+  if (!variant || !current) return { sms: entry.sms, email: entry.email };
+  return {
+    sms: variantCount(current, variant, { language: entry.language, channel: "sms" }),
+    email: variantCount(current, variant, { language: entry.language, channel: "email" }),
+  };
+}
 const missing = computed(() => (campaign.value ? missingLanguages(campaign.value).map(languageName) : []));
 type Check = { label: string; detail: string; ok: boolean };
 const checks = computed<Check[]>(() => {
@@ -73,6 +100,18 @@ const checks = computed<Check[]>(() => {
       ok: !missing.value.length,
     });
   }
+  if (current.ab_test && current.content) {
+    const empty = emptySide(current);
+    list.push({
+      label: "Test",
+      detail: noSecondVersion.value
+        ? "The second version is not written yet."
+        : empty
+          ? `Nobody in this audience lands on version ${empty}, so there is nothing to compare.`
+          : `Each person stays on one version: ${variantPeople(current, "A")} get A and ${variantPeople(current, "B")} get B, with the same offer. The report compares them and names no winner.`,
+      ok: !noSecondVersion.value && !empty,
+    });
+  }
   if (current.channels.includes("email") && current.content) {
     list.push({
       label: "Email link",
@@ -84,7 +123,7 @@ const checks = computed<Check[]>(() => {
   list.push({ label: "When", detail: problem.value || (form.value.mode === "now" ? "Sends as soon as you approve." : "Sends on the schedule below."), ok: !problem.value });
   return list;
 });
-const blocked = computed(() => Boolean(campaign.value?.blockers.length) || messageCount.value === 0 || missing.value.length > 0);
+const blocked = computed(() => Boolean(campaign.value?.blockers.length) || messageCount.value === 0 || missing.value.length > 0 || noSecondVersion.value);
 const actionLabel = computed(() => {
   if (submitting.value) return "Working...";
   if (form.value.mode !== "now") return "Approve and schedule";
@@ -155,19 +194,25 @@ onMounted(async () => {
 
     <section v-if="campaign.content" class="section">
       <h2>What they read</h2>
-      <div v-for="entry in versions" :key="entry.language" class="version" :data-testid="entry.language ? `review-${entry.language}` : undefined">
-        <h3 v-if="versions.length > 1" class="version-head">
-          {{ entry.name }}
-          <span class="muted small">{{ (entry.sms + entry.email).toLocaleString("en-US") }} messages</span>
+      <div v-for="group in groups" :key="group.variant" class="group" :data-testid="group.variant ? `review-variant-${group.variant}` : undefined">
+        <h3 v-if="group.label" class="group-head">
+          {{ group.label }}
+          <span class="muted small" :data-testid="`people-${group.variant}`">{{ variantShare(campaign, group.variant) }}% · {{ variantPeople(campaign, group.variant) }}</span>
         </h3>
-        <article v-if="campaign.channels.includes('sms') && (entry.sms || versions.length === 1)" class="message card" data-testid="review-sms">
-          <h3 class="muted small">SMS</h3>
-          <p class="text">{{ entry.version.sms }}</p>
-        </article>
-        <article v-if="campaign.channels.includes('email') && (entry.email || versions.length === 1)" class="message card" data-testid="review-email">
-          <h3 class="muted small">Email</h3>
-          <EmailPreview :message="entry.version" :recipients="[]" :language="entry.language" />
-        </article>
+        <div v-for="entry in group.entries" :key="entry.language" class="version" :data-testid="entry.language ? `review-${entry.language}` : undefined">
+          <h3 v-if="group.entries.length > 1" class="version-head">
+            {{ entry.name }}
+            <span class="muted small">{{ (peopleIn(group.variant, entry).sms + peopleIn(group.variant, entry).email).toLocaleString("en-US") }} messages</span>
+          </h3>
+          <article v-if="campaign.channels.includes('sms') && (entry.sms || group.entries.length === 1)" class="message card" data-testid="review-sms">
+            <h3 class="muted small">SMS</h3>
+            <p class="text">{{ entry.version.sms }}</p>
+          </article>
+          <article v-if="campaign.channels.includes('email') && (entry.email || group.entries.length === 1)" class="message card" data-testid="review-email">
+            <h3 class="muted small">Email</h3>
+            <EmailPreview :message="entry.version" :recipients="[]" :language="entry.language" />
+          </article>
+        </div>
       </div>
     </section>
 
@@ -257,9 +302,23 @@ onMounted(async () => {
   color: var(--color-warning);
 }
 
+.group,
 .version {
   display: grid;
   gap: var(--space-2);
+}
+
+.group {
+  gap: var(--space-3);
+}
+
+.group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .version-head {

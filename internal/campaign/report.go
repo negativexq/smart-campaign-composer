@@ -72,6 +72,19 @@ type ReportLifecycle struct {
 	ArrivedUnknown int `json:"arrived_unknown"`
 }
 
+// ReportVariant follows one channel's messages for one version of a test. It compares
+// what happened and names no winner, because nothing here measures what people did.
+type ReportVariant struct {
+	Variant   string `json:"variant"`
+	Channel   string `json:"channel"`
+	Planned   int    `json:"planned"`
+	Accepted  int    `json:"accepted"`
+	Delivered int    `json:"delivered"`
+	Bounced   int    `json:"bounced"`
+	Waiting   int    `json:"waiting"`
+	Opened    int    `json:"opened"`
+}
+
 // Report is what the delivery records say about a campaign, beyond its counts.
 type Report struct {
 	Reasons    []ReportReason     `json:"reasons"`
@@ -79,6 +92,7 @@ type Report struct {
 	Timeline   Timeline           `json:"timeline"`
 	Engagement []ReportEngagement `json:"engagement"`
 	Lifecycle  []ReportLifecycle  `json:"lifecycle"`
+	Variants   []ReportVariant    `json:"variants"`
 }
 
 var deliveryEvents = []string{"delivered", "bounced", "opened"}
@@ -132,7 +146,11 @@ func (s *Service) Report(ctx context.Context, id string) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	return Report{Reasons: reasons, Problems: problems, Timeline: timeline, Engagement: engagement, Lifecycle: lifecycle}, nil
+	variants, err := s.reportVariants(ctx, id)
+	if err != nil {
+		return Report{}, err
+	}
+	return Report{Reasons: reasons, Problems: problems, Timeline: timeline, Engagement: engagement, Lifecycle: lifecycle, Variants: variants}, nil
 }
 
 // arrivalLateral reads one delivery's arrival. An open proves arrival even if the
@@ -167,6 +185,30 @@ func (s *Service) reportLifecycle(ctx context.Context, id string) ([]ReportLifec
 		return nil, fmt.Errorf("read report lifecycle: %w", err)
 	}
 	return lifecycle, nil
+}
+
+func (s *Service) reportVariants(ctx context.Context, id string) ([]ReportVariant, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT d.variant, d.channel, count(*),
+		       count(*) FILTER (WHERE d.status = 'SENT'),
+		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NOT NULL),
+		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.bounced_at IS NOT NULL),
+		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL),
+		       count(*) FILTER (WHERE d.status = 'SENT' AND EXISTS (
+		           SELECT 1 FROM delivery_events e WHERE e.delivery_id = d.id AND e.event_type = 'opened'))
+		FROM campaign_deliveries d
+		`+arrivalLateral+`
+		WHERE d.campaign_id = $1 AND d.variant IS NOT NULL
+		GROUP BY d.variant, d.channel
+		ORDER BY d.channel DESC, d.variant`, id)
+	if err != nil {
+		return nil, fmt.Errorf("read report variants: %w", err)
+	}
+	variants, err := pgx.CollectRows(rows, pgx.RowToStructByPos[ReportVariant])
+	if err != nil {
+		return nil, fmt.Errorf("read report variants: %w", err)
+	}
+	return variants, nil
 }
 
 func (s *Service) reportEngagement(ctx context.Context, id string) ([]ReportEngagement, error) {

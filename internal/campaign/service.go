@@ -72,14 +72,16 @@ type ProposeInput struct {
 
 // View is a campaign as the marketer sees it.
 type View struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	NameSource   string   `json:"name_source"`
-	Brief        string   `json:"brief"`
-	Status       string   `json:"status"`
-	Channels     []string `json:"channels"`
-	Tone         string   `json:"tone"`
-	OfferPercent *int     `json:"offer_percent"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	NameSource      string   `json:"name_source"`
+	Brief           string   `json:"brief"`
+	Status          string   `json:"status"`
+	Channels        []string `json:"channels"`
+	Tone            string   `json:"tone"`
+	ABTest          bool     `json:"ab_test"`
+	VariantAPercent int      `json:"variant_a_percent"`
+	OfferPercent    *int     `json:"offer_percent"`
 	// NotMessagedWithinDays is what the form asked for; the audience rule that
 	// applies is in Proposal.
 	NotMessagedWithinDays *int                `json:"not_messaged_within_days"`
@@ -99,11 +101,13 @@ type View struct {
 	// ContentWarnings are differences from the brief for a person to judge.
 	ContentWarnings []content.Issue `json:"content_warnings"`
 	// Languages splits the audience by the language people read.
-	Languages  []segment.LanguageAudience `json:"languages"`
-	ApprovedAt time.Time                  `json:"approved_at,omitzero"`
-	Schedule   *ScheduleView              `json:"schedule,omitempty"`
-	CreatedAt  time.Time                  `json:"created_at"`
-	UpdatedAt  time.Time                  `json:"updated_at"`
+	Languages []segment.LanguageAudience `json:"languages"`
+	// VariantAudience is who lands on each side of a test.
+	VariantAudience []VariantAudience `json:"variant_audience,omitempty"`
+	ApprovedAt      time.Time         `json:"approved_at,omitzero"`
+	Schedule        *ScheduleView     `json:"schedule,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 // Service runs campaign operations.
@@ -132,6 +136,9 @@ type NewCampaign struct {
 	Tone                  string
 	OfferPercent          *int
 	NotMessagedWithinDays *int
+	ABTest                bool
+	// VariantAPercent is who gets version A, from 1 to 99. Half when left out.
+	VariantAPercent *int
 }
 
 func (n NewCampaign) validate() error {
@@ -142,6 +149,9 @@ func (n NewCampaign) validate() error {
 		return ErrInvalidOptions
 	}
 	if n.NotMessagedWithinDays != nil && (*n.NotMessagedWithinDays < 1 || *n.NotMessagedWithinDays > 365) {
+		return ErrInvalidOptions
+	}
+	if n.VariantAPercent != nil && (!n.ABTest || *n.VariantAPercent < 1 || *n.VariantAPercent > 99) {
 		return ErrInvalidOptions
 	}
 	return checkOffer(n.Brief, n.OfferPercent)
@@ -176,9 +186,9 @@ func (s *Service) CreateWith(ctx context.Context, campaign NewCampaign) (string,
 
 	var id string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO campaigns (brief, name, created_by, channels, tone, offer_percent, not_messaged_within_days)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id::text`,
-		brief, provisionalName(brief), personFrom(ctx), chosen, campaign.Tone, campaign.OfferPercent, campaign.NotMessagedWithinDays).Scan(&id); err != nil {
+		INSERT INTO campaigns (brief, name, created_by, channels, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::int, 50)) RETURNING id::text`,
+		brief, provisionalName(brief), personFrom(ctx), chosen, campaign.Tone, campaign.OfferPercent, campaign.NotMessagedWithinDays, campaign.ABTest, campaign.VariantAPercent).Scan(&id); err != nil {
 		return "", fmt.Errorf("insert campaign: %w", err)
 	}
 	if err := recordAudit(ctx, tx, id, eventCreated, map[string]any{"brief_characters": utf8.RuneCountInString(brief), "channels": chosen, "tone": campaign.Tone, "offer_percent": campaign.OfferPercent, "not_messaged_within_days": campaign.NotMessagedWithinDays}); err != nil {
@@ -688,14 +698,24 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 			view.Languages[i].Email = 0
 		}
 	}
+	if view.ABTest {
+		if view.VariantAudience, err = s.variantAudience(ctx, view); err != nil {
+			return View{}, err
+		}
+	}
 	if view.Content != nil {
 		view.ContentWarnings = append(view.ContentWarnings, content.CheckDiscounts(view.Content.Content, view.writingBrief())...)
 		view.ContentWarnings = append(view.ContentWarnings, view.Content.NotApplied...)
-		for _, translation := range view.Content.Translations {
-			issues := append(content.CheckDiscounts(translation.Content, view.writingBrief()), translation.NotApplied...)
-			for _, issue := range issues {
-				issue.Message = segment.LanguageName(translation.Language) + " version: " + issue.Message
-				view.ContentWarnings = append(view.ContentWarnings, issue)
+		for _, root := range view.Content.variants() {
+			for index, version := range root.all() {
+				if root == view.Content && index == 0 {
+					continue
+				}
+				issues := append(content.CheckDiscounts(version.Content, view.writingBrief()), version.NotApplied...)
+				for _, issue := range issues {
+					issue.Message = versionLabel(version, index > 0) + ": " + issue.Message
+					view.ContentWarnings = append(view.ContentWarnings, issue)
+				}
 			}
 		}
 	}
@@ -719,12 +739,12 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 		snapshot     []byte
 	)
 	err := s.db.QueryRow(ctx, `
-		SELECT c.name, c.name_source, c.brief, c.status, c.channels, c.tone, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
+		SELECT c.name, c.name_source, c.brief, c.status, c.channels, c.tone, c.ab_test, c.variant_a_percent, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.Channels, &view.Tone, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt, &snapshot)
+		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.Brief, &view.Status, &view.Channels, &view.Tone, &view.ABTest, &view.VariantAPercent, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt, &snapshot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}
@@ -776,6 +796,51 @@ type AudienceSnapshot struct {
 type blocker struct {
 	reason  string
 	message string
+}
+
+// VariantAudience counts the people on one side of a test who read one language, and
+// how many of them can be reached on each channel this campaign uses.
+type VariantAudience struct {
+	Variant  string `json:"variant"`
+	Language string `json:"language"`
+	Total    int    `json:"total"`
+	SMS      int    `json:"sms"`
+	Email    int    `json:"email"`
+}
+
+func (s *Service) variantAudience(ctx context.Context, view View) ([]VariantAudience, error) {
+	where, args := segment.Compile(view.Proposal.Segment, view.AudienceAsOf)
+	campaignParam, percentParam, channelsParam := fmt.Sprintf("$%d", len(args)+1), fmt.Sprintf("$%d", len(args)+2), fmt.Sprintf("$%d", len(args)+3)
+	rows, err := s.db.Query(ctx, `
+		SELECT `+variantOf(campaignParam, percentParam)+` AS variant, u.language, count(*),
+		       count(*) FILTER (WHERE sms.allowed AND 'sms' = ANY(`+channelsParam+`::text[])),
+		       count(*) FILTER (WHERE email.allowed AND 'email' = ANY(`+channelsParam+`::text[]))
+		FROM users u
+		LEFT JOIN consents sms ON sms.user_id = u.id AND sms.channel = 'sms'
+		LEFT JOIN consents email ON email.user_id = u.id AND email.channel = 'email'
+		WHERE `+where+`
+		GROUP BY variant, u.language
+		ORDER BY variant, count(*) DESC, u.language`, append(args, view.ID, view.VariantAPercent, view.Channels)...)
+	if err != nil {
+		return nil, fmt.Errorf("variant audience: %w", err)
+	}
+	counts, err := pgx.CollectRows(rows, pgx.RowToStructByPos[VariantAudience])
+	if err != nil {
+		return nil, fmt.Errorf("variant audience: %w", err)
+	}
+	return counts, nil
+}
+
+// versionLabel names a version in a note about it.
+func versionLabel(version *StoredContent, translated bool) string {
+	parts := []string{}
+	if version.Variant == content.VariantB {
+		parts = append(parts, "Version B")
+	}
+	if translated {
+		parts = append(parts, segment.LanguageName(version.Language)+" version")
+	}
+	return strings.Join(parts, ", ")
 }
 
 // writingLanguages is who needs a version: every language with someone reachable on

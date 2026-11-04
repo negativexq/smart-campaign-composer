@@ -41,6 +41,8 @@ const (
 	FieldEmailTemplate  = "email_template"
 
 	firstNameVariable = "first_name"
+	// VariantB marks the second version of a campaign that compares two.
+	VariantB = "B"
 )
 
 var (
@@ -62,6 +64,8 @@ type Content struct {
 	EmailTemplate string `json:"email_template"`
 	// Language says who this version is for. Older campaigns have none.
 	Language string `json:"language,omitempty"`
+	// Variant is "B" for the second version of a campaign that compares two.
+	Variant string `json:"variant,omitempty"`
 }
 
 // firstNameFallbacks is what stands in for a missing name in each language, because
@@ -94,6 +98,24 @@ func ForLanguage(main Content, translations []Content, language string) Content 
 		}
 	}
 	return main
+}
+
+// Versions is what an approved campaign stored, as much of it as sending needs.
+type Versions struct {
+	Content
+	Translations []Content `json:"translations"`
+	VariantB     *struct {
+		Content
+		Translations []Content `json:"translations"`
+	} `json:"variant_b"`
+}
+
+// ForPerson picks the version someone receives.
+func (v Versions) ForPerson(variant, language string) Content {
+	if variant == VariantB && v.VariantB != nil {
+		return ForLanguage(v.VariantB.Content, v.VariantB.Translations, language)
+	}
+	return ForLanguage(v.Content, v.Translations, language)
 }
 
 // OffersDiffer reports whether two versions promise different discounts.
@@ -167,7 +189,7 @@ func ParseGenerated(raw []byte, limits Limits, offerSource string) (Content, err
 		return Content{}, malformed("trailing content after the object")
 	}
 	generated := limits.Keep(decoded.Content)
-	generated.EmailTemplate, generated.Language = "", ""
+	generated.EmailTemplate, generated.Language, generated.Variant = "", "", ""
 	issues := append(CheckMessages(generated, limits), CheckDiscounts(generated, offerSource)...)
 	if len(issues) > 0 {
 		return Content{}, &ValidationError{Issues: issues}

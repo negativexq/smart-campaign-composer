@@ -214,6 +214,37 @@ describe("review", () => {
   });
 });
 
+describe("review of a test", () => {
+  const test: Campaign = { ...ready, ab_test: true, content: { ...ready.content!, variant_b: { ...ready.content!, variant: "B", sms: "Second {{first_name}}" } }, variant_a_percent: 30, variant_audience: [{ variant: "A", language: "tr", total: 50, sms: 40, email: 45 }, { variant: "B", language: "tr", total: 96, sms: 80, email: 90 }] };
+
+  it("shows both versions before anyone approves", async () => {
+    stub({ "GET /api/campaigns/c1": { body: test } });
+    const wrapper = mount(ReviewView, { props: { campaignId: "c1" } });
+    await flushPromises();
+    expect(wrapper.find("[data-testid=review-variant-A]").exists()).toBe(true);
+    expect(wrapper.find("[data-testid=review-variant-B]").text()).toContain("Second {{first_name}}");
+    expect(wrapper.find("[data-testid=people-B]").text()).toBe("70% · 96 people");
+    expect(wrapper.find("[data-testid=review-checks]").text()).toContain("names no winner");
+    expect(wrapper.find("[data-testid=approve]").attributes("disabled")).toBeUndefined();
+  });
+
+  it("warns without blocking when nobody lands on a side", async () => {
+    stub({ "GET /api/campaigns/c1": { body: { ...test, variant_a_percent: 1, variant_audience: [{ variant: "B", language: "tr", total: 96, sms: 80, email: 90 }] } } });
+    const wrapper = mount(ReviewView, { props: { campaignId: "c1" } });
+    await flushPromises();
+    expect(wrapper.find("[data-testid=review-checks]").text()).toContain("Nobody in this audience lands on version A");
+    expect(wrapper.find("[data-testid=approve]").attributes("disabled")).toBeUndefined();
+  });
+
+  it("blocks approval without the second version", async () => {
+    stub({ "GET /api/campaigns/c1": { body: { ...ready, ab_test: true } } });
+    const wrapper = mount(ReviewView, { props: { campaignId: "c1" } });
+    await flushPromises();
+    expect(wrapper.find("[data-testid=review-checks]").text()).toContain("second version is not written");
+    expect(wrapper.find("[data-testid=approve]").attributes("disabled")).toBeDefined();
+  });
+});
+
 describe("campaign page after approval", () => {
   function routes(campaign: Campaign, counts: Progress = { ...progress, total: 0, processed: 0, by_status: {}, by_channel: {}, responses: {} }): Record<string, Route> {
     return {
@@ -403,6 +434,19 @@ describe("campaign page after approval", () => {
 
     const asked = (fetchMock: ReturnType<typeof stub>, query: string) =>
       fetchMock.mock.calls.filter(([url]) => url === `/api/campaigns/c1/deliveries?limit=100&${query}`).length;
+
+    it("compares a test's versions and names no winner", async () => {
+      const { wrapper } = await openReport({
+        ...report,
+        variants: [
+          { variant: "A", channel: "sms", planned: 10, accepted: 9, delivered: 8, bounced: 1, waiting: 0, opened: 0 },
+          { variant: "B", channel: "sms", planned: 11, accepted: 11, delivered: 7, bounced: 2, waiting: 2, opened: 1 },
+        ],
+      });
+      const card = wrapper.find("[data-testid=variants]");
+      expect(card.text()).toContain("No winner is named");
+      expect(wrapper.find("[data-testid=variant-sms-B]").text()).toContain("11");
+    });
 
     it("selecting a problem lists the people it happened to, and selecting it again clears it", async () => {
       const { wrapper, fetchMock } = await openReport();

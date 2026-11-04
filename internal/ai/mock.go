@@ -297,7 +297,16 @@ func (m *Mock) StreamContent(ctx context.Context, request ContentRequest, handle
 	source := content.OfferSource(request.Brief, request.Instruction)
 	// The language tag holds a language's name, and older callers leave it empty.
 	turkish := request.Language == "Turkish" || (request.Language == "" && mockTurkish.MatchString(request.Brief))
-	draft := mockDraft(turkish, mockDiscount.FindString(source), string(request.Current))
+	avoid := string(request.Current)
+	if len(request.OtherVariant) > 0 {
+		avoid = string(request.OtherVariant)
+	}
+	second := strings.Contains(avoid, "seni unutmadık") || strings.Contains(avoid, "we saved your spot")
+	// Another language's version says what this one says, in the same wording.
+	if len(request.Reference) > 0 {
+		second = strings.Contains(string(request.Reference), "kaldığın yerden") || strings.Contains(string(request.Reference), "pick up where you left off")
+	}
+	draft := mockDraft(turkish, mockDiscount.FindString(source), second)
 	draft = mockTone(draft, request.Tone, turkish)
 	if link := mockLink.FindString(request.Brief + " " + request.Instruction); link != "" {
 		draft.EmailCTAURL, draft.EmailCTALabel = link, "See the offer"
@@ -323,7 +332,7 @@ func (m *Mock) StreamContent(ctx context.Context, request ContentRequest, handle
 	return Response{Output: output}, nil
 }
 
-func mockDraft(turkish bool, offer, current string) content.Content {
+func mockDraft(turkish bool, offer string, second bool) content.Content {
 	offerSMS, offerEmail := "", ""
 	if offer != "" {
 		if turkish {
@@ -332,11 +341,10 @@ func mockDraft(turkish bool, offer, current string) content.Content {
 			offerSMS, offerEmail = " Your "+offer+" discount is ready.", " Your "+offer+" discount is waiting for you."
 		}
 	}
-	first := mockWording(turkish, 0, offerSMS, offerEmail)
-	if current != "" && strings.Contains(current, mustJSON(first.SMS)) {
+	if second {
 		return mockWording(turkish, 1, offerSMS, offerEmail)
 	}
-	return first
+	return mockWording(turkish, 0, offerSMS, offerEmail)
 }
 
 // mockTone makes the chosen tone visible, as a real model's wording would.

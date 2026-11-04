@@ -120,12 +120,14 @@ func (a *api) create(w http.ResponseWriter, r *http.Request) {
 		Tone     string   `json:"tone"`
 		Offer    *int     `json:"offer_percent"`
 		Skip     *int     `json:"not_messaged_within_days"`
+		ABTest   bool     `json:"ab_test"`
+		Share    *int     `json:"variant_a_percent"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
 	id, err := a.campaigns.CreateWith(r.Context(), campaign.NewCampaign{
-		Brief: body.Brief, Channels: body.Channels, Tone: body.Tone, OfferPercent: body.Offer, NotMessagedWithinDays: body.Skip,
+		Brief: body.Brief, Channels: body.Channels, Tone: body.Tone, OfferPercent: body.Offer, NotMessagedWithinDays: body.Skip, ABTest: body.ABTest, VariantAPercent: body.Share,
 	})
 	if err != nil {
 		writeError(w, r, err)
@@ -222,6 +224,10 @@ func (a *api) generate(w http.ResponseWriter, r *http.Request) {
 	view, err := generation.Run(r.Context(), func(event campaign.GenerationEvent) {
 		if event.Type == campaign.EventReset {
 			stream.send("reset", struct{}{})
+			return
+		}
+		if event.Type == campaign.EventVariant {
+			stream.send("variant", map[string]string{"variant": event.Text})
 			return
 		}
 		if event.Type == campaign.EventLanguage {
@@ -430,7 +436,7 @@ func (a *api) deliveries(w http.ResponseWriter, r *http.Request) {
 	}
 	deliveries, err := a.campaigns.Deliveries(r.Context(), r.PathValue("id"), campaign.DeliveryFilter{
 		Status: query.Get("status"), Channel: query.Get("channel"), Reason: query.Get("reason"), Outcome: query.Get("outcome"),
-		From: from, To: to, Retried: query.Get("retried") == "true", Opened: query.Get("opened"), Arrival: query.Get("arrival"), Limit: limit, Offset: offset,
+		From: from, To: to, Retried: query.Get("retried") == "true", Opened: query.Get("opened"), Arrival: query.Get("arrival"), Variant: query.Get("variant"), Limit: limit, Offset: offset,
 	})
 	if err != nil {
 		writeError(w, r, err)
@@ -499,7 +505,9 @@ func describeError(r *http.Request, err error) (int, string) {
 	case errors.Is(err, campaign.ErrChannelDiscount):
 		status, message = http.StatusConflict, "The SMS and the email would promise different discounts. Change the discount in the brief, or make both messages say the same."
 	case errors.Is(err, campaign.ErrLanguageDiscount):
-		status, message = http.StatusConflict, "The languages would promise different discounts. Edit them to say the same, or write the messages again."
+		status, message = http.StatusConflict, "The languages or versions would promise different discounts. Edit them to say the same, or write the messages again."
+	case errors.Is(err, campaign.ErrMissingVariant):
+		status, message = http.StatusConflict, "This test needs its second version. Write the messages again to add it."
 	case errors.Is(err, campaign.ErrMissingLanguage):
 		status, message = http.StatusConflict, "Part of this audience reads a language with no messages yet. Write the messages again to add it."
 	case errors.Is(err, campaign.ErrOfferConflict):

@@ -50,8 +50,10 @@ type Response struct {
 type ContentRequest struct {
 	// Language is who this version is for. Reference is the version already written
 	// for another language, which this one has to say the same as.
-	Language        string
-	Reference       json.RawMessage
+	Language  string
+	Reference json.RawMessage
+	// OtherVariant is the other version of a test, which this one has to differ from.
+	OtherVariant    json.RawMessage
 	Tone            string
 	Brief           string
 	Conditions      []string

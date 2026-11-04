@@ -214,16 +214,18 @@ func (s *Scheduler) runOne(ctx context.Context) (bool, error) {
 		scheduledFor     time.Time
 		scheduledBy      *string
 		channels         []string
+		abTest           bool
+		variantAPercent  int
 	)
 	err = tx.QueryRow(ctx, `
-		SELECT c.id::text, c.status, v.version, s.spec, v.segment, s.next_run_at, s.created_by, c.channels
+		SELECT c.id::text, c.status, v.version, s.spec, v.segment, s.next_run_at, s.created_by, c.channels, c.ab_test, c.variant_a_percent
 		FROM campaign_schedules s
 		JOIN campaigns c ON c.id = s.campaign_id
 		JOIN campaign_versions v ON v.campaign_id = c.id AND v.approved_at IS NOT NULL
 		WHERE s.next_run_at <= $1 AND c.status IN ('SCHEDULED', 'DISPATCHING')
 		ORDER BY s.next_run_at
 		LIMIT 1
-		FOR UPDATE OF s, c SKIP LOCKED`, now).Scan(&id, &status, &version, &encodedSpec, &seg, &scheduledFor, &scheduledBy, &channels)
+		FOR UPDATE OF s, c SKIP LOCKED`, now).Scan(&id, &status, &version, &encodedSpec, &seg, &scheduledFor, &scheduledBy, &channels, &abTest, &variantAPercent)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -244,7 +246,7 @@ func (s *Scheduler) runOne(ctx context.Context) (bool, error) {
 	}
 	// The audience is counted fresh, and the unique key on deliveries keeps
 	// everyone already reached out of it.
-	queued, skipped, err := insertDeliveries(ctx, tx, id, version, channels, proposal.Segment, now, traceParent(ctx))
+	queued, skipped, err := insertDeliveries(ctx, tx, id, version, channels, testShare(abTest, variantAPercent), proposal.Segment, now, traceParent(ctx))
 	if err != nil {
 		return false, err
 	}
