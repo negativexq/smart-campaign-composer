@@ -84,11 +84,11 @@ func (s *Service) Approve(ctx context.Context, id string) (View, error) {
 	switch status {
 	case statusReady:
 	case statusApproved, statusScheduled, statusDispatching, "COMPLETED", "COMPLETED_WITH_FAILURES":
-		return s.Get(ctx, id)
+		return s.get(ctx, tx, id)
 	default:
 		return View{}, ErrNotReviewable
 	}
-	view, err := s.Get(ctx, id)
+	view, err := s.get(ctx, tx, id)
 	if err != nil {
 		return View{}, err
 	}
@@ -153,13 +153,13 @@ func (s *Service) Dispatch(ctx context.Context, id string) (view View, err error
 	switch status {
 	case statusApproved:
 	case statusDispatching, "COMPLETED", "COMPLETED_WITH_FAILURES":
-		return s.Get(ctx, id)
+		return s.get(ctx, tx, id)
 	case statusScheduled:
 		return View{}, ErrAlreadyScheduled
 	default:
 		return View{}, ErrNotApproved
 	}
-	stored, err := s.load(ctx, id)
+	stored, err := s.loadFrom(ctx, tx, id)
 	if err != nil {
 		return View{}, err
 	}

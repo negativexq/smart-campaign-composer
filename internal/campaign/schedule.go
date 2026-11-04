@@ -135,12 +135,12 @@ func (s *Service) CancelSchedule(ctx context.Context, id string) (View, error) {
 	return s.Get(ctx, id)
 }
 
-func (s *Service) loadSchedule(ctx context.Context, id string) (*ScheduleView, error) {
+func (s *Service) loadSchedule(ctx context.Context, q segment.Querier, id string) (*ScheduleView, error) {
 	var (
 		view    ScheduleView
 		encoded []byte
 	)
-	err := s.db.QueryRow(ctx, `SELECT spec, next_run_at, last_run_at, runs, created_by FROM campaign_schedules WHERE campaign_id = $1`, id).
+	err := q.QueryRow(ctx, `SELECT spec, next_run_at, last_run_at, runs, created_by FROM campaign_schedules WHERE campaign_id = $1`, id).
 		Scan(&encoded, &view.NextRunAt, &view.LastRunAt, &view.Runs, &view.CreatedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil //nolint:nilnil // no schedule is a normal state

@@ -701,11 +701,17 @@ func recordAudit(ctx context.Context, tx pgx.Tx, id, event string, details map[s
 // Get returns a campaign with its audience, counted at the time the proposal was
 // made so the size under review does not drift as time windows slide.
 func (s *Service) Get(ctx context.Context, id string) (View, error) {
-	view, err := s.load(ctx, id)
+	return s.get(ctx, s.db, id)
+}
+
+// get reads through q. A caller holding a transaction passes it, because waiting for
+// a second connection while holding one hangs once every connection is held that way.
+func (s *Service) get(ctx context.Context, q segment.Querier, id string) (View, error) {
+	view, err := s.loadFrom(ctx, q, id)
 	if err != nil {
 		return View{}, err
 	}
-	if view.Schedule, err = s.loadSchedule(ctx, id); err != nil {
+	if view.Schedule, err = s.loadSchedule(ctx, q, id); err != nil {
 		return View{}, err
 	}
 	if view.Proposal == nil {
@@ -714,7 +720,7 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 	view.Conditions = segment.Describe(view.Proposal.Segment)
 	if view.AudienceSnapshot != nil {
 		view.Audience = view.AudienceSnapshot.Counts
-	} else if view.Audience, err = segment.Count(ctx, s.db, view.Proposal.Segment, view.AudienceAsOf); err != nil {
+	} else if view.Audience, err = segment.Count(ctx, q, view.Proposal.Segment, view.AudienceAsOf); err != nil {
 		return View{}, err
 	}
 	// Reachable means on a channel this campaign uses.
@@ -727,7 +733,7 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 	for _, blocker := range blockersFor(*view.Proposal, view.Audience) {
 		view.Blockers = append(view.Blockers, blocker.message)
 	}
-	lengths, err := segment.LongestNames(ctx, s.db, view.Proposal.Segment, view.AudienceAsOf)
+	lengths, err := segment.LongestNames(ctx, q, view.Proposal.Segment, view.AudienceAsOf)
 	if err != nil {
 		return View{}, err
 	}
@@ -735,7 +741,7 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 		SMSName: lengths.SMS, EmailName: lengths.Email,
 		SkipSMS: !slices.Contains(view.Channels, "sms"), SkipEmail: !slices.Contains(view.Channels, "email"),
 	}
-	if view.Languages, err = segment.Languages(ctx, s.db, view.Proposal.Segment, view.AudienceAsOf); err != nil {
+	if view.Languages, err = segment.Languages(ctx, q, view.Proposal.Segment, view.AudienceAsOf); err != nil {
 		return View{}, err
 	}
 	for i := range view.Languages {
@@ -748,7 +754,7 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 		}
 	}
 	if view.ABTest {
-		if view.VariantAudience, err = s.variantAudience(ctx, view); err != nil {
+		if view.VariantAudience, err = s.variantAudience(ctx, q, view); err != nil {
 			return View{}, err
 		}
 	}
@@ -772,6 +778,10 @@ func (s *Service) Get(ctx context.Context, id string) (View, error) {
 }
 
 func (s *Service) load(ctx context.Context, id string) (View, error) {
+	return s.loadFrom(ctx, s.db, id)
+}
+
+func (s *Service) loadFrom(ctx context.Context, q segment.Querier, id string) (View, error) {
 	var parsed pgtype.UUID
 	if err := parsed.Scan(id); err != nil {
 		return View{}, ErrNotFound
@@ -787,7 +797,7 @@ func (s *Service) load(ctx context.Context, id string) (View, error) {
 		approvedAt   *time.Time
 		snapshot     []byte
 	)
-	err := s.db.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		SELECT c.name, c.name_source, c.brief, c.status, c.channels, c.tone, c.ab_test, c.variant_a_percent, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
 		FROM campaigns c
 		LEFT JOIN LATERAL (
@@ -857,10 +867,10 @@ type VariantAudience struct {
 	Email    int    `json:"email"`
 }
 
-func (s *Service) variantAudience(ctx context.Context, view View) ([]VariantAudience, error) {
+func (s *Service) variantAudience(ctx context.Context, q segment.Querier, view View) ([]VariantAudience, error) {
 	where, args := segment.Compile(view.Proposal.Segment, view.AudienceAsOf)
 	campaignParam, percentParam, channelsParam := fmt.Sprintf("$%d", len(args)+1), fmt.Sprintf("$%d", len(args)+2), fmt.Sprintf("$%d", len(args)+3)
-	rows, err := s.db.Query(ctx, `
+	rows, err := q.Query(ctx, `
 		SELECT `+variantOf(campaignParam, percentParam)+` AS variant, u.language, count(*),
 		       count(*) FILTER (WHERE sms.allowed AND 'sms' = ANY(`+channelsParam+`::text[])),
 		       count(*) FILTER (WHERE email.allowed AND 'email' = ANY(`+channelsParam+`::text[]))

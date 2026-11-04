@@ -366,3 +366,7 @@ Five attempts last under 20 seconds, so a provider answering 5xx for a minute wo
 ## Retrying depends on the provider's idempotency
 
 A call with no answer may have gone through, so a retry is only safe if the provider recognises the repeat. The mock does, by idempotency key. Real ones may not: Twilio documents sending an SMS as not idempotent, and Amazon SES warns that a retry can produce a second email. Connecting one of those means choosing per provider: where repeats are not recognised, a timeout or 5xx ends as `UNKNOWN` rather than being retried, trading a possibly missed message for no double one. That is not built, since only the mock exists today.
+
+## A transaction never asks the pool for a second connection
+
+Approving and dispatching once read the campaign through the pool while holding its row lock in a transaction. Concurrent requests for one campaign could then hold every connection between them: one owned the lock and waited for a free connection, the others waited for the lock. Nothing ended the wait. The pool holds at least four connections or one per CPU, so this appeared on a 4-CPU CI runner with five requests and not on an 8-CPU laptop. Reads inside a transaction now go through it, and they also see the state the lock protects. The campaign tests give the service a single connection, so this mistake hangs them on any machine.

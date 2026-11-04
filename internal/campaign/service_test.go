@@ -69,8 +69,11 @@ type harness struct {
 	service  *campaign.Service
 	provider *scriptedProvider
 	pool     *pgxpool.Pool
-	metrics  *telemetry.Metrics
-	spans    *tracetest.InMemoryExporter
+	// servicePool holds one connection, so code that asks the pool for a second one
+	// while its transaction is open hangs here on any machine, not only on a small one.
+	servicePool *pgxpool.Pool
+	metrics     *telemetry.Metrics
+	spans       *tracetest.InMemoryExporter
 }
 
 func newHarness(t *testing.T, steps ...step) *harness {
@@ -82,14 +85,21 @@ func newHarness(t *testing.T, steps ...step) *harness {
 	provider := &scriptedProvider{steps: steps}
 	metrics := telemetry.NewMetrics(prometheus.NewRegistry())
 	spans := tracetest.NewInMemoryExporter()
-	h := &harness{provider: provider, pool: pool, metrics: metrics, spans: spans}
+	config := pool.Config()
+	config.MaxConns = 1
+	servicePool, err := pgxpool.NewWithConfig(context.Background(), config)
+	if err != nil {
+		t.Fatalf("service pool: %v", err)
+	}
+	t.Cleanup(servicePool.Close)
+	h := &harness{provider: provider, pool: pool, servicePool: servicePool, metrics: metrics, spans: spans}
 	h.service = h.serviceWith(provider)
 	return h
 }
 
 func (h *harness) serviceWith(provider ai.Provider) *campaign.Service {
 	tracer := sdktrace.NewTracerProvider(sdktrace.WithSyncer(h.spans)).Tracer("test")
-	return campaign.NewService(h.pool, provider, h.metrics, tracer, func() time.Time { return referenceTime })
+	return campaign.NewService(h.servicePool, provider, h.metrics, tracer, func() time.Time { return referenceTime })
 }
 
 func (h *harness) create(t *testing.T) string {
