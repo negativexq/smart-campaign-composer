@@ -27,6 +27,7 @@ const (
 	eventDispatched      = "campaign.dispatched"
 	reasonWithoutConsent = "no_consent"
 
+	eventExported        = "deliveries.exported"
 	defaultDeliveryLimit = 200
 	maxDeliveryLimit     = 500
 )
@@ -373,6 +374,47 @@ type Delivery struct {
 }
 
 // Deliveries lists a campaign's deliveries by person.
+// ExportDeliveries hands over every delivery the filter keeps, not one page, and leaves
+// a record of who took them. It stops at the first error from write.
+func (s *Service) ExportDeliveries(ctx context.Context, id string, filter DeliveryFilter, write func(Delivery) error) error {
+	filter.Limit, filter.Offset = maxDeliveryLimit, 0
+	for {
+		page, err := s.Deliveries(ctx, id, filter)
+		if err != nil {
+			return err
+		}
+		if filter.Offset == 0 {
+			if err := s.recordExport(ctx, id); err != nil {
+				return err
+			}
+		}
+		for _, delivery := range page {
+			if err := write(delivery); err != nil {
+				return err
+			}
+		}
+		if len(page) < maxDeliveryLimit {
+			return nil
+		}
+		filter.Offset += maxDeliveryLimit
+	}
+}
+
+func (s *Service) recordExport(ctx context.Context, id string) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin export: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+	if err := recordAudit(ctx, tx, id, eventExported, map[string]any{}); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit export: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilter) ([]Delivery, error) {
 	if filter.Status != "" && !slices.Contains(deliveryStatuses, filter.Status) {
 		return nil, ErrUnknownFilter

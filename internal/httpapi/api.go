@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -58,6 +59,8 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 		"GET /api/campaigns/{id}/progress":                       a.progress,
 		"GET /api/campaigns/{id}/events":                         a.events,
 		"GET /api/campaigns/{id}/deliveries":                     a.deliveries,
+		"GET /api/campaigns/{id}/deliveries.csv":                 a.deliveriesCSV,
+		"POST /api/campaigns/{id}/duplicate":                     a.duplicate,
 		"GET /api/campaigns/{id}/report":                         a.report,
 		"GET /api/campaigns/{id}/deliveries/{delivery}/attempts": a.deliveryAttempts,
 		"GET /api/campaigns/{id}/activity":                       a.activity,
@@ -424,25 +427,41 @@ func (a *api) events(w http.ResponseWriter, r *http.Request) {
 	stream.send("end", struct{}{})
 }
 
-func (a *api) deliveries(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
+func deliveryFilter(query url.Values) (campaign.DeliveryFilter, error) {
 	limit, _ := strconv.Atoi(query.Get("limit"))   //nolint:errcheck // anything invalid means the default
 	offset, _ := strconv.Atoi(query.Get("offset")) //nolint:errcheck // anything invalid means the start
 	from, fromErr := parseTime(query.Get("from"))
 	to, toErr := parseTime(query.Get("to"))
 	if fromErr != nil || toErr != nil {
-		writeError(w, r, campaign.ErrUnknownFilter)
-		return
+		return campaign.DeliveryFilter{}, campaign.ErrUnknownFilter
 	}
-	deliveries, err := a.campaigns.Deliveries(r.Context(), r.PathValue("id"), campaign.DeliveryFilter{
+	return campaign.DeliveryFilter{
 		Status: query.Get("status"), Channel: query.Get("channel"), Reason: query.Get("reason"), Outcome: query.Get("outcome"),
 		From: from, To: to, Retried: query.Get("retried") == "true", Opened: query.Get("opened"), Arrival: query.Get("arrival"), Variant: query.Get("variant"), Limit: limit, Offset: offset,
-	})
+	}, nil
+}
+
+func (a *api) deliveries(w http.ResponseWriter, r *http.Request) {
+	filter, err := deliveryFilter(r.URL.Query())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	deliveries, err := a.campaigns.Deliveries(r.Context(), r.PathValue("id"), filter)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deliveries": deliveries})
+}
+
+func (a *api) duplicate(w http.ResponseWriter, r *http.Request) {
+	view, err := a.campaigns.Duplicate(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, view)
 }
 
 func (a *api) report(w http.ResponseWriter, r *http.Request) {

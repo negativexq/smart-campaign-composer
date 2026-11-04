@@ -5,6 +5,7 @@ import {
   cancelSchedule,
   dispatchCampaign,
   errorMessage,
+  duplicateCampaign,
   getActivity,
   getCampaign,
   getProgress,
@@ -30,6 +31,7 @@ import { firstMessagePath } from "../lib/campaignSteps";
 import { isDraftStatus } from "../lib/campaignStatus";
 import { formatDateTime } from "../lib/format";
 import { languageVersions } from "../lib/languages";
+import { navigate } from "../lib/navigation";
 import { sendingBlockers } from "../lib/systemHealth";
 import { campaignDiscount, reachHint, uniqueWarnings, warningTitle } from "../lib/message";
 
@@ -45,6 +47,7 @@ const tab = ref<Tab>("overview");
 const progress = ref<Progress | null>(null);
 const refreshKey = ref(0);
 const acting = ref(false);
+const duplicating = ref(false);
 const actionError = ref("");
 const disconnected = ref(false);
 let stopWatching: (() => void) | null = null;
@@ -128,6 +131,20 @@ async function act(action: () => Promise<unknown>) {
   }
 }
 
+// The copy opens where its next step is: its messages are checked, or its audience found.
+async function duplicate() {
+  duplicating.value = true;
+  actionError.value = "";
+  try {
+    const copy = await duplicateCampaign(props.campaignId);
+    navigate(`/campaigns/${copy.id}/${copy.content ? "review" : "edit"}`);
+  } catch (failure) {
+    actionError.value = errorMessage(failure);
+  } finally {
+    duplicating.value = false;
+  }
+}
+
 function onRenamed(updated: Campaign) {
   campaign.value = updated;
   getActivity(props.campaignId).then((entries) => (activity.value = entries), () => {});
@@ -170,6 +187,9 @@ onBeforeUnmount(() => stopWatching?.());
         <CampaignName as="h1" :campaign="campaign" hide-origin @renamed="onRenamed" />
         <CampaignStatusBadge :status="campaign.status" />
       </div>
+      <button class="button button--secondary" type="button" :disabled="duplicating" data-testid="duplicate" @click="duplicate">
+        {{ duplicating ? "Copying..." : "Duplicate" }}
+      </button>
       <a
         v-if="isDraft"
         class="button button--primary link-button"

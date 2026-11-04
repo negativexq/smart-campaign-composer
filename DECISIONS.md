@@ -329,6 +329,12 @@ A campaign can ask for two versions of its messages. The marketer enters who get
 
 The report shows each side's numbers and declares nothing. Delivered and bounced are simulated and random here and opens come only from the test inbox, so a winner would be a coin toss with a badge on it. Sending the winner to the rest and significance testing wait for a real outcome to measure. The cost is plain: each version per language is its own model call, so two languages take four.
 
+## A copy starts over and an export stays small
+
+Duplicating a campaign keeps its brief, options, audience rule and messages, and leaves approval, schedule and deliveries behind. The audience is counted again from today, and the copy passes the same approval checks, so a message that no longer fits the new audience's longest name is caught. No model call is spent on what is already written.
+
+The CSV holds every delivery the filters keep, not the page on screen, and it leaves contact details out because a report read elsewhere does not need them. Who exported is recorded in the campaign's activity. Accepted is written as accepted and simulated arrival is labelled simulated in the column names, so the file does not claim more than the screens do. Customer text that starts like a formula is neutralized before a spreadsheet can run it.
+
 ## What was asked and not done is shown
 
 A model can pass over part of a request without breaking any rule, and the screen then looks as if the work was done. Asking the model to admit it is not enough, so there are two sources. The model reports in `not_applied`, and the backend compares the result with the request itself: a refinement that changed neither the rule nor the brief says so, and a number or city named in a request but missing from the result is listed. These are notes, not blockers, because only the person knows whether the outcome is acceptable. Writing or editing that channel again clears its note.

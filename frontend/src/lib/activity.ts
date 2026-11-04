@@ -52,6 +52,10 @@ export function describeActivity(entry: ActivityEntry): { title: string; detail:
   switch (entry.type) {
     case "campaign.created":
       return { title: "Campaign created", detail: "" };
+    case "campaign.duplicated":
+      return { title: `Copied from "${details.source_name}"`, detail: "" };
+    case "deliveries.exported":
+      return { title: "Deliveries exported as CSV", detail: "" };
     case "campaign.renamed":
       return { title: `Renamed to "${details.name}"`, detail: "" };
     case "segment.proposed": {

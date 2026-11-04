@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from "vue";
 
-import { errorMessage, getDeliveries, getDeliveryAttempts, type Delivery, type DeliveryAttempt, type Progress } from "../api/campaigns";
+import { deliveriesCsvUrl, errorMessage, getDeliveries, getDeliveryAttempts, type Delivery, type DeliveryAttempt, type Progress } from "../api/campaigns";
 import { DELIVERY_STATUSES, deliveryStatusMeta, type DeliveryStatus } from "../lib/deliveryStatus";
 import { formatDateTime } from "../lib/format";
 import { ARRIVALS, OUTCOMES, REASONS, arrivalOf, describeQuery, isFiltered, matches, noFilter, type DeliveryQuery } from "../lib/report";
@@ -147,6 +147,12 @@ onMounted(() => load(PAGE));
       </label>
     </div>
 
+    <div v-if="rows?.length" class="export">
+      <a class="button button--secondary" :href="deliveriesCsvUrl(campaignId, query)" download data-testid="export-csv">
+        {{ isFiltered(query) ? "Export these as CSV" : "Export all as CSV" }}
+      </a>
+    </div>
+
     <p v-if="isFiltered(query)" class="active small" data-testid="active-filter">
       <span>Showing: {{ describeQuery(query) }}</span>
       <button class="link small" type="button" data-testid="clear-filters" @click="clearFilters">Clear filters</button>
@@ -238,6 +244,11 @@ onMounted(() => load(PAGE));
   align-self: flex-end;
   gap: var(--space-2);
   min-height: 40px;
+}
+
+.export {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .active {

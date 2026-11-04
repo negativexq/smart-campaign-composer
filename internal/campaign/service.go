@@ -48,6 +48,7 @@ const (
 	eventRenamed       = "campaign.renamed"
 	maxProvisionalName = 60
 	eventCreated       = "campaign.created"
+	eventDuplicated    = "campaign.duplicated"
 	eventSegmentChosen = "segment.proposed"
 )
 
@@ -198,6 +199,54 @@ func (s *Service) CreateWith(ctx context.Context, campaign NewCampaign) (string,
 		return "", fmt.Errorf("commit create: %w", err)
 	}
 	return id, nil
+}
+
+// Duplicate starts a new draft from a campaign: its brief, options, audience rule and
+// messages. Approval, schedule and deliveries stay behind, and the audience is counted
+// again from now, so the copy goes through every check the original did.
+func (s *Service) Duplicate(ctx context.Context, id string) (View, error) {
+	source, err := s.load(ctx, id)
+	if err != nil {
+		return View{}, err
+	}
+	status := statusDraft
+	if source.Content != nil {
+		status = statusReady
+	}
+	name := []rune(source.Name)
+	const suffix = " (copy)"
+	if len(name) > segment.MaxCampaignNameLength-len(suffix) {
+		name = name[:segment.MaxCampaignNameLength-len(suffix)]
+	}
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return View{}, fmt.Errorf("begin duplicate: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+
+	var copied string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO campaigns (brief, name, name_source, created_by, channels, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, status)
+		SELECT brief, $2, name_source, $3, channels, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, $4
+		FROM campaigns WHERE id = $1
+		RETURNING id::text`, id, string(name)+suffix, personFrom(ctx), status).Scan(&copied); err != nil {
+		return View{}, fmt.Errorf("copy campaign: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO campaign_versions (campaign_id, version, segment, content, llm_provider, llm_model, audience_as_of)
+		SELECT $2, 1, segment, content, llm_provider, llm_model, $3
+		FROM campaign_versions WHERE campaign_id = $1
+		ORDER BY version DESC LIMIT 1`, id, copied, s.now()); err != nil {
+		return View{}, fmt.Errorf("copy version: %w", err)
+	}
+	if err := recordAudit(ctx, tx, copied, eventDuplicated, map[string]any{"source": id, "source_name": source.Name}); err != nil {
+		return View{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return View{}, fmt.Errorf("commit duplicate: %w", err)
+	}
+	return s.Get(ctx, copied)
 }
 
 // Rename sets the name someone chose. Names label a campaign rather than being

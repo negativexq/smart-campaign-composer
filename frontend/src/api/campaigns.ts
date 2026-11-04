@@ -269,11 +269,27 @@ export function getProgress(id: string): Promise<Progress> {
   return request<Progress>(`/api/campaigns/${encodeURIComponent(id)}/progress`);
 }
 
-export async function getDeliveries(id: string, filter: Partial<DeliveryQuery> & { limit: number }): Promise<Delivery[]> {
-  const params = new URLSearchParams({ limit: String(filter.limit) });
+function deliveryParams(filter: Partial<DeliveryQuery>, start: Record<string, string> = {}) {
+  const params = new URLSearchParams(start);
   for (const [key, value] of Object.entries(filter)) {
-    if (value && key !== "limit") params.set(key, String(value));
+    if (value) params.set(key, String(value));
   }
+  return params;
+}
+
+/** The address of everything a filter keeps, as a file to download. */
+export function deliveriesCsvUrl(id: string, filter: Partial<DeliveryQuery>): string {
+  const params = deliveryParams(filter).toString();
+  return `/api/campaigns/${encodeURIComponent(id)}/deliveries.csv${params ? `?${params}` : ""}`;
+}
+
+export function duplicateCampaign(id: string): Promise<Campaign> {
+  return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/duplicate`, {});
+}
+
+export async function getDeliveries(id: string, filter: Partial<DeliveryQuery> & { limit: number }): Promise<Delivery[]> {
+  const { limit, ...rest } = filter;
+  const params = deliveryParams(rest, { limit: String(limit) });
   return (await request<{ deliveries: Delivery[] }>(`/api/campaigns/${encodeURIComponent(id)}/deliveries?${params}`)).deliveries;
 }
 

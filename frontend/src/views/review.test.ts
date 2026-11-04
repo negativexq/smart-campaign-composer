@@ -396,6 +396,28 @@ describe("campaign page after approval", () => {
     expect(wrapper.find("[data-testid=deliveries-empty]").exists()).toBe(true);
   });
 
+  it("exports what the filters keep and copies the campaign", async () => {
+    stub({
+      ...routes({ ...ready, status: "COMPLETED" }, progress),
+      "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [{ id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 1, response_code: 202, reason: "", next_attempt_at: "2026-11-03T12:00:00Z", sent_at: null, updated_at: "2026-11-03T12:00:00Z" }] } },
+      "GET /api/campaigns/c1/report": { body: { reasons: [], problems: [], timeline: { bucket_seconds: 0, buckets: [] }, engagement: [] } },
+      "GET /api/campaigns/c1/deliveries?limit=100&channel=sms": { body: { deliveries: [{ id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 1, response_code: 202, reason: "", next_attempt_at: "2026-11-03T12:00:00Z", sent_at: null, updated_at: "2026-11-03T12:00:00Z" }] } },
+      "POST /api/campaigns/c1/duplicate": { body: { ...ready, id: "c2" } },
+    });
+    const wrapper = mount(CampaignDetailView, { props: { campaignId: "c1" } });
+    await flushPromises();
+    await wrapper.find("#tab-deliveries").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=export-csv]").attributes("href")).toBe("/api/campaigns/c1/deliveries.csv");
+    await wrapper.find("[data-testid=filter-channel]").setValue("sms");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=export-csv]").attributes("href")).toBe("/api/campaigns/c1/deliveries.csv?channel=sms");
+
+    await wrapper.find("[data-testid=duplicate]").trigger("click");
+    await flushPromises();
+    expect(currentPath.value).toBe("/campaigns/c2/review");
+  });
+
   describe("report", () => {
     const row = { id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 2, response_code: 202, reason: "", provider_message_id: "m", next_attempt_at: "2026-11-03T12:00:00Z", sent_at: null, updated_at: "2026-11-03T12:00:00Z" };
     const report = {
