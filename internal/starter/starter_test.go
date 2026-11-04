@@ -105,6 +105,17 @@ func TestLoadShipsFinishedTemplatesWithTheirImages(t *testing.T) {
 	}
 }
 
+// A word fixed in a template would stay in one language in every campaign.
+func TestStarterWordsAreAllWrittenForTheCampaign(t *testing.T) {
+	for _, design := range starter.Designs() {
+		for _, block := range design.Blocks {
+			if block.Text != "" || block.Label != "" {
+				t.Errorf("%s: block %q has fixed words", design.Name, block.ID)
+			}
+		}
+	}
+}
+
 func TestLoadDoesNotBringBackWhatWasDeleted(t *testing.T) {
 	ctx := context.Background()
 	pool := testsupport.NewDatabase(t)

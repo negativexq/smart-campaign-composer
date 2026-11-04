@@ -411,4 +411,4 @@ Setup adds seven templates, their images and an example brand kit, so a new inst
 
 A row in `starter_content` records that this happened. Without it, every restart would either bring back a template someone deleted or need to tell "deleted" from "never added". A template with the same name or an existing brand kit is kept as it is, which also makes the load safe on an installation that already has its own.
 
-The Winter campaigns image has English words drawn into it, which the campaign's language does not change. The other six images have no words.
+The starter images have no words drawn into them and the templates have no fixed text, so every word in an email follows the campaign's language.

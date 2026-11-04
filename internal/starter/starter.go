@@ -115,11 +115,7 @@ func Designs() []content.Design {
 			Name: "Winter campaigns", Accent: "#B91C1C", Page: "#F5F7FA", Button: "rounded", Corners: 8, Font: "sans", Footer: footer,
 			Blocks: []content.Block{
 				logo(alignLeft, 30),
-				picture("winter-hero.png", "Winter sale, 30% off"),
-				{
-					ID: "returns", Type: blockText, Align: alignLeft,
-					Text: "Free returns on every order, {{first_name}}. Questions? We answer the same day.",
-				},
+				picture("winter-hero.png", "Snowy mountains and pine trees under falling snow"),
 				slot(content.SlotHeadline, blockHeading, alignLeft, ""),
 				slot(content.SlotBody, blockText, alignLeft, ""),
 				slot(content.SlotCTA, blockButton, alignLeft, ""),
