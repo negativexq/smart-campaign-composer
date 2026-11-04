@@ -233,6 +233,8 @@ Signing in takes a username or email and no password. The name goes into an unsi
 
 A schedule is a row in `campaign_schedules`, including its next run time, and the scheduler keeps nothing in memory. Restarting any service or the machine loses nothing, and the data stays while the Postgres volume does: `make down` keeps it, `docker compose down -v` deletes it. Seeding skips a database that already has users. A one-time send whose time passed during downtime goes out when the system returns, and missed intervals become one run.
 
+
+Closing a campaign takes the same row lock a scheduled run holds while it adds deliveries, then looks for open deliveries again. Without that, a run starting just as the last one drained could be closed over: nothing claims the deliveries of a campaign that stopped sending, so they would sit queued under a campaign marked completed. The look has to be its own statement after the lock, because one statement keeps the view it started with.
 ## A refinement rewrites the brief
 
 The brief is what a marketer reads first and what message writing starts from, so it has to say the same thing as the rule. A refinement returns the whole brief rewritten next to the new rule, and the two are saved together.

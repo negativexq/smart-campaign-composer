@@ -353,6 +353,69 @@ func TestARetryWaitsForItsTurn(t *testing.T) {
 	}
 }
 
+// A scheduled run holds the campaign row while it adds deliveries. A worker that saw
+// nothing open just before must not close the campaign over them, because nothing
+// claims the deliveries of a campaign that is no longer sending.
+func TestFinishingLeavesDeliveriesFromARunThatJustStarted(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	r := newRig(t, always(accepted, nil))
+	r.drain(t)
+	if _, err := r.pool.Exec(ctx, `UPDATE campaigns SET status = 'DISPATCHING' WHERE id = $1`, r.id); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := r.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer run.Rollback(ctx) //nolint:errcheck // no-op after commit
+	if _, err := run.Exec(ctx, `SELECT 1 FROM campaigns WHERE id = $1 FOR UPDATE`, r.id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Exec(ctx, `
+		UPDATE campaign_deliveries SET status = 'QUEUED', next_attempt_at = now()
+		WHERE id = (SELECT id FROM campaign_deliveries WHERE campaign_id = $1 AND status = 'SENT' ORDER BY id LIMIT 1)`, r.id); err != nil {
+		t.Fatal(err)
+	}
+
+	finished := make(chan error, 1)
+	go func() { finished <- r.worker.FinishCampaigns(ctx) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting bool
+		if err := r.pool.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			               WHERE datname = current_database() AND wait_event_type = 'Lock')`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("finishing never waited for the run")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if err := run.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+
+	if status := r.campaignStatus(t); status != "DISPATCHING" {
+		t.Fatalf("closed as %s with a delivery still queued", status)
+	}
+	r.drain(t)
+	if got := r.statuses(t); got["QUEUED"] != 0 {
+		t.Fatalf("the delivery was never sent: %v", got)
+	}
+	if status := r.campaignStatus(t); status != "COMPLETED" {
+		t.Fatalf("status after the run: %s", status)
+	}
+}
+
 func TestServerErrorsEndAsFailed(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, always(delivery.Result{StatusCode: http.StatusServiceUnavailable}, nil))

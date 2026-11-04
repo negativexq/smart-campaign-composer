@@ -786,6 +786,25 @@ func (w *Worker) finishCampaign(ctx context.Context, id string) error {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
+	// A scheduled run adds deliveries under this row's lock, and nothing claims the
+	// deliveries of a campaign that stopped sending. So the check comes after the lock,
+	// in its own statement: one statement would keep the view from before the wait.
+	var current string
+	if err := tx.QueryRow(ctx, `SELECT status FROM campaigns WHERE id = $1 FOR UPDATE`, id).Scan(&current); err != nil {
+		return fmt.Errorf("lock campaign: %w", err)
+	}
+	if current != "DISPATCHING" {
+		return nil // another worker got here first
+	}
+	var open bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM campaign_deliveries WHERE campaign_id = $1 AND status IN ('QUEUED', 'SENDING', 'RETRYING'))`, id).Scan(&open); err != nil {
+		return fmt.Errorf("check open deliveries: %w", err)
+	}
+	if open {
+		return nil
+	}
+
 	counts := map[string]int{}
 	rows, err := tx.Query(ctx, `SELECT status, count(*) FROM campaign_deliveries WHERE campaign_id = $1 GROUP BY status`, id)
 	if err != nil {
@@ -818,12 +837,8 @@ func (w *Worker) finishCampaign(ctx context.Context, id string) error {
 	case counts[statusFailed]+counts[statusUnknown] > 0:
 		status = "COMPLETED_WITH_FAILURES"
 	}
-	result, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1 AND status = 'DISPATCHING'`, id, status)
-	if err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1`, id, status); err != nil {
 		return fmt.Errorf("finish campaign: %w", err)
-	}
-	if result.RowsAffected() == 0 {
-		return nil // another worker got here first
 	}
 	details, err := json.Marshal(map[string]any{
 		"accepted": counts[statusSent], "failed": counts[statusFailed], "unknown": counts[statusUnknown], "skipped": counts[statusSkipped],
