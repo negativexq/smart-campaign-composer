@@ -10,9 +10,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/negativexq/smart-campaign-composer/internal/asset"
 	"github.com/negativexq/smart-campaign-composer/internal/db"
 	"github.com/negativexq/smart-campaign-composer/internal/seed"
 	"github.com/negativexq/smart-campaign-composer/internal/server"
+	"github.com/negativexq/smart-campaign-composer/internal/starter"
 	"github.com/negativexq/smart-campaign-composer/internal/telemetry"
 )
 
@@ -50,6 +52,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	slog.Info("setup complete", "seeded", applied)
+	started := false
+	if dir := os.Getenv("ASSET_DIR"); dir != "" {
+		if started, err = starter.Load(ctx, pool, asset.DiskStore{Dir: dir}); err != nil {
+			return err
+		}
+	}
+	slog.Info("setup complete", "seeded", applied, "starter_templates", started)
 	return nil
 }

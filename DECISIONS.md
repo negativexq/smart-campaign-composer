@@ -404,3 +404,11 @@ A campaign keeps its own copy of the design rather than pointing to a version ro
 An upload is judged by its content, not its name or declared type: only PNG and JPEG decode, and the size is checked from the header before any pixels are read. The image is encoded again from its pixels, which removes metadata and anything hidden in the file; a photo's orientation tag is applied first so it does not turn sideways. SVG is refused because it can carry scripts.
 
 Files are named by their hash and never change, and equal uploads share one. An image cannot be deleted while a template, the brand kit or a campaign's content mentions it, so a sent email's picture does not disappear. The file endpoint needs no session, since people reading an email have none. Emails carry a URL built from `PUBLIC_URL`, so outside a local demo that must be a public HTTPS address. Files sit on a Docker volume behind a small `Store` interface that object storage can replace.
+
+## Starter templates load once and never overwrite
+
+Setup adds seven templates, their images and an example brand kit, so a new installation can show the Template Studio without anyone uploading first. The images are embedded in the setup binary and go through the same processing and store as an upload.
+
+A row in `starter_content` records that this happened. Without it, every restart would either bring back a template someone deleted or need to tell "deleted" from "never added". A template with the same name or an existing brand kit is kept as it is, which also makes the load safe on an installation that already has its own.
+
+The Winter campaigns image has English words drawn into it, which the campaign's language does not change. The other six images have no words.

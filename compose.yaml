@@ -39,6 +39,11 @@ services:
     <<: *backend
     restart: "no"
     command: ["/app/setup"]
+    environment:
+      <<: *backend-env
+      ASSET_DIR: /data/assets
+    volumes:
+      - asset-data:/data/assets
     depends_on:
       postgres:
         condition: service_healthy
