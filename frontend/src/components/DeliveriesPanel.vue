@@ -10,6 +10,8 @@ import StatusBadge from "./StatusBadge.vue";
 import ValidationNotice from "./ValidationNotice.vue";
 
 const PAGE = 100;
+// The most the backend returns for one request.
+const LARGEST_REQUEST = 500;
 const REASON_OPTIONS = ["no_consent", "consent_withdrawn", "server_error", "rejected", "timeout", "lease_expired"];
 const PROBLEM_OPTIONS = ["rate_limited", "server_error", "rejected", "timeout"];
 
@@ -25,14 +27,49 @@ const openId = ref("");
 const attempts = ref<Record<string, DeliveryAttempt[]>>({});
 let latest = 0;
 
-async function load(limit: number) {
+// Asks in requests the backend will answer in full, so a short answer means the list ended.
+async function fetchFrom(offset: number, count: number) {
+  const found: Delivery[] = [];
+  while (found.length < count) {
+    const limit = Math.min(count - found.length, LARGEST_REQUEST);
+    const page = await getDeliveries(props.campaignId, { ...query.value, limit, offset: offset + found.length });
+    found.push(...page);
+    if (page.length < limit) break;
+  }
+  return found;
+}
+
+// A full answer does not say whether anything follows it, and offering more that
+// is not there would leave a button that does nothing.
+async function fetchPage(offset: number, count: number) {
+  const found = await fetchFrom(offset, count);
+  const more = found.length === count && (await fetchFrom(offset + count, 1)).length > 0;
+  return { found, more };
+}
+
+// Reads the rows on screen again, because the list changes while a campaign sends.
+async function load(count: number) {
   const request = ++latest;
   try {
-    const page = await getDeliveries(props.campaignId, { ...query.value, limit });
+    const { found, more } = await fetchPage(0, count);
     // A slower answer for earlier filters must not replace a newer one.
     if (request !== latest) return;
-    rows.value = page;
-    hasMore.value = page.length === limit;
+    rows.value = found;
+    hasMore.value = more;
+    error.value = "";
+  } catch (failure) {
+    if (request === latest) error.value = errorMessage(failure);
+  }
+}
+
+async function showMore() {
+  const request = ++latest;
+  const shown = rows.value ?? [];
+  try {
+    const { found, more } = await fetchPage(shown.length, PAGE);
+    if (request !== latest) return;
+    rows.value = [...shown, ...found];
+    hasMore.value = more;
     error.value = "";
   } catch (failure) {
     if (request === latest) error.value = errorMessage(failure);
@@ -242,7 +279,7 @@ onMounted(() => {
     </div>
 
     <div v-if="hasMore">
-      <button class="button button--secondary" type="button" data-testid="load-more" @click="load((rows?.length ?? 0) + PAGE)">Show more</button>
+      <button class="button button--secondary" type="button" data-testid="load-more" @click="showMore">Show more</button>
     </div>
   </section>
 </template>

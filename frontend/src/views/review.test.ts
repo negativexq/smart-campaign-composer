@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Campaign, Progress } from "../api/campaigns";
 import { currentPath, navigate } from "../lib/navigation";
 import { systemHealth } from "../lib/systemHealth";
+import DeliveriesPanel from "../components/DeliveriesPanel.vue";
 import CampaignDetailView from "./CampaignDetailView.vue";
 import ReviewView from "./ReviewView.vue";
 
@@ -472,6 +473,41 @@ describe("campaign page after approval", () => {
     await wrapper.find("[data-testid=filter-status]").setValue("FAILED");
     await flushPromises();
     expect(wrapper.find("[data-testid=deliveries-empty]").exists()).toBe(true);
+  });
+
+  it("reaches every delivery, however many there are", async () => {
+    const row = (index: number) => ({ id: `d${index}`, user_id: index, first_name: `Person ${index}`, channel: "sms", status: "SENT", attempts: 1, response_code: 202, reason: "", provider_message_id: "m", created_at: "2026-11-03T12:00:00Z", updated_at: "2026-11-03T12:00:00Z" });
+    const everyone = Array.from({ length: 700 }, (_, index) => row(index));
+    const requested: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const address = new URL(url, "http://test");
+      if (!address.pathname.endsWith("/deliveries")) return { ok: true, status: 200, json: async () => ({ cities: [] }) } as Response;
+      requested.push(address.search);
+      // As the backend does: never more than 500 for one request.
+      const limit = Math.min(Number(address.searchParams.get("limit")), 500);
+      const offset = Number(address.searchParams.get("offset") ?? 0);
+      return { ok: true, status: 200, json: async () => ({ deliveries: everyone.slice(offset, offset + limit) }) } as Response;
+    }));
+    const wrapper = mount(DeliveriesPanel, { props: { campaignId: "c1", channels: ["sms"] } });
+    await flushPromises();
+    expect(wrapper.findAll("[data-testid=delivery-row]")).toHaveLength(100);
+    for (let shown = 200; shown <= 700; shown += 100) {
+      expect(wrapper.find("[data-testid=load-more]").exists()).toBe(true);
+      await wrapper.find("[data-testid=load-more]").trigger("click");
+      await flushPromises();
+      expect(wrapper.findAll("[data-testid=delivery-row]")).toHaveLength(shown);
+    }
+    expect(requested).toContain("?limit=100&offset=600");
+    // The list ends exactly on a full page, and nothing offers more.
+    expect(wrapper.find("[data-testid=load-more]").exists()).toBe(false);
+
+    // What is on screen is read again in requests the backend answers in full.
+    requested.length = 0;
+    await wrapper.setProps({ refreshKey: 1 });
+    await flushPromises();
+    expect(requested).toEqual(expect.arrayContaining(["?limit=500", "?limit=200&offset=500"]));
+    expect(wrapper.findAll("[data-testid=delivery-row]")).toHaveLength(700);
+    expect(wrapper.find("[data-testid=load-more]").exists()).toBe(false);
   });
 
   it("filters deliveries by provider calls and by city", async () => {

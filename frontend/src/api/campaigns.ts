@@ -310,9 +310,9 @@ export function duplicateCampaign(id: string): Promise<Campaign> {
   return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/duplicate`, {});
 }
 
-export async function getDeliveries(id: string, filter: Partial<DeliveryQuery> & { limit: number }): Promise<Delivery[]> {
-  const { limit, ...rest } = filter;
-  const params = deliveryParams(rest, { limit: String(limit) });
+export async function getDeliveries(id: string, filter: Partial<DeliveryQuery> & { limit: number; offset?: number }): Promise<Delivery[]> {
+  const { limit, offset, ...rest } = filter;
+  const params = deliveryParams(rest, { limit: String(limit), ...(offset ? { offset: String(offset) } : {}) });
   return (await request<{ deliveries: Delivery[] }>(`/api/campaigns/${encodeURIComponent(id)}/deliveries?${params}`)).deliveries;
 }
 
