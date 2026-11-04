@@ -48,6 +48,16 @@ const icon = computed(() => ({ success: CheckCircle2, warning: TriangleAlert, er
   color: var(--color-error);
 }
 
+.notice--warning {
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 8%, var(--color-surface));
+}
+
+.notice--error {
+  border-color: color-mix(in srgb, var(--color-error) 30%, transparent);
+  background: color-mix(in srgb, var(--color-error) 6%, var(--color-surface));
+}
+
 .notice--info .icon {
   color: var(--color-text-muted);
 }

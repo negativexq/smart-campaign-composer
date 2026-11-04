@@ -1,4 +1,4 @@
-import type { Campaign, Condition } from "../api/campaigns";
+import type { BriefPart, Campaign, Condition } from "../api/campaigns";
 
 const sentences: Record<string, (value: string) => string> = {
   city: (value) => `Lives in ${value}`,
@@ -35,4 +35,27 @@ export function sourceOf(campaign: Campaign, condition: Condition): { quotes: st
   const assumed = campaign.proposal?.assumptions.some((assumption) => assumption.field === condition.field);
   if (!evidence || assumed) return { quotes, text: "" };
   return { quotes, text: "Added by AI, not in your brief" };
+}
+
+/** The rules an audience part of the brief became. */
+export function partRules(campaign: Campaign, part: BriefPart): string[] {
+  return campaign.conditions.filter((condition) => part.used_as?.includes(condition.field)).map(ruleText);
+}
+
+export type BriefTone = "used" | "missing" | "other" | "";
+
+/** The brief cut into runs by what became of them. A part that cannot be found stays plain. */
+export function briefSegments(brief: string, parts: BriefPart[]): { text: string; tone: BriefTone }[] {
+  const segments: { text: string; tone: BriefTone }[] = [];
+  let cursor = 0;
+  for (const part of parts) {
+    const start = brief.indexOf(part.text, cursor);
+    if (start < 0) continue;
+    if (start > cursor) segments.push({ text: brief.slice(cursor, start), tone: "" });
+    const tone: BriefTone = part.kind !== "audience" ? "other" : part.used_as?.length ? "used" : "missing";
+    segments.push({ text: part.text, tone });
+    cursor = start + part.text.length;
+  }
+  if (cursor < brief.length) segments.push({ text: brief.slice(cursor), tone: "" });
+  return segments;
 }

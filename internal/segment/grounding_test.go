@@ -386,3 +386,155 @@ func TestListedWordsCanBeSaidToBeAboutTheMessage(t *testing.T) {
 		}
 	}
 }
+
+func audiencePart(text string, usedAs ...string) segment.BriefPart {
+	return segment.BriefPart{Text: text, Kind: segment.PartAudience, UsedAs: usedAs}
+}
+
+func withParts(spec segment.Spec, parts ...segment.BriefPart) segment.Proposal {
+	proposal := proposalOf(spec)
+	proposal.BriefParts = parts
+	return proposal
+}
+
+func TestAnAudiencePartWithNoFilterBlocks(t *testing.T) {
+	t.Parallel()
+	proposal := withParts(segment.Spec{City: text("Adana")}, audiencePart("Newsletter subscribers"), segment.BriefPart{Text: "in", Kind: "other"}, audiencePart("Adana", "city"))
+	if problems := segment.CheckAgainstBrief(&proposal, "Newsletter subscribers in Adana", groundingCities, nil); problems != nil {
+		t.Fatal(problems)
+	}
+	if !slices.Equal(proposal.UnsupportedConditions, []string{"Newsletter subscribers"}) {
+		t.Fatalf("unsupported: %v", proposal.UnsupportedConditions)
+	}
+}
+
+func TestAnAudiencePartAlreadyReportedIsNotRepeated(t *testing.T) {
+	t.Parallel()
+	proposal := withParts(segment.Spec{City: text("Adana")}, audiencePart("bülten abonelerine"), audiencePart("Adana'daki", "city"))
+	proposal.UnsupportedConditions = []string{"Bülten abonelerine"}
+	if problems := segment.CheckAgainstBrief(&proposal, "Adana'daki bülten abonelerine", groundingCities, nil); problems != nil {
+		t.Fatal(problems)
+	}
+	if len(proposal.UnsupportedConditions) != 1 {
+		t.Fatalf("unsupported: %v", proposal.UnsupportedConditions)
+	}
+}
+
+func TestAPartNamingAFilterTheRuleDoesNotHaveBlocks(t *testing.T) {
+	t.Parallel()
+	proposal := withParts(segment.Spec{City: text("Adana")}, audiencePart("Adana", "city"), audiencePart("mobil uygulama kullanan", "purchased_within_days"))
+	if problems := segment.CheckAgainstBrief(&proposal, "Adana mobil uygulama kullanan", groundingCities, nil); problems != nil {
+		t.Fatal(problems)
+	}
+	if len(proposal.UnsupportedConditions) != 1 || len(proposal.BriefParts[1].UsedAs) != 0 {
+		t.Fatalf("proposal: %+v", proposal)
+	}
+}
+
+// Run 3 of a long brief marked joining words as conditions, which would stop a campaign for nothing.
+func TestJoiningWordsAreNotConditions(t *testing.T) {
+	t.Parallel()
+	brief := "Son 60 günde alışveriş yapmış ama Adana'daki olanları seçelim"
+	proposal := withParts(segment.Spec{City: text("Adana"), PurchasedWithinDays: number(60)},
+		audiencePart("Son 60 günde alışveriş yapmış", "purchased_within_days"), audiencePart("ama"), audiencePart("Adana'daki", "city"), audiencePart("olanları seçelim"))
+	if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems != nil {
+		t.Fatal(problems)
+	}
+	if len(proposal.UnsupportedConditions) != 0 || len(proposal.Unsure) != 0 || len(proposal.BriefParts) != 2 {
+		t.Fatalf("proposal: %+v", proposal)
+	}
+}
+
+func TestPartsAboutTheMessageDoNotBlock(t *testing.T) {
+	t.Parallel()
+	proposal := withParts(segment.Spec{City: text("Adana")}, audiencePart("Adana müşterilerine", "city"), segment.BriefPart{Text: "%20 indirim yaz", Kind: segment.PartMessage})
+	if problems := segment.CheckAgainstBrief(&proposal, "Adana müşterilerine %20 indirim yaz", groundingCities, nil); problems != nil {
+		t.Fatal(problems)
+	}
+	if len(proposal.UnsupportedConditions) != 0 || len(proposal.Unsure) != 0 {
+		t.Fatalf("proposal: %+v", proposal)
+	}
+}
+
+// A model cannot leave words out of the split to keep them away from a person.
+func TestWordsNoPartCoversAreFlagged(t *testing.T) {
+	t.Parallel()
+	proposal := withParts(segment.Spec{City: text("Adana")}, audiencePart("Adana", "city"), segment.BriefPart{Text: "made up words", Kind: segment.PartMessage})
+	if problems := segment.CheckAgainstBrief(&proposal, "Adana newsletter subscribers", groundingCities, nil); problems != nil {
+		t.Fatal(problems)
+	}
+	if len(proposal.BriefParts) != 1 || !slices.Contains(proposal.Unsure, "newsletter subscribers") {
+		t.Fatalf("proposal: %+v", proposal)
+	}
+}
+
+func TestAnUnsureReadingIsShownNotRefused(t *testing.T) {
+	t.Parallel()
+	for name, tt := range map[string]struct {
+		brief string
+		spec  segment.Spec
+		part  string
+		field string
+	}{
+		"negative verb":   {"30 gündür ödeme yapmayan Bursa müşterileri", segment.Spec{City: text("Bursa"), NotPurchasedWithinDays: number(30)}, "30 gündür ödeme yapmayan", "not_purchased_within_days"},
+		"positive word":   {"30 gün içinde ödeme yapan Bursa müşterileri", segment.Spec{City: text("Bursa"), PurchasedWithinDays: number(30)}, "30 gün içinde ödeme yapan", "purchased_within_days"},
+		"english synonym": {"Istanbul shoppers inactive for 30 days", segment.Spec{City: text("İstanbul"), NotPurchasedWithinDays: number(30)}, "inactive for 30 days", "not_purchased_within_days"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			proposal := withParts(tt.spec, audiencePart(tt.part, tt.field))
+			proposal.NotAudience = []string{"Bursa", "Istanbul"}
+			if problems := segment.CheckAgainstBrief(&proposal, tt.brief, groundingCities, nil); problems != nil {
+				t.Fatal(problems)
+			}
+			if !slices.Contains(proposal.Unsure, tt.part) {
+				t.Fatalf("unsure: %v", proposal.Unsure)
+			}
+		})
+	}
+}
+
+// A part has to say more than the time to stand for a behaviour the brief never names.
+func TestAPartOfOnlyTimeDoesNotExcuseABehaviour(t *testing.T) {
+	t.Parallel()
+	proposal := withParts(segment.Spec{City: text("Ankara"), PurchasedWithinDays: number(30)}, audiencePart("son 30 gün", "purchased_within_days"))
+	if problems := segment.CheckAgainstBrief(&proposal, "Ankara'dakilere son 30 gün duyuru", groundingCities, nil); problems == nil {
+		t.Fatal("not refused")
+	}
+}
+
+func TestAClearReadingNeedsNoWarning(t *testing.T) {
+	t.Parallel()
+	proposal := withParts(segment.Spec{City: text("Ankara"), PurchasedWithinDays: number(30)}, audiencePart("Ankara", "city"), audiencePart("son 30 günde alışveriş yapan", "purchased_within_days"))
+	if problems := segment.CheckAgainstBrief(&proposal, "Ankara son 30 günde alışveriş yapan", groundingCities, nil); problems != nil {
+		t.Fatal(problems)
+	}
+	if len(proposal.Unsure) != 0 {
+		t.Fatalf("unsure: %v", proposal.Unsure)
+	}
+}
+
+// A benchmark run blocked "İngilizce konuşan Ankara kullanıcıları", where one part gave two filters.
+func TestOnePartCanGiveSeveralFilters(t *testing.T) {
+	t.Parallel()
+	brief := "İngilizce konuşan Ankara kullanıcıları"
+	spec := segment.Spec{City: text("Ankara"), Language: text("en")}
+	for name, proposal := range map[string]segment.Proposal{
+		"named": withParts(spec, audiencePart(brief, "city", "language")),
+		"quoted": func() segment.Proposal {
+			proposal := withParts(spec, audiencePart(brief))
+			proposal.Evidence = []segment.Evidence{{Field: "language", Quote: "İngilizce konuşan"}, {Field: "city", Quote: "Ankara"}}
+			return proposal
+		}(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems != nil {
+				t.Fatal(problems)
+			}
+			if len(proposal.UnsupportedConditions) != 0 || len(proposal.BriefParts[0].UsedAs) != 2 {
+				t.Fatalf("proposal: %+v", proposal)
+			}
+		})
+	}
+}

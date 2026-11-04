@@ -196,7 +196,7 @@ func runRule(ctx context.Context, service *campaign.Service, c Case) (string, an
 		return outcomeError, err.Error()
 	}
 	proposal := view.Proposal
-	detail := map[string]any{"rule": proposal.Segment, "unsupported": proposal.UnsupportedConditions, "unmatched": proposal.Unmatched, "not_applied": proposal.NotApplied, "not_audience": proposal.NotAudience, "brief": view.Brief}
+	detail := map[string]any{"rule": proposal.Segment, "unsupported": proposal.UnsupportedConditions, "unmatched": proposal.Unmatched, "unsure": proposal.Unsure, "not_applied": proposal.NotApplied, "not_audience": proposal.NotAudience, "brief": view.Brief}
 	blocked := len(proposal.UnsupportedConditions) > 0 || len(proposal.Unmatched) > 0 || proposal.Segment.IsEmpty()
 	matches := accepted(c, proposal.Segment)
 	// A blocked result is already in front of a person, so it needs no note as well.
@@ -211,6 +211,8 @@ func runRule(ctx context.Context, service *campaign.Service, c Case) (string, an
 	case c.Expect != ExpectBlock && matches:
 		return outcomeOK, detail
 	case len(proposal.NotApplied) > 0 && c.Kind == "refine":
+		return outcomeVisibleMiss, detail
+	case len(proposal.Unsure) > 0:
 		return outcomeVisibleMiss, detail
 	}
 	return outcomeSilentWrong, detail

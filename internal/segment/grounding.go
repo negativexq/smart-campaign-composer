@@ -45,8 +45,9 @@ var (
 func CheckAgainstBrief(proposal *Proposal, brief string, cities []string, chosenQuietDays *int) *ValidationError {
 	problems := &ValidationError{}
 	reading := readBrief(brief)
-	proposal.Unmatched = nil
+	proposal.Unmatched, proposal.Unsure = nil, nil
 	proposal.UnsupportedConditions = slices.DeleteFunc(proposal.UnsupportedConditions, matching.OnlyPeople)
+	checkParts(proposal, brief)
 	checkCity(proposal, problems, brief, cities)
 	checkWindows(proposal, problems, reading, chosenQuietDays)
 	checkBehavior(proposal, problems, reading)
@@ -282,17 +283,26 @@ func checkBehavior(proposal *Proposal, problems *ValidationError, reading briefR
 		switch {
 		case reading.notBought:
 			problems.add("behavior_flipped", "purchased_within_days is set but the brief asks for people who did not buy")
-		case !reading.unsure:
+		case reading.unsure || partSaysMoreThanTime(proposal, "purchased_within_days"):
+			noteUnsure(proposal, "purchased_within_days")
+		default:
 			problems.add("behavior_not_in_brief", "purchased_within_days is set but the brief does not mention a purchase")
 		}
 	}
 	if (spec.NotPurchasedWithinDays != nil || spec.noPurchaseSinceCart()) && !reading.notBought {
+		field := "not_purchased_within_days"
+		if spec.NotPurchasedWithinDays == nil {
+			field = "no_purchase_since_cart"
+		}
 		switch {
 		case reading.unsure:
+			noteUnsure(proposal, field)
 		case reading.boughtWord:
 			problems.add("behavior_flipped", "a no purchase filter is set but the brief asks for people who bought")
-		case len(reading.durations) == 0:
+		case len(reading.durations) == 0 && !partSaysMoreThanTime(proposal, field):
 			problems.add("behavior_not_in_brief", "a no purchase filter is set but the brief does not say so")
+		default:
+			noteUnsure(proposal, field)
 		}
 	}
 }
@@ -335,4 +345,94 @@ func checkLeftOut(proposal *Proposal, reading briefReading) {
 	if len(reading.bound[subjectMessage]) > 0 && spec.NotMessagedWithinDays == nil {
 		leftOut("recent messages")
 	}
+}
+
+// checkParts holds the model's split of the brief to the brief and the rule. An
+// audience part with no filter blocks like any other condition the filters cannot
+// express. Words no part covers are flagged, so leaving them out hides nothing.
+func checkParts(proposal *Proposal, brief string) {
+	if len(proposal.BriefParts) == 0 {
+		return
+	}
+	applied := Describe(proposal.Segment)
+	rest := " " + foldWords(brief) + " "
+	kept := make([]BriefPart, 0, len(proposal.BriefParts))
+	for _, part := range proposal.BriefParts {
+		part.Text = strings.TrimSpace(part.Text)
+		folded := foldWords(part.Text)
+		if folded == "" || !strings.Contains(foldWords(brief), folded) {
+			continue
+		}
+		rest = strings.Replace(rest, folded, " ", 1)
+		if matching.OnlyFiller(part.Text) {
+			continue
+		}
+		part.UsedAs = filtersOf(proposal, part, applied)
+		if part.Kind == PartAudience && len(part.UsedAs) == 0 && !alreadyReported(proposal.UnsupportedConditions, part.Text) {
+			proposal.UnsupportedConditions = append(proposal.UnsupportedConditions, part.Text)
+		}
+		kept = append(kept, part)
+	}
+	proposal.BriefParts = kept
+	left := slices.DeleteFunc(strings.Fields(rest), matching.OnlyFiller)
+	if words := strings.Trim(strings.Join(left, " "), " .,;:!?"); matching.Key(words) != "" {
+		proposal.Unsure = append(proposal.Unsure, words)
+	}
+}
+
+// filtersOf keeps what a part may claim and adds what its own evidence says, since a
+// model can name one filter for words that gave two, or forget to name any.
+func filtersOf(proposal *Proposal, part BriefPart, applied []Condition) []string {
+	fields := []string{}
+	for _, condition := range applied {
+		claimed := slices.Contains(part.UsedAs, condition.Field)
+		quotedHere := slices.ContainsFunc(proposal.Evidence, func(evidence Evidence) bool {
+			quote, text := foldWords(evidence.Quote), foldWords(part.Text)
+			return evidence.Field == condition.Field && quote != "" && (strings.Contains(text, quote) || strings.Contains(quote, text))
+		})
+		if claimed || quotedHere {
+			fields = append(fields, condition.Field)
+		}
+	}
+	return fields
+}
+
+func alreadyReported(conditions []string, text string) bool {
+	return slices.ContainsFunc(conditions, func(condition string) bool {
+		return strings.Contains(matching.Key(condition), matching.Key(text)) || strings.Contains(matching.Key(text), matching.Key(condition))
+	})
+}
+
+// partFor finds the words a filter came from.
+func partFor(proposal *Proposal, field string) string {
+	for _, part := range proposal.BriefParts {
+		if slices.Contains(part.UsedAs, field) {
+			return part.Text
+		}
+	}
+	for _, evidence := range proposal.Evidence {
+		if evidence.Field == field {
+			return evidence.Quote
+		}
+	}
+	return ""
+}
+
+// partSaysMoreThanTime tells a part that names a behaviour in its own words from one
+// that only repeats how long, which says nothing about what people did.
+func partSaysMoreThanTime(proposal *Proposal, field string) bool {
+	text := partFor(proposal, field)
+	return text != "" && !matching.OnlyTime(text)
+}
+
+func noteUnsure(proposal *Proposal, field string) {
+	text := partFor(proposal, field)
+	if text == "" {
+		for _, condition := range Describe(proposal.Segment) {
+			if condition.Field == field {
+				text = condition.Label + " " + condition.Value
+			}
+		}
+	}
+	proposal.Unsure = append(proposal.Unsure, text)
 }

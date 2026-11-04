@@ -77,6 +77,10 @@ func (*Mock) ProposeSegment(_ context.Context, request SegmentRequest) (Response
 	applyFilters(&proposal, folded, request.Cities)
 	addMockEvidence(&proposal, before, text)
 	proposal.CampaignName = mockName(proposal.Segment)
+	proposal.BriefParts = nil
+	if request.Refinement == "" {
+		proposal.BriefParts = mockParts(request.Brief, proposal.Evidence)
+	}
 	proposal.UpdatedBrief = ""
 	if request.Refinement != "" {
 		proposal.UpdatedBrief = mockUpdatedBrief(request.Brief, request.Refinement, before.City, proposal.Segment.City)
@@ -87,6 +91,28 @@ func (*Mock) ProposeSegment(_ context.Context, request SegmentRequest) (Response
 		return Response{}, fmt.Errorf("%w: %w", ErrInvalidOutput, err)
 	}
 	return Response{Output: output}, nil
+}
+
+// mockParts marks what the keywords used and calls the rest other. A condition the
+// mock can name is reported in unsupported_conditions, as it cannot quote one.
+func mockParts(brief string, evidence []segment.Evidence) []segment.BriefPart {
+	parts := []segment.BriefPart{}
+	rest := brief
+	for _, quote := range evidence {
+		before, after, found := strings.Cut(rest, quote.Quote)
+		if !found {
+			continue
+		}
+		if strings.TrimSpace(before) != "" {
+			parts = append(parts, segment.BriefPart{Text: before, Kind: segment.PartOther})
+		}
+		parts = append(parts, segment.BriefPart{Text: quote.Quote, Kind: segment.PartAudience, UsedAs: []string{quote.Field}})
+		rest = after
+	}
+	if strings.TrimSpace(rest) != "" {
+		parts = append(parts, segment.BriefPart{Text: rest, Kind: segment.PartOther})
+	}
+	return parts
 }
 
 // mockUpdatedBrief swaps a day count or city the refinement changes and otherwise

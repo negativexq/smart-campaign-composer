@@ -273,22 +273,30 @@ Generated messages get the same treatment: a city or number that is not in the b
 
 The first run changed a design rule. Three of its four silently wrong audiences came from our own check: the model read `alışverişi olmayan` correctly, our narrower reading called that a contradiction, and the model obeyed the correction. A wrong correction is worse than none, so the backend now refuses only a clear opposite. Where it is unsure it leaves the answer alone. Blocking rarely hurts, and the checks are not tightened further to chase the remaining cases.
 
-The latest report, three runs of every case on `gpt-6-luna` (738 runs):
+The latest report, one run of every case on `gpt-6-luna`:
 
 | Result | Runs |
 |---|---|
-| As expected | 717 |
-| Blocked without need | 20 |
-| Silently wrong audience | 1 |
+| As expected | 241 |
+| Blocked without need | 5 |
+| Silently wrong audience | 0 |
 | Message with forbidden text | 0 |
 
-Where the limits fall:
+One clean run says little about the next one: the run before these changes had one silently wrong audience in 738. These numbers describe one model on cases we wrote ourselves, not real traffic, and they do not carry over to another model. The held-out cases have been read since, so they no longer count as unseen.
 
-- **Enforced by the backend, whatever the model does:** a city, window or language a brief clearly contradicts is refused. A condition the lists recognise and the rule leaves out, such as age, gender or loyalty, blocks approval. A segment cannot run as raw SQL, and a person still approves every campaign.
-- **Depends on the model:** a condition the lists do not know. `Newsletter subscribers in Adana` became the Adana rule in one of three runs, and nothing caught it. The checks alone stopped 48 of 66 such answers, so the audience and its size stay on screen for a person to approve.
-- **Blocks without need, by choice:** words the lists know used in another sense (`yaş fark etmeksizin`) and behaviour the filters only roughly match (`mağazamıza uğramayan`). The result is visible and a person can change the brief, so it costs time and not a wrong send.
+## Three levels of telling a person
 
-These numbers describe one model on cases we wrote ourselves. They are not a measure of real traffic, and they do not carry over to another model. The cases in `unseen_negation` were written before the fix they test, but the held-out cases have been read since, so they no longer count as unseen.
+Marketing tools with AI segments mostly show the conditions and leave the rest to the person. We check more than that, and stay out of the way where we are not sure. What the backend finds goes to one of three levels:
+
+- **Corrected without showing it.** A city, window or language the brief clearly contradicts goes back to the model. If it cannot fix the answer, nothing is stored and the person sees an error.
+- **Red: blocks approval.** A condition about who receives the message that the rule does not express. Sending to all of Adana when the brief says newsletter subscribers in Adana is the wrong campaign, so the person has to change the brief.
+- **Yellow: shown, does not block.** A reading the backend cannot confirm, such as `ödeme yapmayan` as no purchase, and words the model left out of its split. The person decides.
+
+The promise this makes is narrower than "the audience is never wrong": a contradiction does not pass, a missing condition is not hidden, and nothing is sent until a person has seen it and approved it.
+
+Finding the missing condition does not depend on a list of words. The model splits the brief into parts and says which decide the audience and which filter each one became, and the page shows all of it. The backend only trusts this as far as it can check: a part must appear in the brief, a filter it names must be in the rule, and words no part covers are flagged. An audience part with no filter blocks. This still rests on the model: if it calls a real condition part of the message, nothing blocks, though the words are listed on the page as not used for the audience. A stricter reading of joining words or a longer word list would not change that, so we leave it there.
+
+Where it blocks without need, by choice: words the lists know used in another sense (`yaş fark etmeksizin`) and behaviour the filters only roughly match (`mağazamıza uğramayan`). That costs time and not a wrong send.
 
 ## What was asked and not done is shown
 

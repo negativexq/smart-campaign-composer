@@ -160,6 +160,33 @@ func Places(text string, known []string) []string {
 	return found
 }
 
+// fillerWords join a sentence or ask for the selection, and say nothing about who.
+var fillerWords = []string{
+	"ama", "fakat", "ancak", "ve", "ile", "veya", "ya", "da", "de", "ise", "icin", "bir", "bu", "su", "o", "daki", "deki",
+	"olan", "olanlar", "olanlari", "olanlara", "secelim", "sec", "secin", "yapalim", "kampanya", "kampanyasi",
+	"gonder", "gonderelim", "gonderin", "herkes", "herkese",
+	"and", "or", "but", "the", "a", "an", "to", "for", "of", "in", "who", "that", "which", "are", "is", "with", "select", "send", "campaign", "everyone",
+}
+
+// OnlyFiller reports whether the text has no word that could decide who receives a
+// message. An empty text counts: punctuation alone says nothing either.
+func OnlyFiller(text string) bool {
+	return !slices.ContainsFunc(Tokens(text), func(token string) bool {
+		return !slices.Contains(fillerWords, token) && !audienceWord.MatchString(token) && !slices.Contains(courtesyWords, token)
+	})
+}
+
+// OnlyTime reports whether the text says only how long, such as "son 30 gün".
+func OnlyTime(text string) bool {
+	tokens := Tokens(text)
+	return !slices.ContainsFunc(tokens, func(token string) bool {
+		_, isNumber := wholeNumber(token)
+		return !isNumber && !slices.Contains(impliedOne, token) && !slices.Contains(fillerWords, token) &&
+			!slices.Contains(hourWords, token) && !slices.Contains(dayWords, token) && !slices.Contains(weekWords, token) &&
+			!slices.Contains(monthWords, token) && !slices.Contains(yearWords, token)
+	})
+}
+
 // courtesyWords describe the people without narrowing them down.
 var courtesyWords = []string{"tum", "butun", "degerli", "sevgili", "all", "our", "dear", "valued", "bizim"}
 

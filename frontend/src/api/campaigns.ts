@@ -24,6 +24,12 @@ export type ScheduleSpec = {
   ends_at?: string;
 };
 
+export interface BriefPart {
+  text: string;
+  kind: "audience" | "message" | "other";
+  used_as?: string[] | null;
+}
+
 export type CampaignSchedule = {
   created_by?: string | null;
   spec: ScheduleSpec;
@@ -78,7 +84,7 @@ export type Campaign = {
   offer_percent?: number | null;
   not_messaged_within_days?: number | null;
   version: number;
-  proposal?: { not_applied?: string[] | null; not_audience?: string[] | null; assumptions: Assumption[]; evidence?: Evidence[] | null; unsupported_conditions: string[] };
+  proposal?: { brief_parts?: BriefPart[] | null; unsure?: string[] | null; not_applied?: string[] | null; not_audience?: string[] | null; assumptions: Assumption[]; evidence?: Evidence[] | null; unsupported_conditions: string[] };
   conditions: Condition[];
   audience: Audience;
   audience_as_of?: string;

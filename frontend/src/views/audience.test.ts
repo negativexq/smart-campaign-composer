@@ -230,6 +230,51 @@ describe("audience page", () => {
     expect(wrapper.text()).toContain("Instagram");
   });
 
+  it("shows which parts of the brief became the rule and blocks on the part that did not", async () => {
+    const { wrapper } = await open({
+      "GET /api/campaigns/c1": {
+        body: {
+          ...campaign,
+          brief: "Newsletter subscribers in İstanbul, say hello",
+          blockers: ['The brief asks for "Newsletter subscribers", which no audience filter can express.'],
+          conditions: [{ field: "city", label: "City is", value: "İstanbul" }],
+          proposal: {
+            ...campaign.proposal!,
+            not_audience: ["hello"],
+            brief_parts: [
+              { text: "Newsletter subscribers", kind: "audience" },
+              { text: "İstanbul", kind: "audience", used_as: ["city"] },
+              { text: "say hello", kind: "message" },
+            ],
+          },
+        },
+      },
+    });
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid=brief-text]").text()).toBe("Newsletter subscribers in İstanbul, say hello");
+    expect(wrapper.find(".part--missing").text()).toBe("Newsletter subscribers");
+    expect(wrapper.find(".part--used").text()).toBe("İstanbul");
+    expect(wrapper.find("[data-testid=parts-used]").text()).toBe("1 of 2 audience parts used");
+    const rows = wrapper.findAll("[data-testid=audience-part]").map((row) => row.text());
+    expect(rows[0]).toContain("Not used, no filter for this");
+    expect(rows[1]).toContain("City is İstanbul");
+    expect(wrapper.find("[data-testid=other-parts]").text()).toBe("say hello");
+    expect(wrapper.text()).toContain("This blocks approval");
+    expect(wrapper.find("[data-testid=continue-content]").exists()).toBe(false);
+  });
+
+  it("warns about an unsure reading without stopping the campaign", async () => {
+    const { wrapper } = await open({
+      "GET /api/campaigns/c1": { body: { ...campaign, proposal: { ...campaign.proposal!, unsure: ["ödeme yapmayan"] } } },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Check how this was read");
+    expect(wrapper.text()).toContain("ödeme yapmayan");
+    expect(wrapper.find("[data-testid=continue-content]").exists()).toBe(true);
+  });
+
   it("says when a refinement was not done, without blocking approval", async () => {
     const { wrapper } = await open({
       "GET /api/campaigns/c1": {

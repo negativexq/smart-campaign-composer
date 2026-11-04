@@ -57,6 +57,21 @@ type Evidence struct {
 	Quote string `json:"quote"`
 }
 
+// What a part of the brief is about.
+const (
+	PartAudience = "audience"
+	PartMessage  = "message"
+	PartOther    = "other"
+)
+
+// BriefPart is a piece of the brief and what became of it, shown so a person can
+// see what the rule used. CheckAgainstBrief decides what it may claim.
+type BriefPart struct {
+	Text   string   `json:"text"`
+	Kind   string   `json:"kind"`
+	UsedAs []string `json:"used_as,omitempty"`
+}
+
 // Proposal is a validated audience proposal. UnsupportedConditions lists parts
 // of the brief no filter can express; they block approval until resolved.
 // UpdatedBrief is the brief rewritten for a refinement. It moves to the campaign
@@ -77,6 +92,12 @@ type Proposal struct {
 	// NotAudience is what the model says the brief names without it being about who
 	// receives the message. It lifts a block on those words, so it is always shown.
 	NotAudience []string `json:"not_audience,omitempty"`
+	// BriefParts is the brief split into what decides the audience and what does not.
+	BriefParts []BriefPart `json:"brief_parts,omitempty"`
+	// Unsure is what the backend could not confirm and will not refuse, because a
+	// wrong correction is worse than none. Only CheckAgainstBrief writes it. Shown,
+	// never blocking.
+	Unsure []string `json:"unsure,omitempty"`
 }
 
 // ValidationError lists everything wrong with a proposal, in words that work
@@ -115,6 +136,7 @@ func ParseProposal(raw []byte, cities []string) (Proposal, error) {
 		UnsupportedConditions []string     `json:"unsupported_conditions"`
 		NotApplied            []string     `json:"not_applied"`
 		NotAudience           []string     `json:"not_audience"`
+		BriefParts            []BriefPart  `json:"brief_parts"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -137,6 +159,7 @@ func ParseProposal(raw []byte, cities []string) (Proposal, error) {
 		UnsupportedConditions: cleanConditions(decoded.UnsupportedConditions),
 		NotApplied:            cleanConditions(decoded.NotApplied),
 		NotAudience:           cleanConditions(decoded.NotAudience),
+		BriefParts:            decoded.BriefParts,
 	}
 	if proposal.Assumptions == nil {
 		proposal.Assumptions = []Assumption{}
@@ -207,6 +230,11 @@ func (p *Proposal) validate(cities []string) *ValidationError {
 	}
 	if spec.IsEmpty() && len(p.UnsupportedConditions) == 0 {
 		problems.add("empty_segment", "segment must have at least one filter")
+	}
+	for _, part := range p.BriefParts {
+		if !slices.Contains([]string{PartAudience, PartMessage, PartOther}, part.Kind) {
+			problems.add("invalid_brief_part", fmt.Sprintf("brief part kind %q must be audience, message or other", part.Kind))
+		}
 	}
 	for _, assumption := range p.Assumptions {
 		if !slices.Contains(filterFields, assumption.Field) {
@@ -334,7 +362,7 @@ func JSONSchema() map[string]any {
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
-		"required":             []string{"campaign_name", "updated_brief", "segment", "assumptions", "evidence", "unsupported_conditions"},
+		"required":             []string{"campaign_name", "updated_brief", "segment", "assumptions", "evidence", "unsupported_conditions", "brief_parts"},
 		"properties": map[string]any{
 			"campaign_name": map[string]any{"type": "string", "description": "Short title of 2 to 5 words, at most 80 characters"},
 			"updated_brief": map[string]any{"type": "string", "description": "The whole brief with the refinement applied; empty when there is no refinement"},
@@ -374,6 +402,20 @@ func JSONSchema() map[string]any {
 					"properties": map[string]any{
 						"field": map[string]any{"type": "string", "enum": filterFields},
 						"quote": map[string]any{"type": "string", "description": "Copied character for character, never translated"},
+					},
+				},
+			},
+			"brief_parts": map[string]any{
+				"type":        "array",
+				"description": "The whole brief split into short parts, in order, each copied character for character",
+				"items": map[string]any{
+					"type":                 "object",
+					"additionalProperties": false,
+					"required":             []string{"text", "kind"},
+					"properties": map[string]any{
+						"text":    map[string]any{"type": "string"},
+						"kind":    map[string]any{"type": "string", "enum": []string{PartAudience, PartMessage, PartOther}},
+						"used_as": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": filterFields}, "description": "Every filter this part became; empty if none"},
 					},
 				},
 			},

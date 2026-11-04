@@ -328,7 +328,7 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 		request.Refinement = ""
 	} else if input.Refinement != "" && stored.Proposal != nil {
 		current := *stored.Proposal
-		current.Unmatched, current.NotApplied = nil, nil
+		current.Unmatched, current.NotApplied, current.Unsure, current.BriefParts = nil, nil, nil, nil
 		if request.Current, err = json.Marshal(current); err != nil {
 			return View{}, fmt.Errorf("encode current proposal: %w", err)
 		}

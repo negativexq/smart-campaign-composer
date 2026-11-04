@@ -5,10 +5,12 @@ import { errorMessage, getCampaign, proposeSegment, type Campaign } from "../api
 import AudienceFunnel from "../components/AudienceFunnel.vue";
 import AudienceLoading from "../components/AudienceLoading.vue";
 import AudienceSteps from "../components/AudienceSteps.vue";
+import BriefReading from "../components/BriefReading.vue";
 import SegmentRules from "../components/SegmentRules.vue";
 import CampaignName from "../components/CampaignName.vue";
 import MetricCard from "../components/MetricCard.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
+import { briefSegments } from "../lib/audience";
 import { reachHint } from "../lib/message";
 import { channelLabel, firstChannel, firstMessagePath } from "../lib/campaignSteps";
 import { takeAudienceRequest } from "../lib/pendingAudience";
@@ -30,6 +32,8 @@ const staged = ref(false);
 
 const { breakdown, failed: breakdownFailed } = useAudienceBreakdown(() => campaign.value);
 const hasProposal = computed(() => Boolean(campaign.value?.proposal));
+const parts = computed(() => campaign.value?.proposal?.brief_parts ?? []);
+const segments = computed(() => briefSegments(campaign.value?.brief ?? "", parts.value));
 const blocked = computed(() => Boolean(campaign.value?.blockers.length));
 const waitingForCounts = computed(() => staged.value && !breakdown.value && !breakdownFailed.value);
 const conditionCount = computed(() => campaign.value?.conditions.length ?? 0);
@@ -115,7 +119,13 @@ onMounted(async () => {
         </div>
       </template>
       <template v-else>
-        <p data-testid="brief-text">{{ editingBrief ? editedBrief : campaign.brief }}</p>
+        <p v-if="editingBrief" data-testid="brief-text">{{ editedBrief }}</p>
+        <p v-else data-testid="brief-text"><template v-for="(segment, index) in segments" :key="index"><mark v-if="segment.tone" class="part" :class="`part--${segment.tone}`">{{ segment.text }}</mark><template v-else>{{ segment.text }}</template></template></p>
+        <p v-if="!editingBrief && parts.length" class="legend small muted" data-testid="brief-legend">
+          <span><i class="dot dot--used"></i>In the rule</span>
+          <span><i class="dot dot--missing"></i>Not in the rule</span>
+          <span><i class="dot dot--other"></i>Not for the audience</span>
+        </p>
         <p v-if="briefUpdatedBy" class="small muted" data-testid="brief-updated">Updated from your request: "{{ briefUpdatedBy }}"</p>
         <button class="button button--secondary" type="button" :disabled="Boolean(busyMessage)" @click="startEditingBrief">Edit brief</button>
       </template>
@@ -130,16 +140,21 @@ onMounted(async () => {
 
       <div class="rest" :class="{ 'rest--staged': staged }" :style="{ '--start': `${restStart}ms` }" data-testid="audience-rest">
 
-      <ValidationNotice v-for="blocker in campaign.blockers" :key="blocker" tone="warning" title="This blocks approval">
+      <ValidationNotice v-for="blocker in campaign.blockers" :key="blocker" tone="error" title="This blocks approval">
         {{ blocker }}
       </ValidationNotice>
 
       <ValidationNotice v-for="note in campaign.proposal?.not_applied ?? []" :key="note" tone="warning" title="Not done">
         {{ note }}
       </ValidationNotice>
-      <ValidationNotice v-if="campaign.proposal?.not_audience?.length" tone="warning" title="Not used for the audience">
+      <ValidationNotice v-for="words in campaign.proposal?.unsure ?? []" :key="words" tone="warning" title="Check how this was read" data-testid="unsure">
+        "{{ words }}". We could not confirm this part of the reading, so the rule may not mean what the brief says. You can still continue.
+      </ValidationNotice>
+      <ValidationNotice v-if="!parts.length && campaign.proposal?.not_audience?.length" tone="warning" title="Not used for the audience">
         {{ campaign.proposal.not_audience.join(", ") }}. If any of these should decide who receives this, refine the audience.
       </ValidationNotice>
+
+      <BriefReading :campaign="campaign" />
 
       <section class="section">
         <h2>Audience size</h2>
@@ -195,6 +210,51 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.part {
+  padding: 1px 3px;
+  border-radius: 4px;
+  color: inherit;
+}
+
+.part--used {
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+}
+
+.part--missing {
+  border-bottom: 2px solid var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+}
+
+.part--other {
+  background: var(--color-surface-subtle);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+}
+
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: var(--space-1);
+  border-radius: 3px;
+}
+
+.dot--used {
+  background: color-mix(in srgb, var(--color-success) 30%, transparent);
+}
+
+.dot--missing {
+  background: var(--color-error);
+}
+
+.dot--other {
+  background: var(--color-border);
+}
+
 .rest {
   display: grid;
   gap: var(--space-6);
