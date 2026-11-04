@@ -236,7 +236,7 @@ CI runs on every push to `main` and every pull request: formatting, vet and the 
 | `migrations/` | SQL schema |
 | `frontend/` | Vue 3 and TypeScript UI |
 | `tests/` | Acceptance, chaos and benchmark tests |
-| `docs/screenshots/` | Images in this file |
+| `docs/` | [Architecture](docs/architecture.md), [flows](docs/flows.md) and the images in this file |
 | `ai-sessions/` | Exported AI working sessions |
 
-See [DECISIONS.md](DECISIONS.md) for the reasoning behind the architecture and [DESIGN.md](DESIGN.md) for the Signal design language.
+See [docs/architecture.md](docs/architecture.md) for how the system is put together, [docs/flows.md](docs/flows.md) for how a campaign moves through it, [DECISIONS.md](DECISIONS.md) for the reasoning behind it and [DESIGN.md](DESIGN.md) for the Signal design language.
