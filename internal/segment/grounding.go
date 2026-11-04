@@ -382,8 +382,8 @@ func checkParts(proposal *Proposal, brief string) {
 
 // filtersOf keeps what a part may claim and adds what its own evidence says, since a
 // model can name one filter for words that gave two, or forget to name any.
-func filtersOf(proposal *Proposal, part BriefPart, applied []Condition) []string {
-	fields := []string{}
+func filtersOf(proposal *Proposal, part BriefPart, applied []Condition) FilterList {
+	fields := FilterList{}
 	for _, condition := range applied {
 		claimed := slices.Contains(part.UsedAs, condition.Field)
 		quotedHere := slices.ContainsFunc(proposal.Evidence, func(evidence Evidence) bool {

@@ -1,6 +1,7 @@
 package segment_test
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -536,5 +537,18 @@ func TestOnePartCanGiveSeveralFilters(t *testing.T) {
 				t.Fatalf("proposal: %+v", proposal)
 			}
 		})
+	}
+}
+
+func TestAPartReadsOneFilterOrSeveral(t *testing.T) {
+	t.Parallel()
+	for raw, want := range map[string]int{`"city"`: 1, `["city","language"]`: 2, `null`: 0, `""`: 0, `[]`: 0} {
+		var part segment.BriefPart
+		if err := json.Unmarshal([]byte(`{"text":"Ankara","kind":"audience","used_as":`+raw+`}`), &part); err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+		if len(part.UsedAs) != want {
+			t.Fatalf("%s: %v", raw, part.UsedAs)
+		}
 	}
 }

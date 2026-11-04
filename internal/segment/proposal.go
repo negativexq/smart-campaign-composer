@@ -67,9 +67,32 @@ const (
 // BriefPart is a piece of the brief and what became of it, shown so a person can
 // see what the rule used. CheckAgainstBrief decides what it may claim.
 type BriefPart struct {
-	Text   string   `json:"text"`
-	Kind   string   `json:"kind"`
-	UsedAs []string `json:"used_as,omitempty"`
+	Text   string     `json:"text"`
+	Kind   string     `json:"kind"`
+	UsedAs FilterList `json:"used_as,omitempty"`
+}
+
+// FilterList is the filters a part became. It also reads one name on its own, which
+// a model can return and some stored campaigns hold. An approved version cannot be
+// rewritten, so reading both is what keeps those campaigns open.
+type FilterList []string
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (l *FilterList) UnmarshalJSON(raw []byte) error {
+	var one string
+	if err := json.Unmarshal(raw, &one); err == nil {
+		*l = nil
+		if one != "" {
+			*l = FilterList{one}
+		}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(raw, &many); err != nil {
+		return err
+	}
+	*l = many
+	return nil
 }
 
 // Proposal is a validated audience proposal. UnsupportedConditions lists parts
