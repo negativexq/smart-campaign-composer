@@ -160,6 +160,9 @@ func Places(text string, known []string) []string {
 	return found
 }
 
+// courtesyWords describe the people without narrowing them down.
+var courtesyWords = []string{"tum", "butun", "degerli", "sevgili", "all", "our", "dear", "valued", "bizim"}
+
 var audienceWord = regexp.MustCompile(`^(customers?|users?|people|shoppers?|residents?|musteri|kullanici|yasayan|oturan|insan)`)
 
 // NamesAudience reports whether the text uses this name for the people themselves:
@@ -190,7 +193,9 @@ func NamesAudience(text, name string) bool {
 // says who a message is for without narrowing them down.
 func OnlyPeople(text string) bool {
 	tokens := Tokens(text)
-	return len(tokens) == 1 && audienceWord.MatchString(tokens[0])
+	return len(tokens) > 0 && !slices.ContainsFunc(tokens, func(token string) bool {
+		return !audienceWord.MatchString(token) && !slices.Contains(courtesyWords, token)
+	})
 }
 
 func keysOf(words []string) []string {
@@ -214,6 +219,7 @@ func (d Duration) Contains(days int) bool {
 }
 
 var (
+	hourWords  = []string{"saat", "saatte", "saattir", "saatlik", "hour", "hours"}
 	dayWords   = []string{"gun", "gunde", "gundur", "gunu", "gune", "gunun", "gunden", "gunluk", "gunler", "gunlerde", "day", "days"}
 	weekWords  = []string{"hafta", "haftada", "haftadir", "haftayi", "haftaya", "haftalik", "haftanin", "week", "weeks"}
 	monthWords = []string{"ay", "ayda", "aydir", "ayi", "aya", "aylik", "ayin", "aylar", "month", "months"}
@@ -236,32 +242,53 @@ func Durations(text string) []Duration {
 		if index+1 < len(tokens) && tokens[index+1] == "sonu" {
 			continue
 		}
-		count, ok := countBefore(tokens[index-1])
+		count, ok := countBefore(tokens, index)
 		if !ok {
 			continue
 		}
+		scaled := func(low, high float64) Duration {
+			return Duration{int(count * low), int(count*high + 0.5), index}
+		}
 		switch {
+		case slices.Contains(hourWords, token):
+			hours := count / 24
+			found = append(found, Duration{max(int(hours), 1), max(int(hours+0.99), 1), index})
 		case slices.Contains(dayWords, token):
-			found = append(found, Duration{count, count, index})
+			found = append(found, scaled(1, 1))
 		case slices.Contains(weekWords, token):
-			found = append(found, Duration{count * 7, count * 7, index})
+			found = append(found, scaled(7, 7))
 		case slices.Contains(monthWords, token):
-			found = append(found, Duration{count * 28, count * 31, index})
+			found = append(found, scaled(28, 31))
 		case slices.Contains(yearWords, token):
-			found = append(found, Duration{count * 360, count * 366, index})
+			found = append(found, scaled(360, 366))
 		}
 	}
 	return found
 }
 
-func countBefore(token string) (int, bool) {
+// countBefore reads how many of a unit come before it: 3, üç, bir buçuk, yarım, son.
+func countBefore(tokens []string, index int) (float64, bool) {
+	before := tokens[index-1]
+	if before == "yarim" || before == "half" {
+		return 0.5, true
+	}
+	if before == "bucuk" && index >= 2 {
+		if whole, ok := wholeNumber(tokens[index-2]); ok {
+			return whole + 0.5, true
+		}
+	}
+	if number, ok := wholeNumber(before); ok {
+		return number, true
+	}
+	return 1, slices.Contains(impliedOne, before)
+}
+
+func wholeNumber(token string) (float64, bool) {
 	if number, err := strconv.Atoi(token); err == nil {
-		return number, true
+		return float64(number), true
 	}
-	if number, ok := numberWords[token]; ok {
-		return number, true
-	}
-	return 1, slices.Contains(impliedOne, token)
+	number, ok := numberWords[token]
+	return float64(number), ok
 }
 
 // Numbers lists the numbers in the text.

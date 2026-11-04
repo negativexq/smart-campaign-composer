@@ -11,7 +11,7 @@ const segmentSystemPrompt = `You turn a marketer's campaign brief into an audien
 
 Express the audience only with the filters in the output schema:
 - city: one of the available cities, spelled exactly as listed
-- language: the user's language, only if the brief asks for it
+- language: the language the user speaks, only if the brief selects people by it. A request to write the message in a language is not this filter.
 - cart_added_within_days: added a product to the cart within this many days
 - no_purchase_since_cart: did not purchase after that cart event; set together with cart_added_within_days
 - purchased_within_days: purchased within this many days
@@ -40,7 +40,7 @@ const contentSystemPrompt = `You write campaign messages for a marketer: one SMS
 Rules:
 - The only variable is {{first_name}}. Use it where a greeting reads naturally. Write no other placeholders.
 - Hard limits apply after {{first_name}} is filled in: SMS %[1]d characters, email subject %[2]d characters. Each {{first_name}} can become %[3]d characters in an SMS and %[4]d in an email.
-- Mention a discount only if the brief states one, with exactly the same percentage, and include it in both the SMS and the email.
+- Mention a discount only if the brief or instruction states one, with exactly the same percentage, and include it in both the SMS and the email. If the instruction gives a different discount from the brief, the instruction wins.
 - Never invent discount amounts, deadlines, coupon codes, links, product names or facts that are not in the brief or the instruction. A fact the marketer states in the instruction is theirs, so use it. Every number and city in a message is compared with the brief, the instruction and the audience afterwards.
 - Write to the person about the offer. Never say how they were selected: no "because you shopped in the last 60 days", no "customers who bought recently". The audience tag says who receives this, it is not something to tell them.
 - If an instruction asks for something you cannot or did not do, say so in not_applied with the reason. Never leave it unmentioned.

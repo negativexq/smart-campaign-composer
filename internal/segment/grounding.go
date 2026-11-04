@@ -22,9 +22,10 @@ var (
 	// Words for leaving a cart behind, which say no purchase on their own.
 	leftBehindWord = regexp.MustCompile(`^(abandon|terk|birak)`)
 	purchaseWord   = regexp.MustCompile(`^(alisveris|satin|siparis|purchas|bought$|buy|buyer|order|alan$|alanlar|almis)`)
-	notPurchased   = regexp.MustCompile(`^(yap|al|et|ver|alisveris)m[ae](yan|mis|di)`)
-	messageWord    = regexp.MustCompile(`^(mesaj|messag|ileti)`)
-	englishNot     = []string{"not", "never", "no", "without", "didn", "haven", "hasn", "dont", "havent", "hasnt", "didnt"}
+	// A Turkish verb made negative, whatever the verb: vermeyen, uğramayan, olmayan.
+	turkishNot  = regexp.MustCompile(`^\pL+m[ae](y[ae]n|m[iu]s|d[iu]|y[iu]p|z$|dan$|den$)`)
+	messageWord = regexp.MustCompile(`^(mesaj|messag|ileti)`)
+	notWords    = []string{"not", "never", "no", "nothing", "none", "without", "didn", "haven", "hasn", "dont", "havent", "hasnt", "didnt", "inactive", "yok", "hic", "uzak"}
 
 	ageWord     = regexp.MustCompile(`^(yas|yasinda|yasindan|yasinin|yasli|yaslilar|genc|gencler|age|aged)$`)
 	genderWord  = regexp.MustCompile(`^(kadin|kadinlar|kadinlara|erkek|erkekler|erkeklere|gender|cinsiyet|female|females|male|males|women|men)$`)
@@ -110,16 +111,18 @@ func mentionedIn(conditions []string, word string) bool {
 }
 
 type briefReading struct {
-	durations  []matching.Duration
-	bound      map[string][]matching.Duration
-	hasCart    bool
-	boughtWord bool
-	notBought  bool
-	hasMessage bool
-	hasAge     bool
-	hasGender  bool
-	hasLoyalty bool
-	languages  map[string]bool
+	durations    []matching.Duration
+	bound        map[string][]matching.Duration
+	hasCart      bool
+	boughtWord   bool
+	unsure       bool
+	notBought    bool
+	hasMessage   bool
+	ageWords     []string
+	genderWords  []string
+	loyaltyWords []string
+	cartWords    []string
+	languages    map[string]bool
 }
 
 func readBrief(brief string) briefReading {
@@ -128,9 +131,6 @@ func readBrief(brief string) briefReading {
 	subjects := map[int]string{}
 	for index, token := range tokens {
 		switch {
-		case notPurchased.MatchString(token):
-			reading.notBought = true
-			subjects[index] = subjectPurchase
 		case cartWord.MatchString(token):
 			reading.hasCart = true
 			subjects[index] = subjectCart
@@ -144,19 +144,33 @@ func readBrief(brief string) briefReading {
 			} else {
 				reading.boughtWord = true
 			}
+		case turkishNot.MatchString(token):
+			// A negative verb with no purchase word: it may mean no purchase, and only
+			// a person or the model can say, so nothing is refused on this reading.
+			// "mesaj almayan" is about messages and tells nothing about purchases.
+			if index == 0 || !messageWord.MatchString(tokens[index-1]) {
+				reading.unsure = true
+			}
 		case messageWord.MatchString(token):
 			reading.hasMessage = true
 			subjects[index] = subjectMessage
 		}
-		reading.hasAge = reading.hasAge || ageWord.MatchString(token)
-		reading.hasGender = reading.hasGender || genderWord.MatchString(token)
-		reading.hasLoyalty = reading.hasLoyalty || loyaltyWord.MatchString(token)
+		for _, list := range []struct {
+			pattern *regexp.Regexp
+			words   *[]string
+		}{{ageWord, &reading.ageWords}, {genderWord, &reading.genderWords}, {loyaltyWord, &reading.loyaltyWords}, {cartWord, &reading.cartWords}} {
+			if list.pattern.MatchString(token) {
+				*list.words = append(*list.words, token)
+			}
+		}
 		for code, word := range languageWords {
-			if word.MatchString(token) {
+			if word.MatchString(token) && !aboutTheText(tokens, index) {
 				reading.languages[code] = true
 			}
 		}
 	}
+	// "sepete ekleyip almayan": after a cart, a negative verb is the missing purchase.
+	reading.notBought = reading.notBought || (reading.hasCart && reading.unsure)
 	for _, duration := range reading.durations {
 		if subject := nearestSubject(subjects, duration.Token); subject != "" {
 			reading.bound[subject] = append(reading.bound[subject], duration)
@@ -165,19 +179,36 @@ func readBrief(brief string) briefReading {
 	return reading
 }
 
-// negatedAt reads "did not buy" before the word and "alışveriş yapmayan" after it.
-func negatedAt(tokens []string, index int) bool {
-	for before := max(0, index-3); before < index; before++ {
-		if slices.Contains(englishNot, tokens[before]) {
-			return true
-		}
+var textWord = regexp.MustCompile(`^(yaz|write|mesaj|message|metin|text|sms|email|eposta)`)
+
+// aboutTheText tells "İngilizce yaz" from "İngilizce konuşan": the first is the
+// language of the message and says nothing about the people.
+func aboutTheText(tokens []string, index int) bool {
+	if index+1 < len(tokens) && strings.HasPrefix(tokens[index+1], "konus") {
+		return false
 	}
-	for after := index + 1; after < min(index+3, len(tokens)); after++ {
-		if notPurchased.MatchString(tokens[after]) {
+	for near := max(0, index-3); near < min(index+3, len(tokens)); near++ {
+		if near != index && textWord.MatchString(tokens[near]) {
 			return true
 		}
 	}
 	return false
+}
+
+// negatedAt reads "did not buy" before the word and "alışveriş yapmayan" after it.
+func negatedAt(tokens []string, index int) bool {
+	for near := max(0, index-3); near < min(index+4, len(tokens)); near++ {
+		if near == index {
+			continue
+		}
+		if slices.Contains(notWords, tokens[near]) {
+			return true
+		}
+		if near > index && turkishNot.MatchString(tokens[near]) {
+			return true
+		}
+	}
+	return turkishNot.MatchString(tokens[index])
 }
 
 func nearestSubject(subjects map[int]string, token int) string {
@@ -239,22 +270,28 @@ func checkWindows(proposal *Proposal, problems *ValidationError, reading briefRe
 	}
 }
 
+// checkBehavior sends a rule back only for a clear opposite, or when the brief says
+// nothing that could mean it. A wrong correction is worse than none: a model will obey
+// it, which turns a right answer into a silently wrong one.
 func checkBehavior(proposal *Proposal, problems *ValidationError, reading briefReading) {
 	spec := proposal.Segment
 	if spec.CartAddedWithinDays != nil && !reading.hasCart {
 		problems.add("behavior_not_in_brief", "cart_added_within_days is set but the brief does not mention a cart")
 	}
 	if spec.PurchasedWithinDays != nil && !reading.boughtWord {
-		if reading.notBought {
+		switch {
+		case reading.notBought:
 			problems.add("behavior_flipped", "purchased_within_days is set but the brief asks for people who did not buy")
-		} else {
+		case !reading.unsure:
 			problems.add("behavior_not_in_brief", "purchased_within_days is set but the brief does not mention a purchase")
 		}
 	}
 	if (spec.NotPurchasedWithinDays != nil || spec.noPurchaseSinceCart()) && !reading.notBought {
-		if reading.boughtWord {
+		switch {
+		case reading.unsure:
+		case reading.boughtWord:
 			problems.add("behavior_flipped", "a no purchase filter is set but the brief asks for people who bought")
-		} else {
+		case len(reading.durations) == 0:
 			problems.add("behavior_not_in_brief", "a no purchase filter is set but the brief does not say so")
 		}
 	}
@@ -269,24 +306,28 @@ func checkLanguage(proposal *Proposal, problems *ValidationError, reading briefR
 func checkLeftOut(proposal *Proposal, reading briefReading) {
 	spec := proposal.Segment
 	leftOut := func(note string) { proposal.Unmatched = append(proposal.Unmatched, note) }
-	// Any stated condition counts: a model may word age and gender as one.
-	if len(proposal.UnsupportedConditions) == 0 {
-		if reading.hasAge {
-			leftOut("age")
-		}
-		if reading.hasGender {
-			leftOut("gender")
-		}
-		if reading.hasLoyalty {
-			leftOut("loyalty")
-		}
+	// A stated condition or a claim that names the word deals with it. A model may word
+	// age and gender as one condition, and these words can be about the message.
+	dealtWith := func(words []string) bool {
+		return len(proposal.UnsupportedConditions) > 0 || slices.ContainsFunc(words, func(word string) bool {
+			return mentionedIn(proposal.NotAudience, word)
+		})
 	}
-	if reading.hasCart && spec.CartAddedWithinDays == nil && len(proposal.UnsupportedConditions) == 0 {
+	if len(reading.ageWords) > 0 && !dealtWith(reading.ageWords) {
+		leftOut("age")
+	}
+	if len(reading.genderWords) > 0 && !dealtWith(reading.genderWords) {
+		leftOut("gender")
+	}
+	if len(reading.loyaltyWords) > 0 && !dealtWith(reading.loyaltyWords) {
+		leftOut("loyalty")
+	}
+	if reading.hasCart && spec.CartAddedWithinDays == nil && !dealtWith(reading.cartWords) {
 		leftOut("cart activity")
 	}
 	noPurchaseFilter := spec.NotPurchasedWithinDays != nil || spec.noPurchaseSinceCart()
 	switch {
-	case reading.hasCart && reading.notBought && !noPurchaseFilter:
+	case reading.hasCart && reading.notBought && !noPurchaseFilter && !dealtWith(reading.cartWords):
 		leftOut("no purchase")
 	case len(reading.bound[subjectPurchase]) > 0 && spec.PurchasedWithinDays == nil && !noPurchaseFilter:
 		leftOut("purchase activity")

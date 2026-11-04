@@ -267,7 +267,28 @@ A list of places can always run out, so a place is also read from how the senten
 
 Generated messages get the same treatment: a city or number that is not in the brief, the instruction or the audience is refused, so a model cannot add "last 3 days" or a store in another city. This covers generated text only. A person editing a message may write what they like, except a discount that differs between channels, which cannot be approved. Asking one channel for a new discount is refused up front, because the other channel keeps its text and the offer would split.
 
-We tried this on `gpt-6-luna` with 23 ordinary briefs and refinements, and none was blocked by mistake. With briefs and refinements pushing the model to a wrong rule, four answers were rejected for a city or window not in the brief, and each repaired or stayed consistent before anything was stored.
+## The benchmark draws the limits, it is not a target
+
+`tests/benchmark` holds 246 hard briefs, refinements and content instructions with their expected answers. `make test` runs the checks on them with no model, and `make benchmark` runs them through a real model and writes a report to `tests/benchmark/results`.
+
+The first run changed a design rule. Three of its four silently wrong audiences came from our own check: the model read `alışverişi olmayan` correctly, our narrower reading called that a contradiction, and the model obeyed the correction. A wrong correction is worse than none, so the backend now refuses only a clear opposite. Where it is unsure it leaves the answer alone. Blocking rarely hurts, and the checks are not tightened further to chase the remaining cases.
+
+The latest report, three runs of every case on `gpt-6-luna` (738 runs):
+
+| Result | Runs |
+|---|---|
+| As expected | 717 |
+| Blocked without need | 20 |
+| Silently wrong audience | 1 |
+| Message with forbidden text | 0 |
+
+Where the limits fall:
+
+- **Enforced by the backend, whatever the model does:** a city, window or language a brief clearly contradicts is refused. A condition the lists recognise and the rule leaves out, such as age, gender or loyalty, blocks approval. A segment cannot run as raw SQL, and a person still approves every campaign.
+- **Depends on the model:** a condition the lists do not know. `Newsletter subscribers in Adana` became the Adana rule in one of three runs, and nothing caught it. The checks alone stopped 48 of 66 such answers, so the audience and its size stay on screen for a person to approve.
+- **Blocks without need, by choice:** words the lists know used in another sense (`yaş fark etmeksizin`) and behaviour the filters only roughly match (`mağazamıza uğramayan`). The result is visible and a person can change the brief, so it costs time and not a wrong send.
+
+These numbers describe one model on cases we wrote ourselves. They are not a measure of real traffic, and they do not carry over to another model. The cases in `unseen_negation` were written before the fix they test, but the held-out cases have been read since, so they no longer count as unseen.
 
 ## What was asked and not done is shown
 

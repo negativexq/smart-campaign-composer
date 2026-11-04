@@ -287,3 +287,102 @@ func TestAGenericWordForPeopleIsNotAnUnsupportedCondition(t *testing.T) {
 		t.Fatalf("unsupported: %v", proposal.UnsupportedConditions)
 	}
 }
+
+// The reading of a sentence is only a reading. Where it is unsure it must not push a
+// model off a correct answer, which is how "alışverişi olmayan" once became "bought".
+func TestAnUnsureReadingDoesNotPushAgainstACorrectAnswer(t *testing.T) {
+	t.Parallel()
+	for name, tt := range map[string]struct {
+		brief string
+		spec  segment.Spec
+	}{
+		"olmayan":  {"Son 30 günde alışverişi olmayan Ankara müşterileri", segment.Spec{City: text("Ankara"), NotPurchasedWithinDays: number(30)}},
+		"nothing":  {"Ankara customers who bought nothing in the last 30 days", segment.Spec{City: text("Ankara"), NotPurchasedWithinDays: number(30)}},
+		"vermeyen": {"Bursa'da son 14 günde sipariş vermeyenler", segment.Spec{City: text("Bursa"), NotPurchasedWithinDays: number(14)}},
+		"unknown":  {"Son 30 gündür mağazamıza uğramayan Bursa müşterileri", segment.Spec{City: text("Bursa"), NotPurchasedWithinDays: number(30)}},
+		"english":  {"Istanbul shoppers inactive for 30 days", segment.Spec{City: text("İstanbul"), NotPurchasedWithinDays: number(30)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			proposal := proposalOf(tt.spec)
+			if problems := segment.CheckAgainstBrief(&proposal, tt.brief, groundingCities, nil); problems != nil {
+				t.Fatalf("pushed back: %v", problems)
+			}
+		})
+	}
+}
+
+// Clear disagreement is still sent back.
+func TestAClearOppositeIsStillRefused(t *testing.T) {
+	t.Parallel()
+	for brief, spec := range map[string]segment.Spec{
+		"Son 30 günde alışveriş yapan Ankara müşterileri":      {City: text("Ankara"), NotPurchasedWithinDays: number(30)},
+		"Son 30 günde alışveriş yapmayan Ankara müşterileri":   {City: text("Ankara"), PurchasedWithinDays: number(30)},
+		"Ankara customers who bought in the last 30 days":      {City: text("Ankara"), NotPurchasedWithinDays: number(30)},
+		"Ankara customers who did not buy in the last 30 days": {City: text("Ankara"), PurchasedWithinDays: number(30)},
+	} {
+		t.Run(brief, func(t *testing.T) {
+			t.Parallel()
+			proposal := proposalOf(spec)
+			if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems == nil {
+				t.Fatal("not refused")
+			}
+		})
+	}
+}
+
+func TestTheLanguageOfTheTextIsNotTheLanguageOfThePeople(t *testing.T) {
+	t.Parallel()
+	for _, brief := range []string{"Mesajı İngilizce yaz, Ankara müşterilerine gönder", "Write in English to Ankara customers", "Ankara müşterilerine İngilizce bir mesaj gönder"} {
+		proposal := proposalOf(segment.Spec{City: text("Ankara"), Language: text("en")})
+		if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems == nil {
+			t.Fatalf("%s: language filter accepted", brief)
+		}
+	}
+}
+
+func TestLengthsOfTimeWithHalvesAndHours(t *testing.T) {
+	t.Parallel()
+	for brief, days := range map[string]int{
+		"Son bir buçuk ayda alışveriş yapan Ankara müşterileri": 45,
+		"Yarım yıldır alışveriş yapmayan Ankara müşterileri":    182,
+		"Son 24 saatte alışveriş yapan Ankara müşterileri":      1,
+		"Ankara customers who bought in the last 48 hours":      2,
+	} {
+		spec := segment.Spec{City: text("Ankara"), PurchasedWithinDays: number(days)}
+		if strings.Contains(brief, "yapmayan") {
+			spec = segment.Spec{City: text("Ankara"), NotPurchasedWithinDays: number(days)}
+		}
+		proposal := proposalOf(spec)
+		if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems != nil {
+			t.Fatalf("%s: %v", brief, problems)
+		}
+	}
+}
+
+// A word a list knows can be about something else. The model may say so, but it has
+// to name the word it means.
+func TestListedWordsCanBeSaidToBeAboutTheMessage(t *testing.T) {
+	t.Parallel()
+	for brief, word := range map[string]string{
+		"Alışveriş sepeti özelliğimizi tanıtan duyuru, Bursa müşterilerine": "sepeti",
+		"Tüm Bursa müşterilerine, yaş fark etmeksizin":                      "yaş",
+		"Erkek kadın fark etmeksizin tüm Bursa müşterileri":                 "kadın",
+	} {
+		proposal := proposalOf(segment.Spec{City: text("Bursa")})
+		if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems != nil {
+			t.Fatal(problems)
+		}
+		if len(proposal.Unmatched) == 0 {
+			t.Fatalf("%s: nothing held without the claim", brief)
+		}
+		proposal = proposalOf(segment.Spec{City: text("Bursa")})
+		proposal.NotAudience = []string{"Erkek kadın fark etmeksizin", word + " özelliği"}
+		if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems != nil {
+			t.Fatal(problems)
+		}
+		if len(proposal.Unmatched) != 0 {
+			t.Fatalf("%s: unmatched %v", brief, proposal.Unmatched)
+		}
+	}
+}
