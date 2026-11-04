@@ -1,5 +1,7 @@
 # Smart Campaign Composer
 
+[![CI](https://github.com/negativexq/smart-campaign-composer/actions/workflows/ci.yml/badge.svg)](https://github.com/negativexq/smart-campaign-composer/actions/workflows/ci.yml)
+
 Turns a marketer's plain-language brief into a validated audience and SMS and email messages, waits for human approval, sends through a mock provider, and shows delivery status live. No real messages are ever sent.
 
 The full path works with the mock AI or a real model: brief, validated audience, validated messages, approval, immediate or scheduled sending through the queue, live progress and a per-recipient report. `make test-e2e` covers it end to end, and `make test-chaos` kills and stops services under a running stack. The UI components are visible with sample data at http://localhost:8080/design.
@@ -83,6 +85,8 @@ make benchmark   # measures the system's limits in a single pass
 ```
 
 Integration tests use real PostgreSQL and fail, rather than skip, when it is missing.
+
+CI runs on every push to `main` and every pull request: formatting, vet and the Go tests with the race detector, the frontend tests, type check and build, then the acceptance and chaos tests against the full stack on the mock AI. It needs no API key. `make benchmark` stays manual.
 
 ## Layout
 
