@@ -41,6 +41,7 @@ type ListFilter struct {
 	CreatedWithinDays int
 	Sort              string
 	Limit             int
+	Offset            int
 }
 
 // listOrders holds the only orderings a list can ask for, so no request text
@@ -66,20 +67,50 @@ type Summary struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// List returns campaigns, newest first.
-func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error) {
+// campaignsMatching is which campaigns a filter keeps, shared by the list and its total.
+const campaignsMatching = `
+	FROM campaigns c
+	WHERE ($1::text[] IS NULL OR c.status = ANY($1))
+	  AND ($2 = '' OR c.name ILIKE '%' || $2 || '%' ESCAPE '\' OR c.brief ILIKE '%' || $2 || '%' ESCAPE '\')
+	  AND ($3 = '' OR $3 = ANY(c.channels))
+	  AND ($4 = 0 OR c.created_at >= now() - make_interval(days => $4))`
+
+// args checks a filter and gives the values campaignsMatching asks for.
+func (f ListFilter) args() ([]any, error) {
 	var statuses []string
-	if filter.Group != "" {
-		known, ok := groupStatuses[filter.Group]
+	if f.Group != "" {
+		known, ok := groupStatuses[f.Group]
 		if !ok {
 			return nil, ErrUnknownGroup
 		}
 		statuses = known
 	}
-	order, known := listOrders[filter.Sort]
-	if !known || filter.CreatedWithinDays < 0 || (filter.Channel != "" && filter.Channel != "sms" && filter.Channel != "email") {
+	if _, known := listOrders[f.Sort]; !known || f.CreatedWithinDays < 0 || (f.Channel != "" && f.Channel != "sms" && f.Channel != "email") {
 		return nil, ErrUnknownFilter
 	}
+	return []any{statuses, escapeLike(strings.TrimSpace(f.Query)), f.Channel, f.CreatedWithinDays}, nil
+}
+
+// CountCampaigns says how many campaigns a filter keeps across every page.
+func (s *Service) CountCampaigns(ctx context.Context, filter ListFilter) (int, error) {
+	args, err := filter.args()
+	if err != nil {
+		return 0, err
+	}
+	var total int
+	if err := s.db.QueryRow(ctx, `SELECT count(*)`+campaignsMatching, args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count campaigns: %w", err)
+	}
+	return total, nil
+}
+
+// List returns one page of campaigns, newest first.
+func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error) {
+	args, err := filter.args()
+	if err != nil {
+		return nil, err
+	}
+	order := listOrders[filter.Sort]
 	limit := filter.Limit
 	if limit <= 0 || limit > DefaultListLimit {
 		limit = DefaultListLimit
@@ -91,13 +122,9 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 		       c.created_at, c.updated_at
 		-- Choosing the page first means only its campaigns get counted.
 		FROM (
-			SELECT * FROM campaigns c
-			WHERE ($1::text[] IS NULL OR c.status = ANY($1))
-			  AND ($2 = '' OR c.name ILIKE '%' || $2 || '%' ESCAPE '\' OR c.brief ILIKE '%' || $2 || '%' ESCAPE '\')
-			  AND ($4 = '' OR $4 = ANY(c.channels))
-			  AND ($5 = 0 OR c.created_at >= now() - make_interval(days => $5))
+			SELECT c.*`+campaignsMatching+`
 			ORDER BY `+order+`
-			LIMIT $3
+			LIMIT $5 OFFSET $6
 		) c
 		LEFT JOIN LATERAL (
 			SELECT sum(n)::bigint AS total,
@@ -108,7 +135,7 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 				GROUP BY channel, status
 			) counts
 		) d ON true
-		ORDER BY `+order, statuses, escapeLike(strings.TrimSpace(filter.Query)), limit, filter.Channel, filter.CreatedWithinDays)
+		ORDER BY `+order, append(args, limit, max(filter.Offset, 0))...)
 	if err != nil {
 		return nil, fmt.Errorf("list campaigns: %w", err)
 	}

@@ -65,9 +65,38 @@ export function isFiltered(query: DeliveryQuery): boolean {
   return Object.values(query).some(Boolean);
 }
 
+// No chart selects by these, so a chart click narrows within them instead of dropping them.
+const BESIDE_CHARTS: (keyof DeliveryQuery)[] = ["calls", "city"];
+
 /** A selection is the same when all of its fields match, so clicking it again can clear it. */
 export function matches(query: DeliveryQuery, selection: Partial<DeliveryQuery>): boolean {
-  return (Object.keys(query) as (keyof DeliveryQuery)[]).every((key) => query[key] === { ...noFilter(), ...selection }[key]);
+  const selected = { ...noFilter(), ...selection };
+  return (Object.keys(query) as (keyof DeliveryQuery)[]).every((key) => BESIDE_CHARTS.includes(key) || query[key] === selected[key]);
+}
+
+/** What a chart click leaves: it replaces the earlier chart selection, or clears it when clicked again. */
+export function applySelection(query: DeliveryQuery, selection: Partial<DeliveryQuery>): DeliveryQuery {
+  const kept = { ...noFilter(), calls: query.calls, city: query.city };
+  return matches(query, selection) ? kept : { ...kept, ...selection };
+}
+
+/** The filters named in an address. Anything else there belongs to someone else. */
+export function queryFromSearch(search: string): DeliveryQuery {
+  const params = new URLSearchParams(search);
+  const query: Record<string, string> = noFilter();
+  for (const key of Object.keys(query)) query[key] = params.get(key) ?? "";
+  return query as DeliveryQuery;
+}
+
+/** An address's search part with these filters in it and everything else left alone. */
+export function searchWithQuery(search: string, query: DeliveryQuery): string {
+  const params = new URLSearchParams(search);
+  for (const [key, value] of Object.entries(query)) {
+    if (value) params.set(key, value);
+    else params.delete(key);
+  }
+  const text = params.toString();
+  return text ? `?${text}` : "";
 }
 
 export type ChannelSegment = { status: DeliveryStatus | "WAITING"; label: string; count: number };

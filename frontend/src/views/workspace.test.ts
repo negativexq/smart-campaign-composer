@@ -97,6 +97,24 @@ describe("overview", () => {
     expect(wrapper.text()).toContain("Audience refined");
   });
 
+  it("shows more campaigns past the first page and how many there are", async () => {
+    const everyone = Array.from({ length: 130 }, (_, index) => summary({ id: `c${index}`, name: `Campaign ${index}` }));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const offset = Number(new URL(url, "http://test").searchParams.get("offset") ?? 0);
+      // As the backend does: never more than 100 at once. The second page repeats one row, as it does after a campaign is created.
+      const start = offset ? offset - 1 : 0;
+      return { ok: true, status: 200, json: async () => ({ campaigns: everyone.slice(start, start + 100), total: everyone.length }) } as Response;
+    }));
+    const wrapper = mount(CampaignsView);
+    await flushPromises();
+    expect(wrapper.find("[data-testid=campaign-count]").text()).toBe("Showing 100 of 130 campaigns");
+
+    await wrapper.find("[data-testid=more-campaigns]").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=campaign-count]").text()).toBe("130 campaigns");
+    expect(wrapper.find("[data-testid=more-campaigns]").exists()).toBe(false);
+  });
+
   it("leads from each total to the campaigns it counts", async () => {
     const { wrapper } = await open("/", {
       "/api/overview": { counts: { total: 24, drafts: 3, active: 2, completed: 18, failed: 1 }, recent_campaigns: [summary()], recent_activity: activity },
@@ -107,7 +125,7 @@ describe("overview", () => {
 
   it("opens the filter the address names and keeps it there", async () => {
     window.history.replaceState({}, "", "/campaigns?group=failed");
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ campaigns: [] }) }) as Response));
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ campaigns: [], total: 0 }) }) as Response));
     const wrapper = mount(CampaignsView);
     await flushPromises();
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("group=failed"))).toBe(true);
@@ -161,6 +179,7 @@ describe("campaign list", () => {
           summary(),
           summary({ id: "c2", status: "DISPATCHING", channels: ["email", "sms"], deliveries_total: 200, deliveries_processed: 137 }),
         ],
+        total: 2,
       },
     });
     await settle();
@@ -175,7 +194,7 @@ describe("campaign list", () => {
   });
 
   it("filters by channel and age and sorts on the server", async () => {
-    const { wrapper, fetchMock } = await open("/campaigns", { "/api/campaigns": { campaigns: [summary()] } });
+    const { wrapper, fetchMock } = await open("/campaigns", { "/api/campaigns": { campaigns: [summary()], total: 1 } });
     await settle();
 
     await wrapper.find("#campaign-channel").setValue("sms");
@@ -191,9 +210,9 @@ describe("campaign list", () => {
 
   it("filters by group and search on the server", async () => {
     const { wrapper, fetchMock } = await open("/campaigns", {
-      "/api/campaigns": { campaigns: [summary()] },
-      "/api/campaigns?group=drafts": { campaigns: [] },
-      "/api/campaigns?group=drafts&q=winter+sale": { campaigns: [] },
+      "/api/campaigns": { campaigns: [summary()], total: 1 },
+      "/api/campaigns?group=drafts": { campaigns: [], total: 0 },
+      "/api/campaigns?group=drafts&q=winter+sale": { campaigns: [], total: 0 },
     });
     await settle();
 
@@ -207,7 +226,7 @@ describe("campaign list", () => {
   });
 
   it("offers the first campaign on an empty list", async () => {
-    const { wrapper } = await open("/campaigns", { "/api/campaigns": { campaigns: [] } });
+    const { wrapper } = await open("/campaigns", { "/api/campaigns": { campaigns: [], total: 0 } });
     await settle();
     expect(wrapper.find("[data-testid=no-campaigns] a").attributes("href")).toBe("/campaigns/new");
   });

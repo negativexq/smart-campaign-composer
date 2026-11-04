@@ -10,8 +10,9 @@ import SegmentRules from "../components/SegmentRules.vue";
 import CampaignName from "../components/CampaignName.vue";
 import LanguagePicker from "../components/LanguagePicker.vue";
 import MetricCard from "../components/MetricCard.vue";
+import RefinementDiff from "../components/RefinementDiff.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
-import { briefSegments } from "../lib/audience";
+import { briefSegments, ruleChanges, type RuleChange } from "../lib/audience";
 import { reachHint } from "../lib/message";
 import { channelLabel, firstChannel, firstMessagePath } from "../lib/campaignSteps";
 import { takeAudienceRequest } from "../lib/pendingAudience";
@@ -27,6 +28,7 @@ const busyMessage = ref("");
 const refinement = ref("");
 const savingLanguages = ref(false);
 const briefUpdatedBy = ref("");
+const refined = ref<{ changes: RuleChange[]; before: number; after: number } | null>(null);
 const editingBrief = ref(false);
 const editedBrief = ref("");
 // The results build up in order only right after a search, not when a draft is reopened.
@@ -52,6 +54,7 @@ async function propose(input: { brief?: string; refinement?: string }, message: 
   busyMessage.value = message;
   actionError.value = "";
   briefUpdatedBy.value = "";
+  refined.value = null;
   try {
     campaign.value = await proposeSegment(props.campaignId, input);
     staged.value = true;
@@ -66,15 +69,22 @@ async function propose(input: { brief?: string; refinement?: string }, message: 
 
 async function refine() {
   const asked = refinement.value;
-  const before = campaign.value?.brief;
+  const earlier = campaign.value;
   if (!(await propose({ refinement: asked }, "Updating the segment rule..."))) return;
   refinement.value = "";
-  if (campaign.value?.brief !== before) briefUpdatedBy.value = asked;
+  if (!campaign.value || !earlier) return;
+  if (campaign.value.brief !== earlier.brief) briefUpdatedBy.value = asked;
+  const changes = ruleChanges(earlier.conditions, campaign.value.conditions);
+  const [before, after] = [earlier.audience.total, campaign.value.audience.total];
+  // A request that changed nothing already says so in its own notice.
+  if (changes.length || before !== after) refined.value = { changes, before, after };
 }
 
 async function chooseLanguages(excluded: string[]) {
   savingLanguages.value = true;
   actionError.value = "";
+  // Leaving out a language moves the audience, so the comparison would no longer hold.
+  refined.value = null;
   try {
     campaign.value = await setExcludedLanguages(props.campaignId, excluded);
   } catch (failure) {
@@ -149,6 +159,7 @@ onMounted(async () => {
     <AudienceLoading v-if="busyMessage || waitingForCounts" :message="busyMessage || 'Counting the audience...'" />
 
     <template v-else-if="hasProposal">
+      <RefinementDiff v-if="refined" v-bind="refined" />
       <SegmentRules :campaign="campaign" :staged="staged" />
       <AudienceFunnel :campaign="campaign" :breakdown="breakdown" :failed="breakdownFailed" :staged="staged" :start-after="funnelStart" show-sources />
 

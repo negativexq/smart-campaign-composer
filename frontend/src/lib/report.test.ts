@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Progress } from "../api/campaigns";
-import { arrivalOf, bucketQuery, channelBars, describeQuery, formatBucketWidth, matches, niceMax, noFilter } from "./report";
+import { applySelection, arrivalOf, bucketQuery, channelBars, describeQuery, formatBucketWidth, matches, niceMax, noFilter, queryFromSearch, searchWithQuery } from "./report";
 
 describe("channelBars", () => {
   const progress = (byChannel: Progress["by_channel"]) => ({ by_channel: byChannel }) as unknown as Progress;
@@ -61,5 +61,39 @@ describe("arrivalOf", () => {
   it("only accepted messages wait for a report", () => {
     expect(arrivalOf({ status: "SENT" })).toEqual({ label: "Waiting for a report", at: null });
     expect(arrivalOf({ status: "FAILED" })).toBeNull();
+  });
+});
+
+describe("chart selections", () => {
+  it("replaces the earlier selection and keeps what no chart selects by", () => {
+    const query = { ...noFilter(), city: "Ankara", calls: "2+", outcome: "timeout" };
+    expect(applySelection(query, { channel: "sms", status: "SENT" })).toEqual({ ...noFilter(), city: "Ankara", calls: "2+", channel: "sms", status: "SENT" });
+  });
+
+  it("clears only the selection when it is clicked again, and still shows as selected", () => {
+    const query = { ...noFilter(), city: "Ankara", reason: "timeout" };
+    expect(matches(query, { reason: "timeout" })).toBe(true);
+    expect(applySelection(query, { reason: "timeout" })).toEqual({ ...noFilter(), city: "Ankara" });
+  });
+
+  it("does not count a filter set by hand as the chart's selection", () => {
+    expect(matches({ ...noFilter(), status: "SENT", channel: "sms" }, { channel: "sms" })).toBe(false);
+  });
+});
+
+describe("filters in the address", () => {
+  it("reads the filters and nothing else", () => {
+    const query = queryFromSearch("?tab=deliveries&city=Ankara&status=SENT&utm=x");
+    expect(query).toEqual({ ...noFilter(), city: "Ankara", status: "SENT" });
+  });
+
+  it("writes them beside what is already there and removes those cleared", () => {
+    expect(searchWithQuery("?tab=deliveries&status=SENT", { ...noFilter(), calls: "2+" })).toBe("?tab=deliveries&calls=2%2B");
+    expect(searchWithQuery("?status=SENT", noFilter())).toBe("");
+  });
+
+  it("comes back the same, a time range included", () => {
+    const query = { ...noFilter(), from: "2026-11-03T12:00:00Z", to: "2026-11-03T12:00:10Z", channel: "email" };
+    expect(queryFromSearch(searchWithQuery("?tab=deliveries", query))).toEqual(query);
   });
 });

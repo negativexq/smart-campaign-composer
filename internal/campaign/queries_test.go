@@ -288,3 +288,45 @@ func TestOverviewShowsWhatEachChannelsCallsDid(t *testing.T) {
 		t.Fatalf("calls %d, not accepted %d, %+v (%v)", calls, notAccepted, overview.Channels, named)
 	}
 }
+
+func TestListPagesThroughEveryCampaignAndCountsThem(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, step{output: validProposal})
+	ctx := context.Background()
+	if _, err := h.pool.Exec(ctx, `
+		INSERT INTO campaigns (brief, name, status)
+		SELECT 'paged ' || n, 'Paged ' || lpad(n::text, 3, '0'), 'DRAFT' FROM generate_series(1, 130) n`); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	filter := campaign.ListFilter{Query: "paged", Sort: "name", Group: "drafts"}
+	seen := map[string]bool{}
+	for offset := 0; ; offset += campaign.DefaultListLimit {
+		filter.Offset = offset
+		page, err := h.service.List(ctx, filter)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, summary := range page {
+			seen[summary.ID] = true
+		}
+	}
+	if len(seen) != 130 {
+		t.Fatalf("reached %d campaigns, want 130", len(seen))
+	}
+	total, err := h.service.CountCampaigns(ctx, filter)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if total != 130 {
+		t.Fatalf("total %d", total)
+	}
+	if none, err := h.service.CountCampaigns(ctx, campaign.ListFilter{Query: "paged", Group: "failed"}); err != nil || none != 0 {
+		t.Fatalf("other group: %d %v", none, err)
+	}
+	if _, err := h.service.CountCampaigns(ctx, campaign.ListFilter{Group: "nope"}); !errors.Is(err, campaign.ErrUnknownGroup) {
+		t.Fatalf("unknown group: %v", err)
+	}
+}

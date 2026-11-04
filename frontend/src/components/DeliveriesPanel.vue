@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 import { deliveriesCsvUrl, errorMessage, getDeliveries, getDeliveryCities, getDeliveryAttempts, type Delivery, type DeliveryAttempt, type Progress } from "../api/campaigns";
 import { DELIVERY_STATUSES, deliveryStatusMeta, type DeliveryStatus } from "../lib/deliveryStatus";
-import { formatDateTime } from "../lib/format";
-import { ARRIVALS, CALLS, OUTCOMES, REASONS, arrivalOf, describeQuery, isFiltered, matches, noFilter, type DeliveryQuery } from "../lib/report";
+import { formatDateTime, shownOf } from "../lib/format";
+import { ARRIVALS, CALLS, OUTCOMES, REASONS, applySelection, arrivalOf, describeQuery, isFiltered, noFilter, queryFromSearch, searchWithQuery, type DeliveryQuery } from "../lib/report";
 import DeliveryReport from "./DeliveryReport.vue";
 import StatusBadge from "./StatusBadge.vue";
 import ValidationNotice from "./ValidationNotice.vue";
@@ -18,11 +18,13 @@ const PROBLEM_OPTIONS = ["rate_limited", "server_error", "rejected", "timeout"];
 const props = defineProps<{ campaignId: string; channels: string[]; abTest?: boolean; refreshKey?: number; progress?: Progress | null }>();
 
 const rows = ref<Delivery[] | null>(null);
-const query = ref<DeliveryQuery>(noFilter());
+// In the address, so a refresh keeps them and a link can share them.
+const query = ref<DeliveryQuery>(queryFromSearch(window.location.search));
 const cities = ref<string[]>([]);
 const tableStart = ref<HTMLElement | null>(null);
 const error = ref("");
-const hasMore = ref(false);
+const total = ref(0);
+const hasMore = computed(() => (rows.value?.length ?? 0) < total.value);
 const openId = ref("");
 const attempts = ref<Record<string, DeliveryAttempt[]>>({});
 let latest = 0;
@@ -30,32 +32,26 @@ let latest = 0;
 // Asks in requests the backend will answer in full, so a short answer means the list ended.
 async function fetchFrom(offset: number, count: number) {
   const found: Delivery[] = [];
+  let matching = 0;
   while (found.length < count) {
     const limit = Math.min(count - found.length, LARGEST_REQUEST);
     const page = await getDeliveries(props.campaignId, { ...query.value, limit, offset: offset + found.length });
-    found.push(...page);
-    if (page.length < limit) break;
+    found.push(...page.deliveries);
+    matching = page.total;
+    if (page.deliveries.length < limit) break;
   }
-  return found;
-}
-
-// A full answer does not say whether anything follows it, and offering more that
-// is not there would leave a button that does nothing.
-async function fetchPage(offset: number, count: number) {
-  const found = await fetchFrom(offset, count);
-  const more = found.length === count && (await fetchFrom(offset + count, 1)).length > 0;
-  return { found, more };
+  return { found, matching };
 }
 
 // Reads the rows on screen again, because the list changes while a campaign sends.
 async function load(count: number) {
   const request = ++latest;
   try {
-    const { found, more } = await fetchPage(0, count);
+    const { found, matching } = await fetchFrom(0, count);
     // A slower answer for earlier filters must not replace a newer one.
     if (request !== latest) return;
     rows.value = found;
-    hasMore.value = more;
+    total.value = matching;
     error.value = "";
   } catch (failure) {
     if (request === latest) error.value = errorMessage(failure);
@@ -66,10 +62,10 @@ async function showMore() {
   const request = ++latest;
   const shown = rows.value ?? [];
   try {
-    const { found, more } = await fetchPage(shown.length, PAGE);
+    const { found, matching } = await fetchFrom(shown.length, PAGE);
     if (request !== latest) return;
     rows.value = [...shown, ...found];
-    hasMore.value = more;
+    total.value = matching;
     error.value = "";
   } catch (failure) {
     if (request === latest) error.value = errorMessage(failure);
@@ -92,13 +88,12 @@ async function toggle(row: Delivery) {
 function changeFilter() {
   openId.value = "";
   rows.value = null;
-  hasMore.value = false;
+  total.value = 0;
   load(PAGE);
 }
 
-// Selecting what is already selected clears it.
 function selectFromChart(selection: Partial<DeliveryQuery>) {
-  query.value = matches(query.value, selection) ? noFilter() : { ...noFilter(), ...selection };
+  query.value = applySelection(query.value, selection);
   changeFilter();
   tableStart.value?.scrollIntoView?.({ behavior: "smooth", block: "start" });
 }
@@ -112,6 +107,10 @@ function clearFilters() {
 async function loadCities() {
   cities.value = await getDeliveryCities(props.campaignId).catch(() => []);
 }
+
+watch(query, (current) => {
+  window.history.replaceState({}, "", `${window.location.pathname}${searchWithQuery(window.location.search, current)}`);
+}, { deep: true, flush: "sync" });
 
 watch(() => props.refreshKey, () => {
   load(Math.max(rows.value?.length ?? 0, PAGE));
@@ -207,6 +206,7 @@ onMounted(() => {
     </div>
 
     <div v-if="rows?.length" class="export">
+      <p class="small muted count" data-testid="delivery-count">{{ shownOf(rows.length, total, "delivery", "deliveries") }}</p>
       <a class="button button--secondary" :href="deliveriesCsvUrl(campaignId, query)" download data-testid="export-csv">
         {{ isFiltered(query) ? "Export these as CSV" : "Export all as CSV" }}
       </a>
@@ -299,7 +299,14 @@ onMounted(() => {
 
 .export {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.count {
+  margin: 0;
 }
 
 .export .button {

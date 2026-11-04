@@ -465,9 +465,9 @@ describe("campaign page after approval", () => {
     const row = { id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 2, response_code: 202, reason: "", provider_message_id: "m", next_attempt_at: "", sent_at: null, updated_at: "" };
     const { wrapper } = await open({
       ...routes({ ...ready, status: "COMPLETED" }, progress),
-      "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [row] } },
+      "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [row], total: 1 } },
       "GET /api/campaigns/c1/report": { body: { reasons: [], problems: [], timeline: { bucket_seconds: 0, buckets: [] }, engagement: [] } },
-      "GET /api/campaigns/c1/deliveries?limit=100&status=FAILED": { body: { deliveries: [] } },
+      "GET /api/campaigns/c1/deliveries?limit=100&status=FAILED": { body: { deliveries: [], total: 0 } },
       "GET /api/campaigns/c1/deliveries/d1/attempts": {
         body: { attempts: [{ attempt: 1, response_code: 500, outcome: "server_error", error: "", occurred_at: "2026-11-03T12:00:00Z" }, { attempt: 2, response_code: 202, outcome: "accepted", error: "", occurred_at: "2026-11-03T12:00:05Z" }] },
       },
@@ -497,11 +497,12 @@ describe("campaign page after approval", () => {
       // As the backend does: never more than 500 for one request.
       const limit = Math.min(Number(address.searchParams.get("limit")), 500);
       const offset = Number(address.searchParams.get("offset") ?? 0);
-      return { ok: true, status: 200, json: async () => ({ deliveries: everyone.slice(offset, offset + limit) }) } as Response;
+      return { ok: true, status: 200, json: async () => ({ deliveries: everyone.slice(offset, offset + limit), total: everyone.length }) } as Response;
     }));
     const wrapper = mount(DeliveriesPanel, { props: { campaignId: "c1", channels: ["sms"] } });
     await flushPromises();
     expect(wrapper.findAll("[data-testid=delivery-row]")).toHaveLength(100);
+    expect(wrapper.find("[data-testid=delivery-count]").text()).toBe("Showing 100 of 700 deliveries");
     for (let shown = 200; shown <= 700; shown += 100) {
       expect(wrapper.find("[data-testid=load-more]").exists()).toBe(true);
       await wrapper.find("[data-testid=load-more]").trigger("click");
@@ -511,6 +512,7 @@ describe("campaign page after approval", () => {
     expect(requested).toContain("?limit=100&offset=600");
     // The list ends exactly on a full page, and nothing offers more.
     expect(wrapper.find("[data-testid=load-more]").exists()).toBe(false);
+    expect(wrapper.find("[data-testid=delivery-count]").text()).toBe("700 deliveries");
 
     // What is on screen is read again in requests the backend answers in full.
     requested.length = 0;
@@ -525,11 +527,11 @@ describe("campaign page after approval", () => {
     const row = { id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 1, response_code: 202, reason: "", next_attempt_at: "2026-11-03T12:00:00Z", sent_at: null, updated_at: "2026-11-03T12:00:00Z" };
     const fetchMock = stub({
       ...routes({ ...ready, status: "COMPLETED" }, progress),
-      "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [row] } },
+      "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [row], total: 1 } },
       "GET /api/campaigns/c1/delivery-cities": { body: { cities: ["Ankara", "Bursa"] } },
       "GET /api/campaigns/c1/report": { body: { reasons: [], problems: [], timeline: { bucket_seconds: 0, buckets: [] }, engagement: [] } },
-      "GET /api/campaigns/c1/deliveries?limit=100&calls=2%2B": { body: { deliveries: [] } },
-      "GET /api/campaigns/c1/deliveries?limit=100&calls=2%2B&city=Bursa": { body: { deliveries: [row] } },
+      "GET /api/campaigns/c1/deliveries?limit=100&calls=2%2B": { body: { deliveries: [], total: 0 } },
+      "GET /api/campaigns/c1/deliveries?limit=100&calls=2%2B&city=Bursa": { body: { deliveries: [row], total: 1 } },
     });
     const wrapper = mount(CampaignDetailView, { props: { campaignId: "c1" } });
     await flushPromises();
@@ -548,9 +550,9 @@ describe("campaign page after approval", () => {
   it("exports what the filters keep and copies the campaign", async () => {
     stub({
       ...routes({ ...ready, status: "COMPLETED" }, progress),
-      "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [{ id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 1, response_code: 202, reason: "", next_attempt_at: "2026-11-03T12:00:00Z", sent_at: null, updated_at: "2026-11-03T12:00:00Z" }] } },
+      "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [{ id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 1, response_code: 202, reason: "", next_attempt_at: "2026-11-03T12:00:00Z", sent_at: null, updated_at: "2026-11-03T12:00:00Z" }], total: 1 } },
       "GET /api/campaigns/c1/report": { body: { reasons: [], problems: [], timeline: { bucket_seconds: 0, buckets: [] }, engagement: [] } },
-      "GET /api/campaigns/c1/deliveries?limit=100&channel=sms": { body: { deliveries: [{ id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 1, response_code: 202, reason: "", next_attempt_at: "2026-11-03T12:00:00Z", sent_at: null, updated_at: "2026-11-03T12:00:00Z" }] } },
+      "GET /api/campaigns/c1/deliveries?limit=100&channel=sms": { body: { deliveries: [{ id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 1, response_code: 202, reason: "", next_attempt_at: "2026-11-03T12:00:00Z", sent_at: null, updated_at: "2026-11-03T12:00:00Z" }], total: 1 } },
       "POST /api/campaigns/c1/duplicate": { body: { ...ready, id: "c2" } },
     });
     const wrapper = mount(CampaignDetailView, { props: { campaignId: "c1" } });
@@ -587,14 +589,14 @@ describe("campaign page after approval", () => {
       const fetchMock = stub({
         ...routes({ ...ready, status: "COMPLETED" }, progress),
         "GET /api/campaigns/c1/report": { body },
-        "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [row] } },
-        "GET /api/campaigns/c1/deliveries?limit=100&status=SENT&channel=sms": { body: { deliveries: [row] } },
-        "GET /api/campaigns/c1/deliveries?limit=100&outcome=rate_limited": { body: { deliveries: [] } },
-        "GET /api/campaigns/c1/deliveries?limit=100&status=SENT&channel=sms&arrival=bounced": { body: { deliveries: [{ ...row, bounced_at: "2026-11-03T12:00:05Z" }] } },
-        "GET /api/campaigns/c1/deliveries?limit=100&reason=server_error": { body: { deliveries: [] } },
-        "GET /api/campaigns/c1/deliveries?limit=100&channel=sms&opened=yes": { body: { deliveries: [{ ...row, opened_at: "2026-11-03T12:05:00Z" }] } },
-        "GET /api/campaigns/c1/deliveries?limit=100&status=SENT&channel=email&opened=no": { body: { deliveries: [row] } },
-        "GET /api/campaigns/c1/deliveries?limit=100&from=2026-11-03T12%3A00%3A00Z&to=2026-11-03T12%3A00%3A10.000Z": { body: { deliveries: [] } },
+        "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [row], total: 1 } },
+        "GET /api/campaigns/c1/deliveries?limit=100&status=SENT&channel=sms": { body: { deliveries: [row], total: 1 } },
+        "GET /api/campaigns/c1/deliveries?limit=100&outcome=rate_limited": { body: { deliveries: [], total: 0 } },
+        "GET /api/campaigns/c1/deliveries?limit=100&status=SENT&channel=sms&arrival=bounced": { body: { deliveries: [{ ...row, bounced_at: "2026-11-03T12:00:05Z" }], total: 1 } },
+        "GET /api/campaigns/c1/deliveries?limit=100&reason=server_error": { body: { deliveries: [], total: 0 } },
+        "GET /api/campaigns/c1/deliveries?limit=100&channel=sms&opened=yes": { body: { deliveries: [{ ...row, opened_at: "2026-11-03T12:05:00Z" }], total: 1 } },
+        "GET /api/campaigns/c1/deliveries?limit=100&status=SENT&channel=email&opened=no": { body: { deliveries: [row], total: 1 } },
+        "GET /api/campaigns/c1/deliveries?limit=100&from=2026-11-03T12%3A00%3A00Z&to=2026-11-03T12%3A00%3A10.000Z": { body: { deliveries: [], total: 0 } },
       });
       const wrapper = mount(CampaignDetailView, { props: { campaignId: "c1" } });
       await flushPromises();
@@ -632,6 +634,30 @@ describe("campaign page after approval", () => {
       await flushPromises();
       expect(wrapper.find("[data-testid=active-filter]").exists()).toBe(false);
       expect(wrapper.find("[data-testid=delivery-row]").exists()).toBe(true);
+    });
+
+    it("keeps filters in the address, and a chart click keeps the city", async () => {
+      window.history.replaceState({}, "", "/campaigns/c1?tab=deliveries&city=Bursa");
+      const { wrapper, fetchMock } = await openReport();
+      expect(asked(fetchMock, "city=Bursa")).toBe(1);
+      expect(wrapper.find("[data-testid=active-filter]").text()).toContain("Bursa");
+
+      await wrapper.find("[data-testid=segment-sms-SENT]").trigger("click");
+      await flushPromises();
+      expect(asked(fetchMock, "status=SENT&channel=sms&city=Bursa")).toBe(1);
+      expect(window.location.search).toBe("?tab=deliveries&city=Bursa&status=SENT&channel=sms");
+
+      // Clicking the tab already open must not lose them.
+      await wrapper.find("#tab-deliveries").trigger("click");
+      expect(window.location.search).toBe("?tab=deliveries&city=Bursa&status=SENT&channel=sms");
+
+      await wrapper.find("[data-testid=segment-sms-SENT]").trigger("click");
+      await flushPromises();
+      expect(window.location.search).toBe("?tab=deliveries&city=Bursa");
+
+      await wrapper.find("[data-testid=clear-filters]").trigger("click");
+      await flushPromises();
+      expect(window.location.search).toBe("?tab=deliveries");
     });
 
     it("selecting a reason replaces the earlier selection", async () => {

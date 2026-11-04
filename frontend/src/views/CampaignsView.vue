@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { errorMessage, listCampaigns, type CampaignGroup, type CampaignSummary } from "../api/campaigns";
 import CampaignTable from "../components/CampaignTable.vue";
 import ValidationNotice from "../components/ValidationNotice.vue";
+import { shownOf } from "../lib/format";
 
 const SEARCH_DELAY_MS = 250;
 
@@ -23,19 +24,40 @@ const channel = ref("");
 const createdWithinDays = ref("");
 const sort = ref("");
 const campaigns = ref<CampaignSummary[] | null>(null);
+const total = ref(0);
 const error = ref("");
 const isFiltered = computed(() => group.value !== "" || query.value.trim() !== "" || channel.value !== "" || createdWithinDays.value !== "");
 
 let latestRequest = 0;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
+const currentFilter = () => ({ group: group.value, query: query.value, channel: channel.value, createdWithinDays: createdWithinDays.value, sort: sort.value });
+
 async function load() {
   const request = ++latestRequest;
   error.value = "";
   try {
-    const result = await listCampaigns({ group: group.value, query: query.value, channel: channel.value, createdWithinDays: createdWithinDays.value, sort: sort.value });
+    const result = await listCampaigns(currentFilter());
     // A slower earlier response must not replace the current filter's results.
-    if (request === latestRequest) campaigns.value = result;
+    if (request !== latestRequest) return;
+    campaigns.value = result.campaigns;
+    total.value = result.total;
+  } catch (failure) {
+    if (request === latestRequest) error.value = errorMessage(failure);
+  }
+}
+
+async function showMore() {
+  const request = ++latestRequest;
+  const shown = campaigns.value ?? [];
+  error.value = "";
+  try {
+    const result = await listCampaigns(currentFilter(), shown.length);
+    if (request !== latestRequest) return;
+    // A campaign created meanwhile moves the rest down, so the next page can repeat one.
+    const known = new Set(shown.map((campaign) => campaign.id));
+    campaigns.value = [...shown, ...result.campaigns.filter((campaign) => !known.has(campaign.id))];
+    total.value = result.total;
   } catch (failure) {
     if (request === latestRequest) error.value = errorMessage(failure);
   }
@@ -95,7 +117,13 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
     <ValidationNotice v-if="error" tone="error" title="We could not load your campaigns">{{ error }}</ValidationNotice>
     <p v-else-if="!campaigns" class="muted" role="status">Loading campaigns...</p>
     <template v-else>
-      <CampaignTable v-if="campaigns.length" :campaigns="campaigns" />
+      <template v-if="campaigns.length">
+        <p class="small muted count" data-testid="campaign-count">{{ shownOf(campaigns.length, total, "campaign", "campaigns") }}</p>
+        <CampaignTable :campaigns="campaigns" />
+        <div v-if="campaigns.length < total">
+          <button class="button button--secondary" type="button" data-testid="more-campaigns" @click="showMore">Show more</button>
+        </div>
+      </template>
       <p v-else-if="isFiltered" class="muted" data-testid="no-results">No campaigns match these filters.</p>
       <div v-else class="empty card" data-testid="no-campaigns">
         <p class="muted">No campaigns yet.</p>
@@ -163,6 +191,10 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
   max-width: 100%;
   height: 40px;
   padding-block: 0;
+}
+
+.count {
+  margin: 0;
 }
 
 .empty {

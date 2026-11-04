@@ -25,6 +25,21 @@ export function ruleText(condition: Condition): string {
   return condition.field === "no_purchase_since_cart" ? conditionSentence(condition) : `${condition.label} ${condition.value}`;
 }
 
+export type RuleChange = { field: string; before?: string; after?: string };
+
+/** What differs between two rules, in the order the new rule reads, then what it dropped. */
+export function ruleChanges(before: Condition[], after: Condition[]): RuleChange[] {
+  const earlier = new Map(before.map((condition) => [condition.field, ruleText(condition)]));
+  const changes: RuleChange[] = [];
+  for (const condition of after) {
+    const text = ruleText(condition);
+    if (earlier.get(condition.field) !== text) changes.push({ field: condition.field, before: earlier.get(condition.field), after: text });
+    earlier.delete(condition.field);
+  }
+  for (const [field, text] of earlier) changes.push({ field, before: text });
+  return changes;
+}
+
 /** Where a condition came from, never claiming words nobody wrote. */
 export function sourceOf(campaign: Campaign, condition: Condition): { quotes: string[]; text: string } {
   const evidence = campaign.proposal?.evidence;

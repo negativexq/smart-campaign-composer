@@ -356,6 +356,55 @@ describe("audience page", () => {
     expect((wrapper.find("#refinement").element as HTMLInputElement).value).toBe("");
   });
 
+  it("shows what a refinement changed in the rule and the audience", async () => {
+    const earlier = {
+      ...campaign,
+      audience: { total: 40, sms: 20, email: 20 },
+      conditions: [
+        { field: "city", label: "City is", value: "Ankara" },
+        { field: "cart_added_within_days", label: "Cart added within", value: "7 days" },
+        { field: "language", label: "Language is", value: "Turkish" },
+      ],
+    };
+    const later = {
+      ...earlier,
+      audience: { total: 12, sms: 5, email: 6 },
+      conditions: [
+        { field: "city", label: "City is", value: "Ankara" },
+        { field: "cart_added_within_days", label: "Cart added within", value: "14 days" },
+        { field: "purchased_within_days", label: "Purchased within", value: "30 days" },
+      ],
+    };
+    const { wrapper } = await open({
+      "GET /api/campaigns/c1": { body: earlier },
+      "POST /api/campaigns/c1/segment": { body: later },
+    });
+    expect(wrapper.find("[data-testid=refinement-diff]").exists()).toBe(false);
+
+    await wrapper.find("#refinement").setValue("make it 14 days");
+    await wrapper.findAll("form").at(-1)!.trigger("submit");
+    await flushPromises();
+
+    const changes = wrapper.findAll("[data-testid=refinement-change]").map((row) => [row.find(".kind").text(), row.text().replace(row.find(".kind").text(), "").replace(/\s+/g, " ").trim()]);
+    expect(changes).toEqual([
+      ["Changed", "Cart added within 7 days → Cart added within 14 days"],
+      ["Added", "Purchased within 30 days"],
+      ["Removed", "Language is Turkish"],
+    ]);
+    expect(wrapper.find("[data-testid=refinement-audience]").text().replace(/\s+/g, " ")).toContain("40 → 12");
+  });
+
+  it("does not claim a change when a refinement made none", async () => {
+    const { wrapper } = await open({
+      "GET /api/campaigns/c1": { body: campaign },
+      "POST /api/campaigns/c1/segment": { body: campaign },
+    });
+    await wrapper.find("#refinement").setValue("make it nicer");
+    await wrapper.findAll("form").at(-1)!.trigger("submit");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=refinement-diff]").exists()).toBe(false);
+  });
+
   it("shows the brief the refinement rewrote and says so", async () => {
     const { wrapper } = await open({
       "GET /api/campaigns/c1": { body: campaign },

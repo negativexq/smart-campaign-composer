@@ -90,6 +90,21 @@ func TestEventsThatMakeNoSenseAreRefused(t *testing.T) {
 	if _, err := h.service.Deliveries(ctx, id, campaign.DeliveryFilter{Opened: "maybe"}); !errors.Is(err, campaign.ErrUnknownFilter) {
 		t.Fatalf("bad filter: %v", err)
 	}
+	// The total counts what the filter keeps, whatever the page size.
+	everyone := deliveryRowsByID(t, h, id)
+	if len(everyone) == 0 {
+		t.Fatal("no deliveries to count")
+	}
+	// Nothing has been reported opened here.
+	for filter, want := range map[string]int{"": len(everyone), "yes": 0, "no": len(everyone)} {
+		total, err := h.service.CountDeliveries(ctx, id, campaign.DeliveryFilter{Opened: filter, Limit: 1})
+		if err != nil || total != want {
+			t.Fatalf("opened %q: total %d, want %d, %v", filter, total, want, err)
+		}
+	}
+	if _, err := h.service.CountDeliveries(ctx, id, campaign.DeliveryFilter{Opened: "maybe"}); !errors.Is(err, campaign.ErrUnknownFilter) {
+		t.Fatalf("bad filter on the total: %v", err)
+	}
 }
 
 func deliveryRowsByID(t *testing.T, h *harness, id string) map[string]string {

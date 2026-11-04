@@ -98,18 +98,26 @@ func (a *api) list(w http.ResponseWriter, r *http.Request) {
 		}
 		days = parsed
 	}
-	campaigns, err := a.campaigns.List(r.Context(), campaign.ListFilter{
+	offset, _ := strconv.Atoi(query.Get("offset")) //nolint:errcheck // anything invalid means the start
+	filter := campaign.ListFilter{
 		Group:             query.Get("group"),
 		Query:             query.Get("q"),
 		Channel:           query.Get("channel"),
 		CreatedWithinDays: days,
 		Sort:              query.Get("sort"),
-	})
+		Offset:            offset,
+	}
+	campaigns, err := a.campaigns.List(r.Context(), filter)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"campaigns": campaigns})
+	total, err := a.campaigns.CountCampaigns(r.Context(), filter)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"campaigns": campaigns, "total": total})
 }
 
 func (a *api) activity(w http.ResponseWriter, r *http.Request) {
@@ -500,7 +508,12 @@ func (a *api) deliveries(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deliveries": deliveries})
+	total, err := a.campaigns.CountDeliveries(r.Context(), r.PathValue("id"), filter)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deliveries": deliveries, "total": total})
 }
 
 func (a *api) deliveryCities(w http.ResponseWriter, r *http.Request) {

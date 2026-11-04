@@ -230,15 +230,16 @@ export function getOverview(): Promise<Overview> {
 
 export type CampaignListFilter = { group: CampaignGroup; query: string; channel?: string; createdWithinDays?: string; sort?: string };
 
-export async function listCampaigns(filter: CampaignListFilter): Promise<CampaignSummary[]> {
+export function listCampaigns(filter: CampaignListFilter, offset = 0): Promise<{ campaigns: CampaignSummary[]; total: number }> {
   const params = new URLSearchParams();
   if (filter.group) params.set("group", filter.group);
   if (filter.query.trim()) params.set("q", filter.query.trim());
   if (filter.channel) params.set("channel", filter.channel);
   if (filter.createdWithinDays) params.set("created_within_days", filter.createdWithinDays);
   if (filter.sort) params.set("sort", filter.sort);
+  if (offset) params.set("offset", String(offset));
   const suffix = params.size ? `?${params}` : "";
-  return (await request<{ campaigns: CampaignSummary[] }>(`/api/campaigns${suffix}`)).campaigns;
+  return request(`/api/campaigns${suffix}`);
 }
 
 export async function getActivity(id: string): Promise<ActivityEntry[]> {
@@ -321,10 +322,10 @@ export function duplicateCampaign(id: string): Promise<Campaign> {
   return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/duplicate`, {});
 }
 
-export async function getDeliveries(id: string, filter: Partial<DeliveryQuery> & { limit: number; offset?: number }): Promise<Delivery[]> {
+export function getDeliveries(id: string, filter: Partial<DeliveryQuery> & { limit: number; offset?: number }): Promise<{ deliveries: Delivery[]; total: number }> {
   const { limit, offset, ...rest } = filter;
   const params = deliveryParams(rest, { limit: String(limit), ...(offset ? { offset: String(offset) } : {}) });
-  return (await request<{ deliveries: Delivery[] }>(`/api/campaigns/${encodeURIComponent(id)}/deliveries?${params}`)).deliveries;
+  return request(`/api/campaigns/${encodeURIComponent(id)}/deliveries?${params}`);
 }
 
 export type TimelineBucket = {

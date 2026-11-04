@@ -71,6 +71,8 @@ const tabs = computed(() => {
 });
 
 function selectTab(id: Tab) {
+  // The address also holds the open tab's own state, such as delivery filters.
+  if (id === tab.value) return;
   tab.value = id;
   const path = window.location.pathname;
   window.history.replaceState({}, "", id === "overview" ? path : `${path}?tab=${id}`);
