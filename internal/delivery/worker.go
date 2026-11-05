@@ -55,6 +55,22 @@ const (
 	// takes several deliveries per query instead of running one per finished call.
 	claimGap   = 20 * time.Millisecond
 	errorPause = 2 * time.Second
+
+	// What a channel's loop can be doing, for campaign_delivery_loop_seconds_total.
+	stateSlotWait   = "slot_wait"
+	stateClaimGap   = "claim_gap"
+	stateReserve    = "reserve"
+	stateClaim      = "claim"
+	stateSettle     = "settle"
+	stateHoldPause  = "hold_pause"
+	stateHoldWindow = "hold_window"
+	stateHoldBreak  = "hold_breaker"
+	stateIdle       = "idle"
+	stateError      = "error"
+
+	pauseSourceRateLimit = "rate_limited"
+	pauseSourceBreaker   = "breaker"
+	pauseSourceNotSent   = "not_sent"
 )
 
 // channels is every channel the worker sends on.
@@ -216,11 +232,11 @@ func (w *Worker) runChannel(ctx context.Context, channel string) {
 	defer sending.Wait()
 
 	for ctx.Err() == nil {
-		free := takeFreeSlots(ctx, slots)
+		free := takeFreeSlots(ctx, slots, func(state string, since time.Time) { w.spent(channel, state, since) })
 		if free == 0 {
 			return
 		}
-		claims, pause, err := w.takeDue(ctx, channel, min(free, max(w.config.BatchSize, 1)))
+		claims, pause, state, err := w.takeDue(ctx, channel, min(free, max(w.config.BatchSize, 1)))
 		if err != nil && ctx.Err() == nil {
 			slog.ErrorContext(ctx, "process deliveries", "channel", channel, "error", err)
 		}
@@ -233,46 +249,100 @@ func (w *Worker) runChannel(ctx context.Context, channel string) {
 				w.handleLogged(ctx, item)
 			})
 		}
+		waited := time.Now()
 		select {
 		case <-ctx.Done():
 		case <-time.After(pause):
 		}
+		if state != "" {
+			w.spent(channel, state, waited)
+			w.observeHold(ctx, channel, state, waited)
+		}
 	}
+}
+
+// spent adds the time since since to what the channel's loop spent in state.
+func (w *Worker) spent(channel, state string, since time.Time) {
+	w.metrics.DeliveryLoopSeconds.WithLabelValues(channel, state).Add(time.Since(since).Seconds())
 }
 
 // takeDue claims deliveries only after getting permission to send them. Claiming
 // first would leave them waiting for the limiter, holding slots and running down
 // their leases, until another worker could take them and send them a second time.
-// The duration says how long to wait before trying again.
-func (w *Worker) takeDue(ctx context.Context, channel string, want int) ([]claim, time.Duration, error) {
+// The duration says how long to wait before trying again, and the state what that
+// wait is for; it is empty when there is nothing to wait for.
+func (w *Worker) takeDue(ctx context.Context, channel string, want int) ([]claim, time.Duration, string, error) {
 	breaker := w.breakers[channel]
 	allowed, retry, probing := breaker.allow(want)
 	if allowed == 0 {
-		return nil, retry, nil
+		return nil, retry, stateHoldBreak, nil
 	}
+	reserving := time.Now()
 	permits, err := w.limiter.Reserve(ctx, channel, allowed)
+	granted := time.Now()
+	w.spent(channel, stateReserve, reserving)
+	w.metrics.LimiterReserveDuration.WithLabelValues(channel).Observe(granted.Sub(reserving).Seconds())
 	if err != nil {
 		breaker.giveBack(allowed)
-		return nil, errorPause, err
+		return nil, errorPause, stateError, err
 	}
 	if permits.Granted == 0 {
 		breaker.giveBack(allowed)
-		w.recordHold(ctx, channel, permits)
-		return nil, permits.Retry, nil
+		w.metrics.DeliveryRateLimitWait.WithLabelValues(channel).Observe(permits.Retry.Seconds())
+		if permits.Paused {
+			return nil, permits.Retry, stateHoldPause, nil
+		}
+		return nil, permits.Retry, stateHoldWindow, nil
 	}
-	claims, err := w.claim(ctx, channel, permits.Granted)
+	w.metrics.LimiterGranted.WithLabelValues(channel).Add(float64(permits.Granted))
+	claims, timing, err := w.claim(ctx, channel, permits.Granted)
+	claimed := time.Now()
+	w.spent(channel, stateClaim, granted)
+	w.metrics.LimiterUnused.WithLabelValues(channel).Add(float64(permits.Granted - len(claims)))
 	claims = w.settle(ctx, channel, permits, claims)
+	settled := time.Now()
+	w.spent(channel, stateSettle, claimed)
+	w.metrics.LimiterSettleDuration.WithLabelValues(channel).Observe(settled.Sub(claimed).Seconds())
 	breaker.giveBack(allowed - len(claims))
+	var link trace.SpanContext
+	if len(claims) > 0 {
+		link = w.traceTake(ctx, channel, len(claims), reserving, granted, settled, claimed, timing)
+	}
 	for i := range claims {
 		claims[i].probe = probing
+		claims[i].granted = granted
+		claims[i].take = link
 	}
 	switch {
 	case err != nil:
-		return nil, errorPause, err
+		return nil, errorPause, stateError, err
 	case len(claims) == 0:
-		return nil, idlePause, nil
+		return nil, idlePause, stateIdle, nil
 	}
-	return claims, 0, nil
+	return claims, 0, "", nil
+}
+
+// traceTake writes one round's spans once it is known that the round found work: an
+// idle worker polls several times a second and its rounds are not worth keeping. The
+// messages sent from this round link to the span it returns.
+func (w *Worker) traceTake(ctx context.Context, channel string, claimed int, reserving, granted, settled, claimEnd time.Time, timing claimTiming) trace.SpanContext {
+	ctx, span := w.tracer.Start(ctx, "delivery.take", trace.WithTimestamp(reserving), trace.WithAttributes(
+		attribute.String("delivery.channel", channel),
+		attribute.Int("delivery.claimed", claimed),
+	))
+	mark := func(ctx context.Context, name string, from, to time.Time, attributes ...attribute.KeyValue) context.Context {
+		ctx, child := w.tracer.Start(ctx, name, trace.WithTimestamp(from), trace.WithAttributes(attributes...))
+		child.End(trace.WithTimestamp(to))
+		return ctx
+	}
+	mark(ctx, "limiter.reserve", reserving, granted)
+	claimCtx := mark(ctx, "delivery.claim", granted, claimEnd, attribute.Int("delivery.claimed", claimed), attribute.Float64("delivery.decode_ms", float64(timing.decode.Microseconds())/1000))
+	mark(claimCtx, "db.acquire", granted, timing.acquired)
+	mark(claimCtx, "db.execute", timing.acquired, timing.executed)
+	mark(claimCtx, "db.read", timing.executed, claimEnd)
+	mark(ctx, "limiter.settle", claimEnd, settled)
+	span.End(trace.WithTimestamp(settled))
+	return span.SpanContext()
 }
 
 // settle gives back what was not claimed, which keeps an idle queue from using up the
@@ -297,29 +367,44 @@ func (w *Worker) settle(ctx context.Context, channel string, permits Permits, cl
 	return claims[:confirmed]
 }
 
-func (w *Worker) recordHold(ctx context.Context, channel string, permits Permits) {
-	w.metrics.DeliveryRateLimitWait.WithLabelValues(channel).Observe(permits.Retry.Seconds())
-	now := time.Now()
-	_, span := w.tracer.Start(ctx, "delivery.limit", trace.WithTimestamp(now), trace.WithAttributes(
+// observeHold records a wait that has just ended, at its real length.
+func (w *Worker) observeHold(ctx context.Context, channel, state string, waited time.Time) {
+	var reason string
+	switch state {
+	case stateHoldPause:
+		reason = "pause"
+	case stateHoldWindow:
+		reason = "window"
+	case stateHoldBreak:
+		reason = "breaker"
+	default:
+		return
+	}
+	w.metrics.LimiterActualWait.WithLabelValues(channel, reason).Observe(time.Since(waited).Seconds())
+	_, span := w.tracer.Start(ctx, "delivery.limit", trace.WithTimestamp(waited), trace.WithAttributes(
 		attribute.String("delivery.channel", channel),
-		attribute.Bool("delivery.limit.paused", permits.Paused),
+		attribute.String("delivery.limit.reason", reason),
 	))
-	span.End(trace.WithTimestamp(now.Add(permits.Retry)))
+	span.End()
 }
 
 // takeFreeSlots waits for a free slot, gives others a moment to free up and takes
 // them all. It returns 0 only when ctx ends.
-func takeFreeSlots(ctx context.Context, slots chan struct{}) int {
+func takeFreeSlots(ctx context.Context, slots chan struct{}, spent func(state string, since time.Time)) int {
+	waiting := time.Now()
 	select {
 	case <-ctx.Done():
 		return 0
 	case <-slots:
 	}
+	spent(stateSlotWait, waiting)
 	free := 1
+	gap := time.Now()
 	select {
 	case <-ctx.Done():
 	case <-time.After(claimGap):
 	}
+	spent(stateClaimGap, gap)
 	for {
 		select {
 		case <-slots:
@@ -367,6 +452,16 @@ type claim struct {
 	// probe marks a call testing whether a failing provider is back.
 	probe   bool
 	content content.Content
+	// granted is when the limiter gave this message's permit, and take the round that
+	// claimed it, which is in another trace.
+	granted time.Time
+	take    trace.SpanContext
+}
+
+// claimTiming is when a claim passed each stage, and the part of it spent decoding.
+type claimTiming struct {
+	acquired, executed time.Time
+	decode             time.Duration
 }
 
 // ProcessBatch takes one batch per channel and waits for all of it, returning how
@@ -377,7 +472,7 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 		failed error
 	)
 	for _, channel := range channels {
-		taken, _, err := w.takeDue(ctx, channel, w.config.BatchSize)
+		taken, _, _, err := w.takeDue(ctx, channel, w.config.BatchSize)
 		claims = append(claims, taken...)
 		failed = errors.Join(failed, err)
 	}
@@ -404,11 +499,18 @@ func (w *Worker) handleLogged(ctx context.Context, item claim) {
 
 // claim outlives a shutdown: giving up on a claim the database has already
 // committed would strand those rows as SENDING until their lease expires.
-func (w *Worker) claim(ctx context.Context, channel string, limit int) ([]claim, error) {
+func (w *Worker) claim(ctx context.Context, channel string, limit int) ([]claim, claimTiming, error) {
 	started := time.Now()
+	var timing claimTiming
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
 	defer cancel()
-	rows, err := w.db.Query(ctx, `
+	conn, err := w.db.Acquire(ctx)
+	if err != nil {
+		return nil, timing, fmt.Errorf("claim deliveries: %w", err)
+	}
+	defer conn.Release()
+	timing.acquired = time.Now()
+	rows, err := conn.Query(ctx, `
 		WITH next AS (
 			SELECT d.id
 			FROM campaign_deliveries d
@@ -426,21 +528,27 @@ func (w *Worker) claim(ctx context.Context, channel string, limit int) ([]claim,
 		FROM next, users u, campaign_versions v
 		WHERE d.id = next.id AND u.id = d.user_id AND v.id = d.campaign_version_id
 		RETURNING d.id::text, d.claim_token::text, d.campaign_id::text, d.channel, d.idempotency_key, d.user_id, d.attempts, d.trace_context,
+		          GREATEST(EXTRACT(EPOCH FROM now() - d.next_attempt_at), 0)::float8,
 		          u.first_name, u.email, u.phone, u.language, COALESCE(d.variant, ''),
 		          COALESCE((SELECT allowed FROM consents WHERE user_id = d.user_id AND channel = d.channel), false),
 		          v.content`, limit, w.config.Lease.Seconds(), channel)
 	if err != nil {
-		return nil, fmt.Errorf("claim deliveries: %w", err)
+		return nil, timing, fmt.Errorf("claim deliveries: %w", err)
 	}
+	timing.executed = time.Now()
+	queueAge := w.metrics.DeliveryQueueAge.WithLabelValues(channel)
 	claims, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (claim, error) {
+		decoding := time.Now()
+		defer func() { timing.decode += time.Since(decoding) }()
 		var (
 			item     claim
 			encoded  []byte
 			language string
 			variant  string
+			age      float64
 		)
 		if err := row.Scan(&item.id, &item.token, &item.campaignID, &item.channel, &item.key, &item.userID, &item.attempts, &item.traceContext,
-			&item.firstName, &item.email, &item.phone, &language, &variant, &item.consented, &encoded); err != nil {
+			&age, &item.firstName, &item.email, &item.phone, &language, &variant, &item.consented, &encoded); err != nil {
 			return claim{}, err
 		}
 		var stored content.Versions
@@ -448,17 +556,23 @@ func (w *Worker) claim(ctx context.Context, channel string, limit int) ([]claim,
 			return claim{}, fmt.Errorf("decode approved content: %w", err)
 		}
 		item.content = stored.ForPerson(variant, language)
+		queueAge.Observe(age)
 		return item, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("claim deliveries: %w", err)
+		return nil, timing, fmt.Errorf("claim deliveries: %w", err)
 	}
 	// Only claims that found work: an idle worker polls several times a second.
 	if len(claims) > 0 {
-		_, span := w.tracer.Start(ctx, "delivery.claim", trace.WithTimestamp(started), trace.WithAttributes(attribute.Int("delivery.claimed", len(claims))))
-		span.End()
+		finished := time.Now()
+		stages := w.metrics.DeliveryClaimDuration
+		stages.WithLabelValues(channel, "acquire").Observe(timing.acquired.Sub(started).Seconds())
+		stages.WithLabelValues(channel, "execute").Observe(timing.executed.Sub(timing.acquired).Seconds())
+		stages.WithLabelValues(channel, "read").Observe((finished.Sub(timing.executed) - timing.decode).Seconds())
+		stages.WithLabelValues(channel, "decode").Observe(timing.decode.Seconds())
+		stages.WithLabelValues(channel, "total").Observe(finished.Sub(started).Seconds())
 	}
-	return claims, nil
+	return claims, timing, nil
 }
 
 func (c claim) message(unsubscribeURL, assetBase string) (Message, error) {
@@ -530,7 +644,7 @@ func (w *Worker) handle(ctx context.Context, item claim) (err error) {
 		w.metrics.DeliveryRetries.WithLabelValues(item.channel, outcome).Inc()
 	}
 	if outcome == outcomeRateLimited {
-		w.pause(ctx, item.channel, result.RetryAfter)
+		w.pause(ctx, item.channel, result.RetryAfter, pauseSourceRateLimit)
 	}
 	attemptError := ""
 	if sendErr != nil {
@@ -549,7 +663,7 @@ func (w *Worker) noteBreaker(ctx context.Context, channel string, failed bool) {
 		w.metrics.DeliveryCircuitTrips.WithLabelValues(channel).Inc()
 		slog.WarnContext(ctx, "provider is failing, holding the channel", "channel", channel, "hold", hold)
 		// This tells other workers; this one is held by its breaker either way.
-		w.pause(ctx, channel, hold)
+		w.pause(ctx, channel, hold, pauseSourceBreaker)
 	case closed:
 		w.metrics.DeliveryCircuitOpen.WithLabelValues(channel).Set(0)
 		slog.InfoContext(ctx, "provider is back, channel resumes", "channel", channel)
@@ -561,13 +675,14 @@ func (w *Worker) noteBreaker(ctx context.Context, channel string, failed bool) {
 func (w *Worker) recordNotSent(ctx context.Context, span trace.Span, item claim) error {
 	span.SetAttributes(attribute.String("delivery.outcome", reasonNotSent))
 	w.metrics.DeliveryAttempts.WithLabelValues(item.channel, reasonNotSent).Inc()
-	w.pause(ctx, item.channel, notSentPause)
+	w.pause(ctx, item.channel, notSentPause, pauseSourceNotSent)
 	return w.record(ctx, item, update{status: statusRetrying, attempts: item.attempts, retryIn: notSentPause, reason: reasonNotSent}, nil)
 }
 
 // pause tells every worker to hold a channel. Failing to do so only means more
 // calls get a 429, so it must not stop the outcome from being recorded.
-func (w *Worker) pause(ctx context.Context, channel string, length time.Duration) {
+func (w *Worker) pause(ctx context.Context, channel string, length time.Duration, source string) {
+	w.metrics.LimiterPause.WithLabelValues(channel, source).Observe(length.Seconds())
 	pauseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
 	defer cancel()
 	if err := w.limiter.Pause(pauseCtx, channel, length); err != nil {
@@ -583,6 +698,9 @@ func (w *Worker) startSpan(ctx context.Context, item claim) (context.Context, tr
 		attribute.Int("delivery.attempt", item.attempts+1),
 		attribute.Bool("delivery.probe", item.probe),
 	)}
+	if item.take.IsValid() {
+		options = append(options, trace.WithLinks(trace.Link{SpanContext: item.take}))
+	}
 	if item.traceContext != nil {
 		parent := propagation.TraceContext{}.Extract(context.Background(), propagation.MapCarrier{"traceparent": *item.traceContext})
 		options = append(options, trace.WithLinks(trace.Link{SpanContext: trace.SpanContextFromContext(parent)}))
@@ -597,6 +715,12 @@ func (w *Worker) send(ctx context.Context, item claim, message Message) (Result,
 	callCtx, span := w.tracer.Start(callCtx, "delivery.provider")
 	defer span.End()
 
+	if !item.granted.IsZero() {
+		w.metrics.DeliveryGrantToSend.WithLabelValues(item.channel).Observe(time.Since(item.granted).Seconds())
+	}
+	inflight := w.metrics.DeliveryInflight.WithLabelValues(item.channel)
+	inflight.Inc()
+	defer inflight.Dec()
 	start := time.Now()
 	result, err := w.sender.Send(callCtx, message)
 	w.metrics.DeliveryDuration.WithLabelValues(item.channel).Observe(time.Since(start).Seconds())
@@ -680,6 +804,10 @@ func (w *Worker) nextStep(ctx context.Context, item claim, outcome string, resul
 // record stores an outcome under the claim. It runs even during shutdown, and a
 // claim that has moved on changes nothing.
 func (w *Worker) record(ctx context.Context, item claim, next update, attempt *attemptRow) error {
+	started := time.Now()
+	defer func() {
+		w.metrics.DeliveryRecordDuration.WithLabelValues(item.channel).Observe(time.Since(started).Seconds())
+	}()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
 	defer cancel()
 	ctx, span := w.tracer.Start(ctx, "delivery.record")

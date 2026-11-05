@@ -9,13 +9,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver for goose
 	"github.com/pressly/goose/v3"
+	"go.opentelemetry.io/otel"
 
 	"github.com/negativexq/smart-campaign-composer/migrations"
 )
 
 // Connect opens a connection pool and verifies the database is reachable.
 func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
-	pool, err := pgxpool.New(ctx, databaseURL)
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse database URL: %w", err)
+	}
+	config.ConnConfig.Tracer = spanTracer{otel.Tracer("db")}
+	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("open pool: %w", err)
 	}

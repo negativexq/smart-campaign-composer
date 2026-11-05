@@ -67,6 +67,8 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer pool.Close()
+	telemetry.RegisterPool(prometheus.DefaultRegisterer, pool)
+	telemetry.StartProfiling(ctx, os.Getenv("PPROF_ADDR"))
 
 	metrics := telemetry.NewMetrics(prometheus.DefaultRegisterer)
 	campaigns := campaign.NewService(pool, provider, metrics, otel.Tracer("campaign"), time.Now)

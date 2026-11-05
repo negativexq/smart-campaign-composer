@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/negativexq/smart-campaign-composer/internal/health"
 	"github.com/negativexq/smart-campaign-composer/internal/mockprovider"
@@ -20,6 +21,20 @@ func main() {
 	slog.SetDefault(telemetry.NewLogger(os.Stdout))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	shutdownTracing, err := telemetry.SetupTracing(ctx, "mock-provider", os.Getenv)
+	if err != nil {
+		slog.Error("set up tracing", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(shutdownCtx); err != nil {
+			slog.Warn("flush traces", "error", err)
+		}
+	}()
+	telemetry.StartProfiling(ctx, os.Getenv("PPROF_ADDR"))
 
 	mux := http.NewServeMux()
 	health.Register(mux, nil)
@@ -63,6 +78,21 @@ func behaviorFromEnv() mockprovider.Behavior {
 			continue
 		}
 		*target = rate
+	}
+	for name, target := range map[string]*time.Duration{
+		"MOCK_MIN_DELAY_MS": &behavior.MinDelay,
+		"MOCK_MAX_DELAY_MS": &behavior.MaxDelay,
+	} {
+		value := os.Getenv(name)
+		if value == "" {
+			continue
+		}
+		milliseconds, err := strconv.Atoi(value)
+		if err != nil || milliseconds < 0 {
+			slog.Warn("ignoring invalid setting", "name", name, "value", value)
+			continue
+		}
+		*target = time.Duration(milliseconds) * time.Millisecond
 	}
 	return behavior
 }

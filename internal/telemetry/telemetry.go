@@ -46,7 +46,24 @@ type Metrics struct {
 	DeliveryRateLimitWait *prometheus.HistogramVec
 	DeliveryCircuitOpen   *prometheus.GaugeVec
 	DeliveryCircuitTrips  *prometheus.CounterVec
+
+	// These split a channel's time and a message's wait into what each one went on.
+	DeliveryLoopSeconds    *prometheus.CounterVec
+	DeliveryClaimDuration  *prometheus.HistogramVec
+	DeliveryRecordDuration *prometheus.HistogramVec
+	DeliveryQueueAge       *prometheus.HistogramVec
+	DeliveryGrantToSend    *prometheus.HistogramVec
+	DeliveryInflight       *prometheus.GaugeVec
+	LimiterReserveDuration *prometheus.HistogramVec
+	LimiterSettleDuration  *prometheus.HistogramVec
+	LimiterGranted         *prometheus.CounterVec
+	LimiterUnused          *prometheus.CounterVec
+	LimiterActualWait      *prometheus.HistogramVec
+	LimiterPause           *prometheus.HistogramVec
 }
+
+// quickBuckets suit calls that normally take milliseconds: Redis, the queue, a commit.
+var quickBuckets = []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}
 
 // NewMetrics registers the series on registerer.
 func NewMetrics(registerer prometheus.Registerer) *Metrics {
@@ -121,6 +138,62 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 			Name: "campaign_delivery_circuit_trips_total",
 			Help: "Times a channel stopped calling a failing provider.",
 		}, []string{"channel"}),
+		DeliveryLoopSeconds: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "campaign_delivery_loop_seconds_total",
+			Help: "Time a channel's sending loop spent, by state. Together the states add up to the time it ran.",
+		}, []string{"channel", "state"}),
+		DeliveryClaimDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "campaign_delivery_claim_duration_seconds",
+			Help:    "Time claiming from the queue, by stage: acquire, execute, read, decode and total.",
+			Buckets: quickBuckets,
+		}, []string{"channel", "stage"}),
+		DeliveryRecordDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "campaign_delivery_record_duration_seconds",
+			Help:    "Time storing an outcome, from taking a connection to the commit.",
+			Buckets: quickBuckets,
+		}, []string{"channel"}),
+		DeliveryQueueAge: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "campaign_delivery_queue_age_seconds",
+			Help:    "How long a delivery had been due when it was claimed.",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.5, 1, 5, 15, 30, 60, 120, 300, 600, 1200, 3600},
+		}, []string{"channel"}),
+		DeliveryGrantToSend: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "campaign_delivery_grant_to_send_seconds",
+			Help:    "Time from the limiter's permit to the start of the provider call.",
+			Buckets: quickBuckets,
+		}, []string{"channel"}),
+		DeliveryInflight: factory.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "campaign_delivery_inflight",
+			Help: "Calls to the provider under way.",
+		}, []string{"channel"}),
+		LimiterReserveDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "campaign_limiter_reserve_duration_seconds",
+			Help:    "Time asking the limiter for permits.",
+			Buckets: quickBuckets,
+		}, []string{"channel"}),
+		LimiterSettleDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "campaign_limiter_settle_duration_seconds",
+			Help:    "Time settling permits with the limiter.",
+			Buckets: quickBuckets,
+		}, []string{"channel"}),
+		LimiterGranted: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "campaign_limiter_granted_total",
+			Help: "Permits the limiter granted.",
+		}, []string{"channel"}),
+		LimiterUnused: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "campaign_limiter_unused_total",
+			Help: "Permits given back because the queue had too little to claim.",
+		}, []string{"channel"}),
+		LimiterActualWait: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "campaign_limiter_actual_wait_seconds",
+			Help:    "How long a channel really waited with nothing granted, by reason: pause, window or breaker.",
+			Buckets: []float64{0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60},
+		}, []string{"channel", "reason"}),
+		LimiterPause: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "campaign_limiter_pause_seconds",
+			Help:    "Pause lengths asked of the limiter, by source. They can overlap, so compare with the actual wait.",
+			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60},
+		}, []string{"channel", "source"}),
 	}
 }
 

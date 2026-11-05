@@ -16,6 +16,9 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 const (
@@ -189,6 +192,9 @@ func (r request) problem() string {
 }
 
 func (s *Server) send(w http.ResponseWriter, r *http.Request) {
+	ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+	ctx, span := otel.Tracer("mock-provider").Start(ctx, "provider.receive")
+	defer span.End()
 	var message request
 	if err := json.NewDecoder(r.Body).Decode(&message); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body is not valid JSON"})
@@ -210,7 +216,10 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.pause(r.Context()) {
+	_, delaying := otel.Tracer("mock-provider").Start(ctx, "provider.delay")
+	delivered := s.pause(r.Context())
+	delaying.End()
+	if !delivered {
 		return
 	}
 
@@ -227,7 +236,9 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, accepting := otel.Tracer("mock-provider").Start(ctx, "provider.accept")
 	id, duplicate, err := s.accept(message, key)
+	accepting.End()
 	if err != nil {
 		// Nothing was accepted, so the sender's retry is the first delivery, not a second.
 		slog.Error("remember idempotency key", "error", err)

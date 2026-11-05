@@ -79,6 +79,8 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
+	telemetry.RegisterPool(prometheus.DefaultRegisterer, pool)
+	telemetry.StartProfiling(ctx, os.Getenv("PPROF_ADDR"))
 
 	redisOptions, err := redis.ParseURL(redisURL)
 	if err != nil {
