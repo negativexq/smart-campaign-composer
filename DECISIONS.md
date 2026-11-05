@@ -195,6 +195,8 @@ Someone testing the product needs to see what was sent, so the mock provider kee
 
 The event is signed with HMAC-SHA256, since this route has no session. It finds the delivery by idempotency key rather than message ID, because a message whose response was lost has no recorded ID, and it can be repeated safely because only the first report of an event is kept. `delivery_events` is separate from `delivery_attempts`: an attempt is our call to the provider, an event is the provider telling us something later. An opened message whose outcome is UNKNOWN stays UNKNOWN, because that status records what our call returned.
 
+Idempotency keys do not live in memory. A retry after a lost response is only safe if the provider still knows the key, so the mock writes each key to a file on a volume and syncs it before the message counts as accepted. If the write fails the call answers 500 and nothing is accepted. Killing the provider mid-send, with 5% of responses lost, sent 6,000 messages once each; the same run with the key file moved aside delivered 161 of them twice.
+
 The inbox and its webhook retries live in memory. Restarting the provider empties the inbox and loses events it had not yet delivered. The labels say opened for email and read for SMS and name the test inbox, because real providers report email opens unreliably and SMS has no read signal.
 
 ## One delivery table, not a table per campaign

@@ -11,6 +11,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/...
 
 FROM alpine:3.22
-RUN adduser -D -u 10001 app && mkdir -p /data/assets && chown app /data/assets
+RUN adduser -D -u 10001 app && mkdir -p /data/assets /data/provider && chown app /data/assets /data/provider
 COPY --from=build /out/ /app/
 USER app

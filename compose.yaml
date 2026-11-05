@@ -103,6 +103,9 @@ services:
       <<: *backend-env
       PROVIDER_EVENTS_URL: http://api:8080/api/provider/events
       PROVIDER_WEBHOOK_SECRET: ${PROVIDER_WEBHOOK_SECRET:-local-mock-webhook-secret}
+      MOCK_KEY_FILE: /data/provider/keys.log
+    volumes:
+      - provider-data:/data/provider
     ports:
       - "8083:8080"
     healthcheck:
@@ -123,3 +126,4 @@ services:
 volumes:
   postgres-data:
   asset-data:
+  provider-data:

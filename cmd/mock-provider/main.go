@@ -28,7 +28,12 @@ func main() {
 	if url := os.Getenv("PROVIDER_EVENTS_URL"); url != "" {
 		behavior.OnEvent = mockprovider.NewWebhook(url, os.Getenv("PROVIDER_WEBHOOK_SECRET"), time.Second)
 	}
-	mockprovider.New(behavior).Register(mux)
+	provider, err := mockprovider.Open(behavior, os.Getenv("MOCK_KEY_FILE"))
+	if err != nil {
+		slog.Error("mock provider cannot remember its keys", "error", err)
+		os.Exit(1)
+	}
+	provider.Register(mux)
 
 	if err := server.Run(ctx, ":"+server.Env("PORT", "8080"), mux); err != nil {
 		slog.Error("mock provider failed", "error", err)

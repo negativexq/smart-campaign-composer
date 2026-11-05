@@ -75,6 +75,7 @@ type Server struct {
 	behavior Behavior
 	mu       sync.Mutex
 	accepted map[string]string
+	keys     *keyLog
 	stats    map[string]*ChannelStats
 	recent   map[string][]time.Time
 	inbox    inbox
@@ -95,6 +96,21 @@ func New(behavior Behavior) *Server {
 		recent:   map[string][]time.Time{},
 		inbox:    inbox{size: behavior.InboxSize, byKey: map[string]*InboxMessage{}},
 	}
+}
+
+// Open builds a provider that remembers its idempotency keys in the file at path, across
+// restarts. Without a path they last as long as the process.
+func Open(behavior Behavior, path string) (*Server, error) {
+	server := New(behavior)
+	if path == "" {
+		return server, nil
+	}
+	keys, accepted, err := openKeyLog(path)
+	if err != nil {
+		return nil, err
+	}
+	server.keys, server.accepted = keys, accepted
+	return server, nil
 }
 
 // Register adds the provider's routes to mux.
@@ -166,7 +182,14 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, duplicate := s.accept(message, key)
+	id, duplicate, err := s.accept(message, key)
+	if err != nil {
+		// Nothing was accepted, so the sender's retry is the first delivery, not a second.
+		slog.Error("remember idempotency key", "error", err)
+		s.count(message.Channel, func(stats *ChannelStats) { stats.ServerErrors++ })
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "temporary failure"})
+		return
+	}
 	if roll < s.behavior.RateLimitRate+s.behavior.ServerErrorRate+s.behavior.LostResponseRate {
 		// The message got through, but the caller never hears about it.
 		<-r.Context().Done()
@@ -195,8 +218,9 @@ func (s *Server) pause(ctx context.Context) bool {
 	}
 }
 
-// accept stores the message once, whatever happens to the response.
-func (s *Server) accept(message request, key string) (string, bool) {
+// accept stores the message once, whatever happens to the response. The key is safe
+// before the message counts as delivered, so no restart can make a retry look new.
+func (s *Server) accept(message request, key string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	channel := message.Channel
@@ -204,9 +228,14 @@ func (s *Server) accept(message request, key string) (string, bool) {
 	if id, known := s.accepted[key]; known {
 		stats.Duplicates++
 		s.inbox.repeat(key)
-		return id, true
+		return id, true, nil
 	}
 	id := "mock_" + cryptorand.Text()
+	if s.keys != nil {
+		if err := s.keys.add(key, id); err != nil {
+			return "", false, err
+		}
+	}
 	s.accepted[key] = id
 	stats.Accepted++
 	// A bounced message reached nobody, so there is nothing to find in the inbox.
@@ -216,7 +245,7 @@ func (s *Server) accept(message request, key string) (string, bool) {
 	}
 	s.reportArrival(Event{Event: arrivalEvent(bounced), Channel: channel, MessageID: id, IdempotencyKey: key})
 
-	return id, false
+	return id, false, nil
 }
 
 // arrived measures the rate as a provider enforces it: every call counts, whatever
