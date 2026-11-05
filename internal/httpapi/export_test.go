@@ -144,6 +144,31 @@ func TestDuplicateStartsANewDraftFromTheOriginal(t *testing.T) {
 	}
 }
 
+// The preview and the rule a copy is made with reach the API.
+func TestACopyCanBeMadeWithARuleForPeopleMessagedLately(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, ai.NewMock())
+	id := sentCampaign(t, api)
+
+	status, preview := call(t, api, http.MethodGet, "/api/campaigns/"+id+"/duplicate-preview?not_messaged_within_days=10", "")
+	if status != http.StatusOK || preview["not_messaged_within_days"].(float64) != 10 || preview["audience"] == nil {
+		t.Fatalf("preview: %d %v", status, preview)
+	}
+	for _, days := range []string{"0", "366", "ten"} {
+		if status, _ := call(t, api, http.MethodGet, "/api/campaigns/"+id+"/duplicate-preview?not_messaged_within_days="+days, ""); status != http.StatusBadRequest {
+			t.Fatalf("a rule of %s days: %d", days, status)
+		}
+	}
+	status, copied := call(t, api, http.MethodPost, "/api/campaigns/"+id+"/duplicate", `{"not_messaged_within_days": 10}`)
+	if status != http.StatusCreated || copied["not_messaged_within_days"].(float64) != 10 {
+		t.Fatalf("duplicate: %d %v", status, copied["not_messaged_within_days"])
+	}
+	segment := copied["proposal"].(map[string]any)["segment"].(map[string]any)
+	if segment["not_messaged_within_days"].(float64) != 10 || copied["audience"].(map[string]any)["total"] != preview["audience"].(map[string]any)["total"] {
+		t.Fatalf("the copy's audience is not the one previewed: %v %v", segment, copied["audience"])
+	}
+}
+
 func TestADraftWithoutAnAudienceCanBeDuplicated(t *testing.T) {
 	t.Parallel()
 	api := newAPI(t, ai.NewMock())

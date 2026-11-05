@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -249,10 +250,68 @@ func (s *Service) CreateWith(ctx context.Context, campaign NewCampaign) (string,
 	return id, nil
 }
 
+// DuplicatePreview is what a copy of a campaign would reach, counted now, and how
+// many of those people the campaign itself already reached.
+type DuplicatePreview struct {
+	// NotMessagedWithinDays is the rule the counts were made with: the one asked
+	// for, or else the campaign's own, which may be none.
+	NotMessagedWithinDays *int `json:"not_messaged_within_days"`
+	// SourceRule is the campaign's own rule, which a copy keeps unless told otherwise.
+	SourceRule    *int           `json:"source_rule"`
+	Audience      segment.Counts `json:"audience"`
+	ReachedBefore int            `json:"reached_before"`
+	LastSentAt    *time.Time     `json:"last_sent_at"`
+}
+
+// DuplicatePreview counts what Duplicate with the same rule would start from.
+// rule nil keeps the campaign's own.
+func (s *Service) DuplicatePreview(ctx context.Context, id string, rule *int) (DuplicatePreview, error) {
+	if rule != nil && (*rule < 1 || *rule > 365) {
+		return DuplicatePreview{}, ErrInvalidOptions
+	}
+	source, err := s.load(ctx, id)
+	if err != nil {
+		return DuplicatePreview{}, err
+	}
+	preview := DuplicatePreview{}
+	if err := s.db.QueryRow(ctx, `
+		SELECT max(sent_at) FROM campaign_deliveries WHERE campaign_id = $1 AND status IN ('SENT', 'UNKNOWN')`, id).Scan(&preview.LastSentAt); err != nil {
+		return DuplicatePreview{}, fmt.Errorf("read last send: %w", err)
+	}
+	if source.Proposal == nil {
+		return preview, nil
+	}
+	spec := source.Proposal.Segment
+	preview.SourceRule = spec.NotMessagedWithinDays
+	if rule != nil {
+		spec.NotMessagedWithinDays = rule
+	}
+	preview.NotMessagedWithinDays = spec.NotMessagedWithinDays
+	now := s.now()
+	if preview.Audience, err = segment.Count(ctx, s.db, spec, now); err != nil {
+		return DuplicatePreview{}, err
+	}
+	where, args := segment.Compile(spec, now)
+	err = s.db.QueryRow(ctx, `
+		SELECT count(*) FROM users u
+		WHERE `+where+` AND EXISTS (
+			SELECT 1 FROM campaign_deliveries d
+			WHERE d.campaign_id = `+fmt.Sprintf("$%d", len(args)+1)+` AND d.user_id = u.id AND d.status IN ('SENT', 'UNKNOWN'))`,
+		append(args, id)...).Scan(&preview.ReachedBefore)
+	if err != nil {
+		return DuplicatePreview{}, fmt.Errorf("count people reached before: %w", err)
+	}
+	return preview, nil
+}
+
 // Duplicate starts a new draft from a campaign: its brief, options, audience rule and
 // messages. Approval, schedule and deliveries stay behind, and the audience is counted
-// again from now, so the copy goes through every check the original did.
-func (s *Service) Duplicate(ctx context.Context, id string) (View, error) {
+// again from now, so the copy goes through every check the original did. rule, when
+// given, leaves out people any campaign messaged within that many days.
+func (s *Service) Duplicate(ctx context.Context, id string, rule *int) (View, error) {
+	if rule != nil && (*rule < 1 || *rule > 365) {
+		return View{}, ErrInvalidOptions
+	}
 	source, err := s.load(ctx, id)
 	if err != nil {
 		return View{}, err
@@ -276,19 +335,22 @@ func (s *Service) Duplicate(ctx context.Context, id string) (View, error) {
 	var copied string
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO campaigns (brief, name, name_source, created_by, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, email_design, status)
-		SELECT brief, $2, name_source, $3, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, email_design, $4
+		SELECT brief, $2, name_source, $3, channels, excluded_languages, tone, offer_percent, COALESCE($5, not_messaged_within_days), ab_test, variant_a_percent, email_template, email_design, $4
 		FROM campaigns WHERE id = $1
-		RETURNING id::text`, id, string(name)+suffix, personFrom(ctx), status).Scan(&copied); err != nil {
+		RETURNING id::text`, id, string(name)+suffix, personFrom(ctx), status, rule).Scan(&copied); err != nil {
 		return View{}, fmt.Errorf("copy campaign: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO campaign_versions (campaign_id, version, segment, content, llm_provider, llm_model, audience_as_of)
-		SELECT $2, 1, segment, content, llm_provider, llm_model, $3
+		SELECT $2, 1,
+		       CASE WHEN $4::int IS NULL OR segment IS NULL THEN segment
+		            ELSE jsonb_set(segment, '{segment,not_messaged_within_days}', to_jsonb($4::int)) END,
+		       content, llm_provider, llm_model, $3
 		FROM campaign_versions WHERE campaign_id = $1
-		ORDER BY version DESC LIMIT 1`, id, copied, s.now()); err != nil {
+		ORDER BY version DESC LIMIT 1`, id, copied, s.now(), rule); err != nil {
 		return View{}, fmt.Errorf("copy version: %w", err)
 	}
-	if err := recordAudit(ctx, tx, copied, eventDuplicated, map[string]any{"source": id, "source_name": source.Name}); err != nil {
+	if err := recordAudit(ctx, tx, copied, eventDuplicated, map[string]any{"source": id, "source_name": source.Name, "not_messaged_within_days": rule}); err != nil {
 		return View{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -1113,7 +1175,25 @@ func blockersFor(proposal segment.Proposal, counts segment.Counts) []blocker {
 	case counts.Total == 0:
 		blockers = append(blockers, blocker{reasonEmpty, "No users match these conditions. Refine the audience to widen it."})
 	case counts.SMS == 0 && counts.Email == 0:
-		blockers = append(blockers, blocker{reasonNoConsent, "None of the matching users have consented to the channels this campaign uses."})
+		blockers = append(blockers, blocker{reasonNoConsent, fmt.Sprintf(
+			"%s match these conditions, but none of them have consented to the channels this campaign uses.", peopleCount(counts.Total))})
 	}
 	return blockers
+}
+
+// peopleCount says how many people, for sentences.
+func peopleCount(count int) string {
+	if count == 1 {
+		return "1 person"
+	}
+	return humanize(count) + " people"
+}
+
+// humanize groups thousands as the pages do, as in 7,000.
+func humanize(count int) string {
+	digits := strconv.Itoa(count)
+	for i := len(digits) - 3; i > 0; i -= 3 {
+		digits = digits[:i] + "," + digits[i:]
+	}
+	return digits
 }

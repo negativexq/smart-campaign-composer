@@ -88,6 +88,7 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 		"GET /api/campaigns/{id}/deliveries.csv":                 a.deliveriesCSV,
 		"GET /api/campaigns/{id}/delivery-cities":                a.deliveryCities,
 		"POST /api/campaigns/{id}/duplicate":                     a.duplicate,
+		"GET /api/campaigns/{id}/duplicate-preview":              a.duplicatePreview,
 		"GET /api/campaigns/{id}/report":                         a.report,
 		"GET /api/campaigns/{id}/deliveries/{delivery}/attempts": a.deliveryAttempts,
 		"GET /api/campaigns/{id}/activity":                       a.activity,
@@ -724,8 +725,34 @@ func (a *api) deliveryCities(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"cities": cities})
 }
 
+// duplicatePreview counts what a copy would reach, optionally with a
+// not_messaged_within_days rule of its own.
+func (a *api) duplicatePreview(w http.ResponseWriter, r *http.Request) {
+	var rule *int
+	if value := r.URL.Query().Get("not_messaged_within_days"); value != "" {
+		days, err := strconv.Atoi(value)
+		if err != nil {
+			writeError(w, r, campaign.ErrInvalidOptions)
+			return
+		}
+		rule = &days
+	}
+	preview, err := a.campaigns.DuplicatePreview(r.Context(), r.PathValue("id"), rule)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, preview)
+}
+
 func (a *api) duplicate(w http.ResponseWriter, r *http.Request) {
-	view, err := a.campaigns.Duplicate(r.Context(), r.PathValue("id"))
+	var body struct {
+		NotMessagedWithinDays *int `json:"not_messaged_within_days"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	view, err := a.campaigns.Duplicate(r.Context(), r.PathValue("id"), body.NotMessagedWithinDays)
 	if err != nil {
 		writeError(w, r, err)
 		return

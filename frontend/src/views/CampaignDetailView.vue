@@ -5,7 +5,6 @@ import {
   cancelSchedule,
   dispatchCampaign,
   errorMessage,
-  duplicateCampaign,
   getActivity,
   getCampaign,
   getProgress,
@@ -25,6 +24,7 @@ import AudienceReport from "../components/AudienceReport.vue";
 import CampaignName from "../components/CampaignName.vue";
 import CampaignStatusBadge from "../components/CampaignStatusBadge.vue";
 import DeliveriesPanel from "../components/DeliveriesPanel.vue";
+import DuplicateDialog from "../components/DuplicateDialog.vue";
 import EmailPreview from "../components/EmailPreview.vue";
 import DeliveryProgress from "../components/DeliveryProgress.vue";
 import MetricCard from "../components/MetricCard.vue";
@@ -164,17 +164,9 @@ async function act(action: () => Promise<unknown>) {
 }
 
 // The copy opens where its next step is: its messages are checked, or its audience found.
-async function duplicate() {
-  duplicating.value = true;
-  actionError.value = "";
-  try {
-    const copy = await duplicateCampaign(props.campaignId);
-    navigate(`/campaigns/${copy.id}/${copy.content ? "review" : "edit"}`);
-  } catch (failure) {
-    actionError.value = errorMessage(failure);
-  } finally {
-    duplicating.value = false;
-  }
+function onDuplicated(copy: Campaign) {
+  duplicating.value = false;
+  navigate(`/campaigns/${copy.id}/${copy.content ? "review" : "edit"}`);
 }
 
 function onRenamed(updated: Campaign) {
@@ -222,9 +214,8 @@ onBeforeUnmount(() => stopWatching?.());
         <CampaignName as="h1" :campaign="campaign" hide-origin @renamed="onRenamed" />
         <CampaignStatusBadge :status="campaign.status" />
       </div>
-      <button class="button button--secondary" type="button" :disabled="duplicating" data-testid="duplicate" @click="duplicate">
-        {{ duplicating ? "Copying..." : "Duplicate" }}
-      </button>
+      <button class="button button--secondary" type="button" data-testid="duplicate" @click="duplicating = true">Duplicate</button>
+      <DuplicateDialog v-if="duplicating" :campaign-id="campaignId" :campaign-name="campaign.name" @close="duplicating = false" @created="onDuplicated" />
       <a
         v-if="isDraft"
         class="button button--primary link-button"

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
 	"github.com/negativexq/smart-campaign-composer/internal/campaign"
@@ -235,11 +236,50 @@ func TestACopyKeepsItsLanguageChoice(t *testing.T) {
 	if _, err := h.service.SetExcludedLanguages(ctx, id, []string{"de"}); err != nil {
 		t.Fatal(err)
 	}
-	copied, err := h.service.Duplicate(ctx, id)
+	copied, err := h.service.Duplicate(ctx, id, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(copied.ExcludedLanguages, []string{"de"}) {
 		t.Fatalf("excluded: %v", copied.ExcludedLanguages)
+	}
+}
+
+// Before copying, a marketer sees how many of the copy's audience this campaign
+// already reached, and a rule for people messaged lately leaves them out.
+func TestADuplicatePreviewCountsWhoTheCampaignAlreadyReached(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Dispatch(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `
+		UPDATE campaign_deliveries SET status = 'SENT', sent_at = $2, updated_at = $2
+		WHERE campaign_id = $1 AND status = 'QUEUED'`, id, referenceTime.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	plain, err := h.service.DuplicatePreview(ctx, id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.ReachedBefore == 0 || plain.LastSentAt == nil || plain.NotMessagedWithinDays != nil {
+		t.Fatalf("a copy as it is would reach the same people again: %+v", plain)
+	}
+	days := 10
+	ruled, err := h.service.DuplicatePreview(ctx, id, &days)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ruled.ReachedBefore != 0 || ruled.Audience.Total != plain.Audience.Total-plain.ReachedBefore {
+		t.Fatalf("the rule should leave out exactly the %d reached: %+v", plain.ReachedBefore, ruled)
+	}
+	copied, err := h.service.Duplicate(ctx, id, &days)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if copied.Audience.Total != ruled.Audience.Total {
+		t.Fatalf("the copy's audience is not the one previewed: %+v", copied.Audience)
 	}
 }

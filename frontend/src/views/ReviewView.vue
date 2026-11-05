@@ -226,6 +226,10 @@ onMounted(async () => {
       <ul class="conditions card" data-testid="review-conditions">
         <li v-for="condition in campaign.conditions" :key="condition.field">{{ condition.label }} <strong>{{ condition.value }}</strong></li>
       </ul>
+      <p class="small" data-testid="review-total">
+        <strong>{{ campaign.audience.total.toLocaleString("en-US") }}</strong> {{ campaign.audience.total === 1 ? "person matches" : "people match" }} these
+        conditions. Of them, these can be messaged:
+      </p>
       <div class="metrics">
         <MetricCard v-if="campaign.channels.includes('sms')" label="SMS" :value="campaign.audience.sms" hint="People who consented" />
         <MetricCard v-if="campaign.channels.includes('email')" label="Email" :value="campaign.audience.email" hint="People who consented" />

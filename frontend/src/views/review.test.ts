@@ -99,6 +99,7 @@ describe("review", () => {
   it("shows who receives what before anything is approved", async () => {
     const { wrapper, fetchMock } = await open();
     expect(wrapper.find("[data-testid=review-conditions]").text()).toContain("İstanbul");
+    expect(wrapper.find("[data-testid=review-total]").text()).toContain("9 people match these conditions");
     expect(wrapper.find("[data-testid=review-sms]").text()).toContain("Hi there");
     expect(wrapper.find("[data-testid=review-email]").text()).toContain("Subject");
     expect(wrapper.find("[data-testid=approve]").text()).toBe("Approve and send 13 messages");
@@ -581,12 +582,18 @@ describe("campaign page after approval", () => {
   });
 
   it("exports what the filters keep and copies the campaign", async () => {
-    stub({
+    const fetchMock = stub({
       ...routes({ ...ready, status: "COMPLETED" }, progress),
       "GET /api/campaigns/c1/deliveries?limit=100": { body: { deliveries: [{ id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 1, response_code: 202, reason: "", next_attempt_at: "2026-11-03T12:00:00Z", sent_at: null, updated_at: "2026-11-03T12:00:00Z" }], total: 1 } },
       "GET /api/campaigns/c1/report": { body: { reasons: [], problems: [], timeline: { bucket_seconds: 0, buckets: [] }, engagement: [] } },
       "GET /api/campaigns/c1/deliveries?limit=100&channel=sms": { body: { deliveries: [{ id: "d1", user_id: 1, first_name: "Ayşe", channel: "sms", status: "SENT", attempts: 1, response_code: 202, reason: "", next_attempt_at: "2026-11-03T12:00:00Z", sent_at: null, updated_at: "2026-11-03T12:00:00Z" }], total: 1 } },
       "POST /api/campaigns/c1/duplicate": { body: { ...ready, id: "c2" } },
+      "GET /api/campaigns/c1/duplicate-preview": {
+        body: { not_messaged_within_days: null, source_rule: null, audience: { total: 7000, sms: 6900, email: 6500 }, reached_before: 6800, last_sent_at: "2026-11-03T12:00:00Z" },
+      },
+      "GET /api/campaigns/c1/duplicate-preview?not_messaged_within_days=12": {
+        body: { not_messaged_within_days: 12, source_rule: null, audience: { total: 200, sms: 190, email: 180 }, reached_before: 0, last_sent_at: "2026-11-03T12:00:00Z" },
+      },
     });
     const wrapper = mount(CampaignDetailView, { props: { campaignId: "c1" } });
     await flushPromises();
@@ -597,8 +604,33 @@ describe("campaign page after approval", () => {
     await flushPromises();
     expect(wrapper.find("[data-testid=export-csv]").attributes("href")).toBe("/api/campaigns/c1/deliveries.csv?channel=sms");
 
-    await wrapper.find("[data-testid=duplicate]").trigger("click");
-    await flushPromises();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await wrapper.find("[data-testid=duplicate]").trigger("click");
+      await flushPromises();
+      // Nothing is copied until the person has seen whom the copy would reach again.
+      expect(called(fetchMock, "POST", "/api/campaigns/c1/duplicate")).toHaveLength(0);
+      expect(wrapper.find("[data-testid=duplicate-reached]").text()).toContain("6,800 of them already received this campaign");
+
+      await wrapper.find("[data-testid=duplicate-leave-out]").setValue(true);
+      await wrapper.find("[data-testid=duplicate-days]").setValue("12");
+      expect(wrapper.find("[data-testid=duplicate-recounting]").exists()).toBe(true);
+      expect((wrapper.find("[data-testid=duplicate-confirm]").element as HTMLButtonElement).disabled).toBe(true);
+      await vi.runAllTimersAsync();
+      await flushPromises();
+      expect(wrapper.find("[data-testid=duplicate-audience]").text()).toContain("200 people match the copy's conditions. Of them, it can message 190 by SMS and 180 by email.");
+      expect(wrapper.find("[data-testid=duplicate-rule-added]").text()).toContain("last 12 days");
+      expect(wrapper.find("[data-testid=duplicate-nobody]").exists()).toBe(false);
+      expect(wrapper.find("[data-testid=duplicate-confirm]").text()).toBe("Create copy");
+      expect(wrapper.find("[data-testid=duplicate-reached]").exists()).toBe(false);
+
+      await wrapper.find("[data-testid=duplicate-confirm]").trigger("click");
+      await flushPromises();
+    } finally {
+      vi.useRealTimers();
+    }
+    const [[, init]] = called(fetchMock, "POST", "/api/campaigns/c1/duplicate");
+    expect(JSON.parse(String(init?.body))).toEqual({ not_messaged_within_days: 12 });
     expect(currentPath.value).toBe("/campaigns/c2/review");
   });
 

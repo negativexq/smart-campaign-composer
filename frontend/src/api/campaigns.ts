@@ -483,8 +483,22 @@ export async function getDeliveryCities(id: string): Promise<string[]> {
   return (await request<{ cities: string[] }>(`/api/campaigns/${encodeURIComponent(id)}/delivery-cities`)).cities;
 }
 
-export function duplicateCampaign(id: string): Promise<Campaign> {
-  return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/duplicate`, {});
+/** What a copy would reach, counted now, and how many of them the campaign reached. */
+export type DuplicatePreview = {
+  not_messaged_within_days: number | null;
+  source_rule: number | null;
+  audience: Audience;
+  reached_before: number;
+  last_sent_at: string | null;
+};
+
+export function getDuplicatePreview(id: string, notMessagedWithinDays: number | null): Promise<DuplicatePreview> {
+  const query = notMessagedWithinDays == null ? "" : `?not_messaged_within_days=${notMessagedWithinDays}`;
+  return request<DuplicatePreview>(`/api/campaigns/${encodeURIComponent(id)}/duplicate-preview${query}`);
+}
+
+export function duplicateCampaign(id: string, notMessagedWithinDays: number | null = null): Promise<Campaign> {
+  return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/duplicate`, notMessagedWithinDays == null ? {} : { not_messaged_within_days: notMessagedWithinDays });
 }
 
 export function getDeliveries(id: string, filter: Partial<DeliveryQuery> & { limit: number; offset?: number }): Promise<{ deliveries: Delivery[]; total: number }> {
