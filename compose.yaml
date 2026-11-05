@@ -19,6 +19,9 @@ services:
       POSTGRES_USER: scc
       POSTGRES_PASSWORD: scc
       POSTGRES_DB: scc
+    # Parallel queries share memory through /dev/shm. Docker's 64 MB default ran out
+    # under read load and failed queries; this is a ceiling, not memory set aside.
+    shm_size: 1gb
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
