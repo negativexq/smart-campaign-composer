@@ -78,6 +78,7 @@ services:
     stop_grace_period: 30s
     environment:
       <<: *backend-env
+      RATE_LIMITER: ${RATE_LIMITER:-permit}
       PROVIDER_URL: http://mock-provider:8080
       UNSUBSCRIBE_SECRET: ${UNSUBSCRIBE_SECRET:-local-unsubscribe-secret}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}

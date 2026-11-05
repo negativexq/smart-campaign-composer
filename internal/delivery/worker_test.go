@@ -1477,3 +1477,40 @@ func TestAnOutageOfServerErrorsIsWaitedOut(t *testing.T) {
 		t.Fatalf("after the outage: %v, want %d sent", got, queued)
 	}
 }
+
+// slowClaimLimiter holds a real permit for as long as a slow claim would.
+type slowClaimLimiter struct {
+	*delivery.RedisPermit
+	hold time.Duration
+}
+
+func (l slowClaimLimiter) Reserve(ctx context.Context, channel string, want int) (delivery.Permits, error) {
+	permits, err := l.RedisPermit.Reserve(ctx, channel, want)
+	time.Sleep(l.hold)
+	return permits, err
+}
+
+func TestAMessageWithAStalePermitIsQueuedAgainAndNeverSent(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	permit := delivery.NewRedisPermit(testsupport.NewRedis(t), time.Millisecond, 2, testsupport.Unique(t))
+	worker := delivery.New(r.pool, r.sender, slowClaimLimiter{permit, 250 * time.Millisecond}, r.metrics, noop.NewTracerProvider().Tracer("test"), delivery.Config{
+		BatchSize: 1, Concurrency: 1, Lease: time.Minute, MaxAttempts: 3, SendTimeout: time.Minute,
+		Backoff: func(int) time.Duration { return 0 },
+	})
+	ctx := context.Background()
+	if _, err := worker.ProcessBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.sender.calls) != 0 {
+		t.Fatalf("a stale permit reached the provider %d times", len(r.sender.calls))
+	}
+	var sending, returned, attempts int
+	if err := r.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status = 'SENDING'), count(*) FILTER (WHERE status = 'RETRYING'),
+		coalesce(sum(attempts), 0) FROM campaign_deliveries WHERE campaign_id = $1`, r.id).Scan(&sending, &returned, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	if sending != 0 || returned == 0 || attempts != 0 {
+		t.Fatalf("sending %d, returned %d, attempts %d", sending, returned, attempts)
+	}
+}

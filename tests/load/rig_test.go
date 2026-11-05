@@ -422,7 +422,10 @@ func writeReport() error {
 	id := time.Now().UTC().Format("2006-01-02-1504")
 	machine := fmt.Sprintf("%s/%s, %d CPUs, %s", runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), runtime.Version())
 	if chosen := os.Getenv("RATE_LIMITER"); chosen != "" {
-		machine += ", limiter " + chosen + " " + os.Getenv("PACING_INTERVAL_MS") + " ms"
+		machine += ", limiter " + chosen
+		if interval := os.Getenv("PACING_INTERVAL_MS"); interval != "" {
+			machine += " " + interval + " ms"
+		}
 	}
 	encoded, err := json.MarshalIndent(map[string]any{"commit": state, "machine": machine, "limit": limit, "scale": os.Getenv("LOAD_SCALE"), "results": results}, "", "  ")
 	if err != nil {

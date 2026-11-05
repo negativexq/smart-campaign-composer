@@ -1,0 +1,124 @@
+{
+  "commit": "b3685f5 with uncommitted changes",
+  "limit": 100,
+  "machine": "darwin/arm64, 8 CPUs, go1.26.6",
+  "results": [
+    {
+      "name": "Pause race, TestPauseRace/own_script,_burst_2,_1_workers",
+      "question": "Can a turn be taken once a pause has begun?",
+      "workers": 0,
+      "setup": "1 workers asking for turns, 300 pauses of 40ms, order read from Redis.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 0,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 0,
+      "cost": {
+        "postgres_statements": 0,
+        "postgres_milliseconds": 0,
+        "claim_calls": 0,
+        "claim_milliseconds": 0,
+        "claimed_rows": 0,
+        "redis_commands": 0,
+        "redis_script_calls": 0,
+        "messages": 0,
+        "statements_per_message": 0,
+        "redis_commands_per_message": 0
+      },
+      "channels": {},
+      "notes": [
+        "Pauses seen 300, turns taken 1402, turns taken during a pause 0, latest 0.00 ms after it began."
+      ],
+      "violations": []
+    },
+    {
+      "name": "Pause race, TestPauseRace/own_script,_burst_2,_4_workers",
+      "question": "Can a turn be taken once a pause has begun?",
+      "workers": 0,
+      "setup": "4 workers asking for turns, 300 pauses of 40ms, order read from Redis.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 0,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 0,
+      "cost": {
+        "postgres_statements": 0,
+        "postgres_milliseconds": 0,
+        "claim_calls": 0,
+        "claim_milliseconds": 0,
+        "claimed_rows": 0,
+        "redis_commands": 0,
+        "redis_script_calls": 0,
+        "messages": 0,
+        "statements_per_message": 0,
+        "redis_commands_per_message": 0
+      },
+      "channels": {},
+      "notes": [
+        "Pauses seen 299, turns taken 1434, turns taken during a pause 0, latest 0.00 ms after it began."
+      ],
+      "violations": []
+    },
+    {
+      "name": "Pause race, TestPauseRace/redis_rate,_burst_2,_1_workers",
+      "question": "Can a turn be taken once a pause has begun?",
+      "workers": 0,
+      "setup": "1 workers asking for turns, 300 pauses of 40ms, order read from Redis.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 0,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 0,
+      "cost": {
+        "postgres_statements": 0,
+        "postgres_milliseconds": 0,
+        "claim_calls": 0,
+        "claim_milliseconds": 0,
+        "claimed_rows": 0,
+        "redis_commands": 0,
+        "redis_script_calls": 0,
+        "messages": 0,
+        "statements_per_message": 0,
+        "redis_commands_per_message": 0
+      },
+      "channels": {},
+      "notes": [
+        "Pauses seen 299, turns taken 1347, turns taken during a pause 132, latest 4.05 ms after it began."
+      ],
+      "violations": []
+    },
+    {
+      "name": "Pause race, TestPauseRace/redis_rate,_burst_2,_4_workers",
+      "question": "Can a turn be taken once a pause has begun?",
+      "workers": 0,
+      "setup": "4 workers asking for turns, 300 pauses of 40ms, order read from Redis.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 0,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 0,
+      "cost": {
+        "postgres_statements": 0,
+        "postgres_milliseconds": 0,
+        "claim_calls": 0,
+        "claim_milliseconds": 0,
+        "claimed_rows": 0,
+        "redis_commands": 0,
+        "redis_script_calls": 0,
+        "messages": 0,
+        "statements_per_message": 0,
+        "redis_commands_per_message": 0
+      },
+      "channels": {},
+      "notes": [
+        "Pauses seen 299, turns taken 1384, turns taken during a pause 165, latest 3.66 ms after it began."
+      ],
+      "violations": []
+    }
+  ],
+  "scale": ""
+}

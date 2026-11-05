@@ -115,6 +115,10 @@ func (r *run) watchPermits() {
 	go r.permits.read(conn)
 }
 
+func isTurnKey(key string) bool {
+	return strings.Contains(key, ":pace:email") || strings.Contains(key, ":permit:email")
+}
+
 func (l *permitLog) read(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 1<<16), 1<<20)
@@ -131,12 +135,12 @@ func (l *permitLog) read(conn net.Conn) {
 		}
 		switch strings.ToLower(args[0][1]) {
 		case "evalsha":
-			reserving = args[2][1] == "2" && len(args) > 5 && strings.Contains(args[3][1], ":pace:email")
+			reserving = args[2][1] == "2" && len(args) > 5 && isTurnKey(args[3][1])
 			if reserving {
 				interval, _ = strconv.ParseInt(args[5][1], 10, 64)
 			}
 		case "set":
-			if match[3] != "lua" || !strings.Contains(args[1][1], ":pace:email") {
+			if match[3] != "lua" || !isTurnKey(args[1][1]) {
 				continue
 			}
 			value, err := strconv.ParseInt(args[2][1], 10, 64)

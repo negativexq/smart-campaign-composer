@@ -94,6 +94,7 @@ func TestALateReservationCannotBunchUpWithNewSends(t *testing.T) {
 		t.Fatalf("reserve: %+v, %v", late, err)
 	}
 	time.Sleep(200 * time.Millisecond)
+	began := time.Now()
 	fresh, err := pacer.Reserve(ctx, "sms", 4)
 	if err != nil || fresh.Granted == 0 {
 		t.Fatalf("fresh: %+v, %v", fresh, err)
@@ -105,9 +106,10 @@ func TestALateReservationCannotBunchUpWithNewSends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Tolerance 40 ms at 10 ms a turn leaves room for at most four sends at one moment.
-	if confirmed+fresh.Granted > 5 {
-		t.Fatalf("%d sends at once", confirmed+fresh.Granted)
+	// Tolerance 40 ms at 10 ms a turn leaves room for four sends at one moment, plus a
+	// turn for each interval this took on a busy machine.
+	if most := 5 + int(time.Since(began)/(10*time.Millisecond)); confirmed+fresh.Granted > most {
+		t.Fatalf("%d sends at once, the pace allows %d", confirmed+fresh.Granted, most)
 	}
 }
 

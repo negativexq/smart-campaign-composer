@@ -51,10 +51,7 @@ const (
 	stallInterval      = 30 * time.Second
 	defaultStallAfter  = 10 * time.Minute
 	idlePause          = 200 * time.Millisecond
-	// claimGap lets a few slots free up before the next claim, so a busy worker
-	// takes several deliveries per query instead of running one per finished call.
-	claimGap   = 20 * time.Millisecond
-	errorPause = 2 * time.Second
+	errorPause         = 2 * time.Second
 )
 
 // channels is every channel the worker sends on.
@@ -111,6 +108,8 @@ type Permits struct {
 	id string
 	// issued is when a pacer granted these, by its own clock.
 	issued int64
+	// taken is when a single permit reached this worker, by its own clock.
+	taken time.Time
 }
 
 // Limiter hands out permission to send on a channel.
@@ -131,6 +130,9 @@ type Config struct {
 	BatchSize int
 	// Concurrency is how many calls each channel makes at once.
 	Concurrency int
+	// ClaimGap lets a few slots free up before the next claim, so a busy worker
+	// takes several deliveries per query instead of running one per finished call.
+	ClaimGap    time.Duration
 	Lease       time.Duration
 	MaxAttempts int
 	SendTimeout time.Duration
@@ -150,6 +152,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		BatchSize:   32,
+		ClaimGap:    20 * time.Millisecond,
 		Concurrency: 32,
 		Lease:       time.Minute,
 		MaxAttempts: 5,
@@ -218,7 +221,7 @@ func (w *Worker) runChannel(ctx context.Context, channel string) {
 	defer sending.Wait()
 
 	for ctx.Err() == nil {
-		free := takeFreeSlots(ctx, slots)
+		free := takeFreeSlots(ctx, slots, w.config.ClaimGap)
 		if free == 0 {
 			return
 		}
@@ -311,7 +314,7 @@ func (w *Worker) recordHold(ctx context.Context, channel string, permits Permits
 
 // takeFreeSlots waits for a free slot, gives others a moment to free up and takes
 // them all. It returns 0 only when ctx ends.
-func takeFreeSlots(ctx context.Context, slots chan struct{}) int {
+func takeFreeSlots(ctx context.Context, slots chan struct{}, gap time.Duration) int {
 	select {
 	case <-ctx.Done():
 		return 0
@@ -320,7 +323,7 @@ func takeFreeSlots(ctx context.Context, slots chan struct{}) int {
 	free := 1
 	select {
 	case <-ctx.Done():
-	case <-time.After(claimGap):
+	case <-time.After(gap):
 	}
 	for {
 		select {

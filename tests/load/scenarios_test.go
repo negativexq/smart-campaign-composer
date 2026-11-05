@@ -374,3 +374,49 @@ func TestT13WorkersRestart(t *testing.T) {
 		email.LongestGap, email.AfterGap100ms, email.AfterGapSecond, out.KeyRepeats))
 	record(t, out)
 }
+
+// TestT14LimitFollowsTheSetting checks that a lower limit really lowers the rate. The
+// run fails on its own if the provider sees more than the limit in any second.
+func TestT14LimitFollowsTheSetting(t *testing.T) {
+	for _, chosen := range []int{50, 5} {
+		t.Run(fmt.Sprintf("limit%d", chosen), func(t *testing.T) {
+			count := max(scaled(chosen*15), 20)
+			r := newRun(t, map[string]int{"email": count})
+			r.limit = chosen
+			r.provider.latency = usualLatency(14)
+			r.startWorkers(2)
+			status := r.waitUntilDone()
+			out := r.finish(fmt.Sprintf("T14 limit %d", chosen), "Does the rate follow RATE_LIMIT_PER_SECOND?",
+				fmt.Sprintf("Two workers, %d emails, a limit of %d a second.", count, chosen), status)
+			out.Notes = append(out.Notes, fmt.Sprintf("Accepted %.1f/s against a limit of %d.", out.Channels["email"].AcceptedRate, chosen))
+			record(t, out)
+		})
+	}
+}
+
+// TestT14bBunchingUnderALowerLimit repeats the T06b case with half the limit and half
+// the group, to see if the margin holds when the rate is lower.
+func TestT14bBunchingUnderALowerLimit(t *testing.T) {
+	const chosen, delay = 50, 200 * time.Millisecond
+	count := scaled(1_000)
+	r := newRun(t, map[string]int{"email": count})
+	r.limit = chosen
+	r.provider.latency = usualLatency(6)
+	var (
+		mu    sync.Mutex
+		calls int
+	)
+	r.provider.network = func() time.Duration {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if (calls-1)/chosen%2 == 0 {
+			return delay
+		}
+		return 0
+	}
+	r.startWorkers(4)
+	status := r.waitUntilDone()
+	record(t, r.finish("T14b bunching under a limit of 50", "Does the margin hold at a lower limit?",
+		fmt.Sprintf("Four workers, %d emails, a limit of %d, every other %d calls delayed %s.", count, chosen, chosen, delay), status))
+}

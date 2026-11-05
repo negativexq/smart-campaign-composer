@@ -157,6 +157,8 @@ Known limit: a person who starts matching later can have a longer first name tha
 
 ## The rate limiter is a sliding window in Redis
 
+Replaced by single permits, described under "A send takes one permit, and a permit is never given back". It stays selectable with `RATE_LIMITER=window`.
+
 A fixed one-second bucket allows up to 200 messages across a bucket boundary. A Lua script keeps a sliding window for each channel, so no one-second span goes over 100, however many workers run. If Redis is unavailable, messages wait and no attempt is used: sending without the limiter would risk breaking a hard limit.
 
 ## An earlier timeout makes the result UNKNOWN
@@ -365,9 +367,13 @@ The worker asks the rate limiter how many sends it may make, then claims exactly
 
 ## The limit is enforced a little early
 
+This describes the sliding window. Single permits use a wider margin for the same reason.
+
 A limit of 100 a second means 100 as the provider counts them. Calls granted exactly a second apart can land within one second, since each reaches the provider a varying few milliseconds later, and measured on arrival this let through up to 117. The limiter therefore counts over 1.1 seconds, which costs about 9% of the rate: at most 91 a second per channel. This holds while that delay stays under 100 ms, and needs measuring again against a real provider.
 
 ## A permit counts from when it is used and belongs to its reservation
+
+This describes the sliding window. Single permits have no reservation to settle.
 
 A permit is granted before the claim, so a slow claim sends it late, where it can land in the same second as permits granted after it. Giving back unused permits by taking the newest also could not tell whose they were: a worker stalled past the window would erase sends another worker had made, and the limit would be exceeded by that many. So after claiming, a worker settles its own reservation in one Redis call: unused permits go back and used ones are counted from that moment. If a stall outlasted the window and others filled it, only what still fits is confirmed, and the rest of the claim returns to the queue without using an attempt. The whole claim returns the same way if settling fails: a failed settle used to count as permission, which is the likely reason a chaos run once saw 5 messages go out after Redis had stopped. Settling costs one more call to Redis per batch.
 
@@ -423,18 +429,47 @@ A row in `starter_content` records that this happened. Without it, every restart
 
 The starter images have no words drawn into them and the templates have no fixed text, so every word in an email follows the campaign's language.
 
+## A send takes one permit, and a permit is never given back
+
+Calls used to leave in groups, up to 100 at once about every 1.13 seconds. If one group was held up on its way by 150 ms and the next was not, the provider saw 200 calls in one second. Spacing calls evenly makes this far smaller, so a worker now takes one permit from Redis for each message. This is the generic cell rate algorithm with a burst of two, in one Lua script that also checks the channel's pause.
+
+Three designs were compared with the same scenarios. An evenly spaced pacer that reserved several turns and returned the unused ones behaved almost the same, but running its return twice created capacity: 8 permits at once where 4 or 5 were allowed. That can happen when a reply is lost and the command retried. A turn that is never returned cannot do this: a repeat costs a turn, and a turn with nothing to send is lost, which costs throughput and not the limit.
+
+`go-redis/redis_rate` gave the same rates and peaks, but it does not know about pauses, so the pause has to be read in a separate command. With a pause every 60 to 130 ms under test, 36 to 53 turns of 1,700 were taken after a pause had begun, within 2 ms of it, and none with our own script. Pause safety is the one part that is ours, and a library would not remove it or the tests, so the script stays.
+
+`RATE_LIMIT_PER_SECOND` sets the pace: 80% of the limit, so 12.5 ms between sends at 100. Below a limit of 10 the burst is one, because two at once could pass the limit within a second. An unknown `RATE_LIMITER` stops the worker instead of choosing another limiter.
+
+A permit older than 200 ms sends nothing and its message returns to the queue, with no attempt used. Age is measured from before asking Redis, on the worker's own monotonic clock, so it needs Redis neither to keep time nor to be reachable. A worker no longer waits 20 ms between claims, as that alone held a worker to about 45 a second, so each message costs one claim.
+
+What this costs, for 20,000 messages:
+
+| | Sliding window | Single permits |
+|---|---|---|
+| Rate per channel | 88.3/s | 80.0/s |
+| Claims | 1,203 | 20,010 |
+| Total time in Postgres | 5.2 s | 7.6 s |
+| Redis commands per message, one worker | 3.7 | 9.0 |
+| Redis commands per message, four workers | 3.7 | 21.0 |
+
+That is about 158 claims and 1,400 Redis commands a second. Neither service's CPU was measured, and claims against a much larger queue were not.
+
+The bigger cost comes from frequent 429s. Each one pauses the channel for its `Retry-After`, and paced calls take longer to reach the next one. With a provider quota of 50 a second and `Retry-After: 1`, 29.7 messages a second were accepted against 43.4 with the sliding window, though with 91 rejected calls against 405. Every 50th call answering 429 gives 29.8 against 45.2. This is kept: a provider asking us to wait is obeyed, and finding its real quota automatically is a control system nobody has asked for.
+
 ## Delivery is measured at the provider, and two limits are known
 
-`make test-load` runs real worker processes against real Postgres, Redis and HTTP, with a provider the scenario controls, and judges rules by what that provider saw. A broken rule fails its scenario. Rates are only recorded, because they depend on the machine. Runs are kept in `tests/load/results`.
+`make test-load` runs real worker processes against real Postgres, Redis and HTTP, with a provider the scenario controls, and judges rules by what that provider saw. A broken rule fails its scenario. Rates are only recorded, because they depend on the machine. Runs are kept in `tests/load/results`, and each names its limiter.
 
-Measured once per scenario on an 8-core laptop, with the provider in the test process and Postgres and Redis in Docker:
+Measured once per scenario on an 8-core laptop, with the provider in the test process and Postgres and Redis in Docker and delays made by the test provider, not a real network. Single permits unless it says otherwise:
 
-- A long send holds about 88.5 messages a second per channel, a little under the 91 the 1.1 second window allows. In any one second the provider saw at most 100, with 1, 2 or 4 workers. Calls leave in groups of up to 100 about every 1.13 seconds.
-- With the limit out of the way, 5,000 messages per channel ran at about 650 a second with one worker, 1,235 with two and 1,870 with four. The workers are far from being the bottleneck, though these runs lasted only 4 to 9 seconds.
-- One 429 with `Retry-After: 1` costs about one second, wherever it falls in a group, and no attempt.
+- A long send holds 80 messages a second per channel. In any one second the provider saw at most 83, with 1, 2 or 4 workers.
+- A limit of 50 gave 39.9 a second with a peak of 41, and a limit of 5 gave 4.0 with a peak of 5.
+- One 429 with `Retry-After: 1` costs about one second and no attempt, and sending resumes at its usual pace, with at most 10 calls in the next 100 ms.
 - With every 50th response lost and one worker killed, all 3,000 messages ended as SENT and none was accepted twice. The dead worker's messages came back when the 60 second lease ended.
+- With Redis killed for 10 seconds, no call left during the outage, and at most 10 left in the 100 ms after it, against 100 with the sliding window. Cutting every Postgres connection for 10 seconds, or killing every worker, lost nothing and sent nothing twice.
+- With email answering 429 for 15 seconds, SMS kept its pace.
+- With the limit out of the way, the sliding window ran 5,000 messages per channel at about 650 a second with one worker, 1,235 with two and 1,870 with four, so workers are far from being the bottleneck, though these runs lasted only 4 to 9 seconds. This was not repeated with single permits.
 
 Two scenarios fail, and they are left failing because they describe real limits:
 
-- **The limit holds only up to about 100 ms of sudden change in network delay.** When one group of 100 is held up and the next is not, the provider saw 200 calls in one second at 150 and 200 ms of delay, and at most 100 at 50 and 100 ms. Random delay of 0 to 200 ms for each call stays within the limit, so this takes delay that moves together. Calling at an even pace would make it far smaller, and that has not been done.
-- **A provider that forgets idempotency keys sends a message twice.** When a response is lost and the provider restarts before the retry, 29 of 30 such messages were accepted again while our records showed each as sent once. No worker can see this: retrying risks a second message and not retrying risks none at all. Keeping keys is the provider's side of the contract, so making the mock keep them would only make the test pass. A real provider's key lifetime has to be checked before relying on one message per person.
+- **The limit holds in the tested case of up to 200 ms of sudden change in network delay, and not at 250 ms.** When one group of calls is held up and the next is not, the calls in the provider's busiest second left over `1 + delay` seconds, so the peak is about `(1 + delay) / interval`, plus up to four. At a limit of 100, the provider saw 86, 90, 93 and 98 at 50, 100, 150 and 200 ms, then 101 at 250 ms and 105 at 300 ms. At a limit of 50 it saw 49 at 200 ms. The sliding window saw 200 from 150 ms on. Random delay of 0 to 200 ms for each call peaked at 90. No margin ends this, as a slower pace only moves the point at which it breaks and costs throughput everywhere, so the pace was not lowered to turn these green. Where a provider's limit has to be exact, it has to be enforced at the provider or a gateway too.
+- **A provider that forgets idempotency keys sends a message twice.** When a response is lost and the provider restarts before the retry, 29 of 30 such messages were accepted again while our records showed each as sent once. No limiter or worker can see this: retrying risks a second message and not retrying risks none at all. Keeping keys is the provider's side of the contract, so making the mock keep them would only make the test pass. A real provider's key lifetime has to be checked before relying on one message per person.

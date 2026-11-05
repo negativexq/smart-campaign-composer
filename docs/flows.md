@@ -175,11 +175,11 @@ sequenceDiagram
 
     W->>B: How many calls may I make?
     B-->>W: Allowed, or wait
-    W->>R: Reserve permits
+    W->>R: Take one permit
     R-->>W: Granted, or wait
     W->>D: Claim with FOR UPDATE SKIP LOCKED
     Note over W,D: Status SENDING, with a new claim_token<br/>and a one-minute lease
-    W->>R: Settle: return unused permits, count the rest from now
+    W->>W: Permit older than 200 ms? Back to the queue, no attempt used
     par For each claimed message
         W->>W: Consent is still given? Otherwise SKIPPED
         W->>W: Render the message for this person's language and version

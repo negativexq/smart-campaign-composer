@@ -47,7 +47,7 @@ The API and the worker never call each other. They share PostgreSQL, so either c
 | `mock-provider` | 8083 (test inbox) | Stands in for an SMS and email provider: idempotency keys, failures, delivery reports and a test inbox |
 | `setup` | none | Runs once before the API and worker: migrations, seed users, starter templates |
 | `postgres` | none | All durable state, including the delivery queue |
-| `redis` | none | Shared rate limiter: a sliding window and a pause key per channel |
+| `redis` | none | Shared rate limiter: the next send time and a pause key per channel |
 
 ## Where each thing is decided
 
@@ -58,7 +58,7 @@ The API and the worker never call each other. They share PostgreSQL, so either c
 | Nothing is sent without approval | Status checks in `campaign.Service`, and the worker only claims from campaigns in `DISPATCHING` |
 | An approved version cannot change | Database trigger on `campaign_versions` |
 | One message per campaign, person and channel | Unique key on `campaign_deliveries` |
-| At most 100 messages per second per channel | Redis sliding window, shared by all workers |
+| At most 100 messages per second per channel | Single permits from Redis, evenly spaced at 80% of the limit and shared by all workers |
 | A stale worker cannot overwrite a result | `claim_token` must still match when recording |
 | The history of decisions cannot be edited | Append-only `audit_events`, written in the same transaction as the change |
 
