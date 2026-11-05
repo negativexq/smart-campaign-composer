@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -89,10 +90,14 @@ type Server struct {
 	slots   chan struct{}
 	stop    chan struct{}
 	closed  bool
-	// stats and recent describe this run of the process and start over with it.
-	stats  map[string]*ChannelStats
+	// stats, recent and peaks describe this run of the process and start over with it.
+	stats map[string]*ChannelStats
+	inbox inbox
+	// rate guards recent and peaks apart from mu, which is held while a write reaches
+	// the disk. Calls that waited for it would otherwise be counted as arriving together.
+	rate   sync.Mutex
 	recent map[string][]time.Time
-	inbox  inbox
+	peaks  map[string]int
 }
 
 // New builds a provider.
@@ -114,6 +119,7 @@ func New(behavior Behavior) *Server {
 		stop:     make(chan struct{}),
 		stats:    map[string]*ChannelStats{"sms": {}, "email": {}},
 		recent:   map[string][]time.Time{},
+		peaks:    map[string]int{},
 		inbox:    inbox{size: behavior.InboxSize, byKey: map[string]*InboxMessage{}},
 	}
 }
@@ -192,6 +198,8 @@ func (r request) problem() string {
 }
 
 func (s *Server) send(w http.ResponseWriter, r *http.Request) {
+	// A call arrives when it comes in, not when its body has been read.
+	at := time.Now()
 	ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
 	ctx, span := otel.Tracer("mock-provider").Start(ctx, "provider.receive")
 	defer span.End()
@@ -204,7 +212,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown channel"})
 		return
 	}
-	s.arrived(message.Channel)
+	s.arrived(message.Channel, at)
 	key := r.Header.Get("Idempotency-Key")
 	problem := message.problem()
 	if key == "" {
@@ -318,19 +326,29 @@ func (s *Server) accept(message request, key string) (string, bool, error) {
 }
 
 // arrived measures the rate as a provider enforces it: every call counts, whatever
-// its answer, from the moment it comes in.
-func (s *Server) arrived(channel string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now()
-	recent := append(s.recent[channel], now)
+// its answer, from the moment it comes in. Calls can be recorded slightly out of
+// order, so each is placed by its time and every window it falls in is counted.
+func (s *Server) arrived(channel string, at time.Time) {
+	s.rate.Lock()
+	defer s.rate.Unlock()
+	recent := s.recent[channel]
+	position, _ := slices.BinarySearchFunc(recent, at, func(a, b time.Time) int { return a.Compare(b) })
+	recent = slices.Insert(recent, position, at)
+	// Windows ending at this call or a later one may have grown.
 	first := 0
-	for first < len(recent) && now.Sub(recent[first]) >= window {
-		first++
+	for end := position; end < len(recent); end++ {
+		for recent[end].Sub(recent[first]) >= window {
+			first++
+		}
+		s.peaks[channel] = max(s.peaks[channel], end-first+1)
 	}
-	s.recent[channel] = recent[first:]
-	stats := s.stats[channel]
-	stats.PeakPerSecond = max(stats.PeakPerSecond, len(s.recent[channel]))
+	// Keep a second more than a window, for calls recorded late.
+	latest := recent[len(recent)-1]
+	drop := 0
+	for drop < len(recent) && latest.Sub(recent[drop]) >= 2*window {
+		drop++
+	}
+	s.recent[channel] = recent[drop:]
 }
 
 func arrivalEvent(bounced bool) string {
@@ -361,6 +379,13 @@ func (s *Server) Stats() map[string]ChannelStats {
 	copied := map[string]ChannelStats{}
 	for channel, stats := range s.stats {
 		copied[channel] = *stats
+	}
+	s.rate.Lock()
+	defer s.rate.Unlock()
+	for channel, peak := range s.peaks {
+		stats := copied[channel]
+		stats.PeakPerSecond = peak
+		copied[channel] = stats
 	}
 	return copied
 }
