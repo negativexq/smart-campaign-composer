@@ -1,0 +1,2768 @@
+{
+  "commit": "3572234 with uncommitted changes",
+  "limit": 100,
+  "machine": "darwin/arm64, 8 CPUs, go1.26.6",
+  "results": [
+    {
+      "name": "T01 steady capacity",
+      "question": "What rate holds for a long send with no provider trouble?",
+      "workers": 1,
+      "setup": "One worker, 10000 messages on each channel, no faults, provider answers in 10-60 ms.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 113.990960958,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 64,
+      "cost": {
+        "postgres_statements": 123017,
+        "postgres_milliseconds": 5194.783108000006,
+        "claim_calls": 1203,
+        "claim_milliseconds": 1066.6924599999988,
+        "claimed_rows": 20000,
+        "redis_commands": 74552,
+        "redis_script_calls": 2609,
+        "messages": 20000,
+        "statements_per_message": 6.15085,
+        "redis_commands_per_message": 3.7276
+      },
+      "channels": {
+        "email": {
+          "requests": 10000,
+          "answers": {
+            "accept": 10000
+          },
+          "unique_accepted": 10000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.34614181997829,
+          "accepted_rate": 88.34848809142066,
+          "longest_gap_seconds": 1.023019875,
+          "span_seconds": 112.199676125,
+          "retry_overhead": 0,
+          "completed_rate": 89.18968141980935,
+          "statuses": {
+            "SENT": 10000
+          },
+          "attempts_used": 10000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 87,
+          "calls_in_100ms_after_longest_gap": 76,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 49,
+            "15-25 ms": 387,
+            "25-100 ms": 116,
+            "over 100 ms": 99,
+            "under 1 ms": 9348
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 3,
+            "10": 27,
+            "11": 31,
+            "12": 32,
+            "13": 36,
+            "14": 54,
+            "15": 52,
+            "16": 48,
+            "17": 35,
+            "18": 32,
+            "19": 28,
+            "2": 7,
+            "20": 13,
+            "21": 17,
+            "22": 4,
+            "23": 4,
+            "24": 1,
+            "25": 2,
+            "27": 1,
+            "29": 1,
+            "3": 4,
+            "30": 2,
+            "32": 90,
+            "4": 12,
+            "5": 6,
+            "6": 14,
+            "7": 14,
+            "8": 13,
+            "9": 30
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.1437735,
+            "their_rate_when_leaving": 688.5830838089078
+          }
+        },
+        "sms": {
+          "requests": 10000,
+          "answers": {
+            "accept": 10000
+          },
+          "unique_accepted": 10000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.34435836774124,
+          "accepted_rate": 88.34346589163638,
+          "longest_gap_seconds": 1.022323041,
+          "span_seconds": 112.196921,
+          "retry_overhead": 0,
+          "completed_rate": 89.18115557393965,
+          "statuses": {
+            "SENT": 10000
+          },
+          "attempts_used": 10000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 85,
+          "calls_in_100ms_after_longest_gap": 76,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 22,
+            "15-25 ms": 382,
+            "25-100 ms": 118,
+            "over 100 ms": 99,
+            "under 1 ms": 9378
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 2,
+            "10": 21,
+            "11": 32,
+            "12": 39,
+            "13": 38,
+            "14": 39,
+            "15": 36,
+            "16": 42,
+            "17": 36,
+            "18": 30,
+            "19": 30,
+            "2": 8,
+            "20": 24,
+            "21": 12,
+            "22": 9,
+            "23": 6,
+            "25": 1,
+            "26": 1,
+            "3": 5,
+            "30": 1,
+            "32": 98,
+            "4": 8,
+            "5": 10,
+            "6": 13,
+            "7": 10,
+            "8": 20,
+            "9": 32
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.141368375,
+            "their_rate_when_leaving": 700.298068786601
+          }
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T03 429 at call 0",
+      "question": "What does a single 429 with Retry-After: 1 cost?",
+      "workers": 1,
+      "setup": "One worker, 2000 emails, call 0 answers 429 (0 means none), everything else succeeds.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 22.1807605,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 32,
+      "cost": {
+        "postgres_statements": 12579,
+        "postgres_milliseconds": 566.6251200000004,
+        "claim_calls": 218,
+        "claim_milliseconds": 114.26141799999999,
+        "claimed_rows": 2000,
+        "redis_commands": 14819,
+        "redis_script_calls": 456,
+        "messages": 2000,
+        "statements_per_message": 6.2895,
+        "redis_commands_per_message": 7.4095
+      },
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.41402950998875,
+          "accepted_rate": 88.40612830418954,
+          "longest_gap_seconds": 1.003305667,
+          "span_seconds": 21.619242833,
+          "retry_overhead": 0,
+          "completed_rate": 92.74609119022398,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 81,
+          "calls_in_100ms_after_longest_gap": 73,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 9,
+            "15-25 ms": 75,
+            "25-100 ms": 25,
+            "over 100 ms": 19,
+            "under 1 ms": 1871
+          },
+          "sends_within_2ms_of_each_other": {
+            "10": 5,
+            "11": 4,
+            "12": 5,
+            "13": 10,
+            "14": 13,
+            "15": 7,
+            "16": 9,
+            "17": 7,
+            "18": 3,
+            "19": 4,
+            "2": 1,
+            "20": 9,
+            "21": 1,
+            "22": 1,
+            "24": 1,
+            "26": 1,
+            "3": 1,
+            "32": 19,
+            "4": 2,
+            "5": 2,
+            "6": 1,
+            "7": 6,
+            "8": 6,
+            "9": 4
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.131309166,
+            "their_rate_when_leaving": 753.9458441157109
+          }
+        }
+      },
+      "notes": [
+        "First to last call: 21.62 s. Longest gap: 1.00 s."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T03 429 at call 500",
+      "question": "What does a single 429 with Retry-After: 1 cost?",
+      "workers": 1,
+      "setup": "One worker, 2000 emails, call 500 answers 429 (0 means none), everything else succeeds.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 23.180936833,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 32,
+      "cost": {
+        "postgres_statements": 12609,
+        "postgres_milliseconds": 611.694734,
+        "claim_calls": 226,
+        "claim_milliseconds": 110.06777899999996,
+        "claimed_rows": 2001,
+        "redis_commands": 15424,
+        "redis_script_calls": 475,
+        "messages": 2000,
+        "statements_per_message": 6.3045,
+        "redis_commands_per_message": 7.712
+      },
+      "channels": {
+        "email": {
+          "requests": 2001,
+          "answers": {
+            "429": 1,
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.04243838206,
+          "accepted_rate": 88.03418778337839,
+          "longest_gap_seconds": 1.068570458,
+          "span_seconds": 22.702068542,
+          "retry_overhead": 0.0005,
+          "completed_rate": 88.03466570376305,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 83,
+          "calls_in_100ms_after_longest_gap": 83,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 13,
+            "15-25 ms": 76,
+            "25-100 ms": 24,
+            "over 100 ms": 20,
+            "under 1 ms": 1867
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 1,
+            "10": 6,
+            "11": 2,
+            "12": 4,
+            "13": 5,
+            "14": 8,
+            "15": 9,
+            "16": 11,
+            "17": 7,
+            "18": 4,
+            "19": 5,
+            "20": 6,
+            "21": 4,
+            "22": 1,
+            "24": 2,
+            "25": 1,
+            "3": 4,
+            "32": 19,
+            "4": 2,
+            "5": 4,
+            "6": 2,
+            "7": 3,
+            "8": 10,
+            "9": 4
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.131629291,
+            "their_rate_when_leaving": 752.1122331351005
+          }
+        }
+      },
+      "notes": [
+        "First to last call: 22.70 s. Longest gap: 1.07 s."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T03 429 at call 550",
+      "question": "What does a single 429 with Retry-After: 1 cost?",
+      "workers": 1,
+      "setup": "One worker, 2000 emails, call 550 answers 429 (0 means none), everything else succeeds.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 23.194242875,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 32,
+      "cost": {
+        "postgres_statements": 12608,
+        "postgres_milliseconds": 586.8101390000003,
+        "claim_calls": 225,
+        "claim_milliseconds": 107.04433400000002,
+        "claimed_rows": 2001,
+        "redis_commands": 15402,
+        "redis_script_calls": 471,
+        "messages": 2000,
+        "statements_per_message": 6.304,
+        "redis_commands_per_message": 7.701
+      },
+      "channels": {
+        "email": {
+          "requests": 2001,
+          "answers": {
+            "429": 1,
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.45766179335867,
+          "accepted_rate": 88.34089252044313,
+          "longest_gap_seconds": 1.025843334,
+          "span_seconds": 22.614151,
+          "retry_overhead": 0.0005,
+          "completed_rate": 88.3464677536129,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 82,
+          "calls_in_100ms_after_longest_gap": 76,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 12,
+            "15-25 ms": 73,
+            "25-100 ms": 25,
+            "over 100 ms": 20,
+            "under 1 ms": 1870
+          },
+          "sends_within_2ms_of_each_other": {
+            "10": 2,
+            "11": 7,
+            "12": 11,
+            "13": 6,
+            "14": 8,
+            "15": 15,
+            "16": 1,
+            "17": 7,
+            "18": 3,
+            "19": 12,
+            "2": 1,
+            "20": 3,
+            "21": 2,
+            "22": 1,
+            "23": 1,
+            "3": 2,
+            "32": 20,
+            "4": 3,
+            "5": 2,
+            "6": 3,
+            "7": 4,
+            "8": 4,
+            "9": 5
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.141337292,
+            "their_rate_when_leaving": 700.4520788469613
+          }
+        }
+      },
+      "notes": [
+        "First to last call: 22.61 s. Longest gap: 1.03 s."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T06 jitter, seed 1",
+      "question": "Does the limit hold when calls take 0-200 ms to reach the provider?",
+      "workers": 4,
+      "setup": "Four workers, 10000 emails, each call delayed 0-200 ms before it counts as arrived.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 113.142578667,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 100,
+      "cost": {
+        "postgres_statements": 66266,
+        "postgres_milliseconds": 4426.080844999996,
+        "claim_calls": 2408,
+        "claim_milliseconds": 1713.8324269999987,
+        "claimed_rows": 10000,
+        "redis_commands": 167485,
+        "redis_script_calls": 5216,
+        "messages": 10000,
+        "statements_per_message": 6.6266,
+        "redis_commands_per_message": 16.7485
+      },
+      "channels": {
+        "email": {
+          "requests": 10000,
+          "answers": {
+            "accept": 10000
+          },
+          "unique_accepted": 10000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.49759121725126,
+          "accepted_rate": 88.4912568861882,
+          "longest_gap_seconds": 0.948224291,
+          "span_seconds": 112.070918208,
+          "retry_overhead": 0,
+          "completed_rate": 89.32125847539648,
+          "statuses": {
+            "SENT": 10000
+          },
+          "attempts_used": 10000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 69,
+          "calls_in_100ms_after_longest_gap": 53,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 171,
+            "10-15 ms": 5,
+            "5-10 ms": 48,
+            "over 100 ms": 99,
+            "under 1 ms": 9676
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 1,
+            "10": 2,
+            "100": 7,
+            "14": 1,
+            "15": 1,
+            "17": 1,
+            "18": 1,
+            "22": 1,
+            "24": 1,
+            "3": 2,
+            "30": 1,
+            "32": 16,
+            "34": 1,
+            "35": 1,
+            "36": 2,
+            "37": 2,
+            "4": 92,
+            "40": 1,
+            "42": 1,
+            "49": 1,
+            "5": 1,
+            "56": 1,
+            "59": 2,
+            "6": 1,
+            "60": 2,
+            "61": 1,
+            "64": 11,
+            "66": 1,
+            "70": 1,
+            "72": 1,
+            "78": 2,
+            "79": 1,
+            "86": 2,
+            "87": 1,
+            "91": 1,
+            "93": 1,
+            "95": 1,
+            "96": 61
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 100,
+            "undelayed": 0,
+            "seconds_those_calls_took_to_leave": 0.00810925,
+            "their_rate_when_leaving": 12208.280667139377
+          }
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T06 jitter, seed 2",
+      "question": "Does the limit hold when calls take 0-200 ms to reach the provider?",
+      "workers": 4,
+      "setup": "Four workers, 10000 emails, each call delayed 0-200 ms before it counts as arrived.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 113.162282375,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 100,
+      "cost": {
+        "postgres_statements": 66266,
+        "postgres_milliseconds": 4479.593320999991,
+        "claim_calls": 2408,
+        "claim_milliseconds": 1688.3248530000023,
+        "claimed_rows": 10000,
+        "redis_commands": 172749,
+        "redis_script_calls": 5216,
+        "messages": 10000,
+        "statements_per_message": 6.6266,
+        "redis_commands_per_message": 17.2749
+      },
+      "channels": {
+        "email": {
+          "requests": 10000,
+          "answers": {
+            "accept": 10000
+          },
+          "unique_accepted": 10000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.48467693770452,
+          "accepted_rate": 88.48626030915919,
+          "longest_gap_seconds": 0.945107083,
+          "span_seconds": 112.09332075,
+          "retry_overhead": 0,
+          "completed_rate": 89.28831587087016,
+          "statuses": {
+            "SENT": 10000
+          },
+          "attempts_used": 10000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 66,
+          "calls_in_100ms_after_longest_gap": 49,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 155,
+            "10-15 ms": 4,
+            "5-10 ms": 41,
+            "over 100 ms": 99,
+            "under 1 ms": 9700
+          },
+          "sends_within_2ms_of_each_other": {
+            "10": 1,
+            "100": 9,
+            "11": 1,
+            "13": 1,
+            "18": 1,
+            "20": 1,
+            "22": 1,
+            "32": 13,
+            "33": 1,
+            "35": 1,
+            "36": 3,
+            "38": 1,
+            "4": 89,
+            "41": 1,
+            "42": 1,
+            "44": 1,
+            "46": 1,
+            "5": 1,
+            "50": 1,
+            "52": 1,
+            "54": 2,
+            "55": 1,
+            "58": 1,
+            "60": 1,
+            "61": 1,
+            "63": 1,
+            "64": 12,
+            "68": 2,
+            "7": 3,
+            "74": 1,
+            "76": 1,
+            "78": 1,
+            "8": 1,
+            "83": 1,
+            "85": 1,
+            "87": 1,
+            "88": 1,
+            "89": 3,
+            "9": 1,
+            "91": 1,
+            "92": 2,
+            "96": 55
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 100,
+            "undelayed": 0,
+            "seconds_those_calls_took_to_leave": 0.007992292,
+            "their_rate_when_leaving": 12386.934811691064
+          }
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T06 jitter, seed 3",
+      "question": "Does the limit hold when calls take 0-200 ms to reach the provider?",
+      "workers": 4,
+      "setup": "Four workers, 10000 emails, each call delayed 0-200 ms before it counts as arrived.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 113.14158525,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 100,
+      "cost": {
+        "postgres_statements": 66266,
+        "postgres_milliseconds": 4487.499781000003,
+        "claim_calls": 2408,
+        "claim_milliseconds": 1685.3109280000021,
+        "claimed_rows": 10000,
+        "redis_commands": 169949,
+        "redis_script_calls": 5216,
+        "messages": 10000,
+        "statements_per_message": 6.6266,
+        "redis_commands_per_message": 16.9949
+      },
+      "channels": {
+        "email": {
+          "requests": 10000,
+          "answers": {
+            "accept": 10000
+          },
+          "unique_accepted": 10000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.51311784755667,
+          "accepted_rate": 88.51058013616819,
+          "longest_gap_seconds": 0.955384208,
+          "span_seconds": 112.0596945,
+          "retry_overhead": 0,
+          "completed_rate": 89.30965866592705,
+          "statuses": {
+            "SENT": 10000
+          },
+          "attempts_used": 10000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 69,
+          "calls_in_100ms_after_longest_gap": 51,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 159,
+            "10-15 ms": 1,
+            "5-10 ms": 41,
+            "over 100 ms": 99,
+            "under 1 ms": 9699
+          },
+          "sends_within_2ms_of_each_other": {
+            "10": 1,
+            "100": 8,
+            "13": 1,
+            "14": 1,
+            "18": 1,
+            "20": 1,
+            "21": 1,
+            "24": 2,
+            "26": 1,
+            "27": 1,
+            "30": 1,
+            "31": 1,
+            "32": 5,
+            "36": 1,
+            "37": 1,
+            "4": 89,
+            "41": 1,
+            "42": 2,
+            "43": 1,
+            "45": 1,
+            "46": 1,
+            "5": 1,
+            "51": 1,
+            "55": 1,
+            "58": 1,
+            "59": 1,
+            "64": 4,
+            "65": 1,
+            "66": 1,
+            "68": 1,
+            "69": 1,
+            "70": 1,
+            "72": 2,
+            "73": 1,
+            "76": 1,
+            "8": 1,
+            "82": 1,
+            "83": 1,
+            "90": 1,
+            "92": 1,
+            "96": 69
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 100,
+            "undelayed": 0,
+            "seconds_those_calls_took_to_leave": 0.008512375,
+            "their_rate_when_leaving": 11630.126727264716
+          }
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T06b network clears, 50ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 50ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 22.189527125,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 100,
+      "cost": {
+        "postgres_statements": 13238,
+        "postgres_milliseconds": 1075.6031559999988,
+        "claim_calls": 472,
+        "claim_milliseconds": 316.1901009999998,
+        "claimed_rows": 2000,
+        "redis_commands": 32942,
+        "redis_script_calls": 1024,
+        "messages": 2000,
+        "statements_per_message": 6.619,
+        "redis_commands_per_message": 16.471
+      },
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.43813572603864,
+          "accepted_rate": 88.42449073835581,
+          "longest_gap_seconds": 1.174081917,
+          "span_seconds": 21.455513167,
+          "retry_overhead": 0,
+          "completed_rate": 93.1374370171018,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 100,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 39,
+            "5-10 ms": 9,
+            "over 100 ms": 19,
+            "under 1 ms": 1932
+          },
+          "sends_within_2ms_of_each_other": {
+            "17": 1,
+            "32": 3,
+            "36": 3,
+            "39": 1,
+            "4": 17,
+            "60": 1,
+            "61": 1,
+            "64": 5,
+            "79": 1,
+            "96": 12
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 100,
+            "undelayed": 0,
+            "seconds_those_calls_took_to_leave": 0.009155042,
+            "their_rate_when_leaving": 10813.713361446074
+          }
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T06b network clears, 100ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 100ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 22.187516333,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 100,
+      "cost": {
+        "postgres_statements": 13238,
+        "postgres_milliseconds": 1130.0263789999997,
+        "claim_calls": 472,
+        "claim_milliseconds": 291.8663170000002,
+        "claimed_rows": 2000,
+        "redis_commands": 33390,
+        "redis_script_calls": 1024,
+        "messages": 2000,
+        "statements_per_message": 6.619,
+        "redis_commands_per_message": 16.695
+      },
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.40645251563988,
+          "accepted_rate": 88.39373048988283,
+          "longest_gap_seconds": 1.230618209,
+          "span_seconds": 21.402588416,
+          "retry_overhead": 0,
+          "completed_rate": 92.88141365511584,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 100,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 46,
+            "5-10 ms": 6,
+            "over 100 ms": 19,
+            "under 1 ms": 1928
+          },
+          "sends_within_2ms_of_each_other": {
+            "100": 3,
+            "12": 1,
+            "21": 1,
+            "23": 1,
+            "27": 1,
+            "32": 1,
+            "36": 1,
+            "38": 1,
+            "4": 15,
+            "40": 1,
+            "41": 1,
+            "56": 1,
+            "58": 1,
+            "61": 1,
+            "64": 1,
+            "7": 1,
+            "75": 1,
+            "89": 1,
+            "96": 10
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 100,
+            "undelayed": 0,
+            "seconds_those_calls_took_to_leave": 0.011242625,
+            "their_rate_when_leaving": 8805.772673196874
+          }
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T06b network clears, 150ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 150ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 22.147507875,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 100,
+      "cost": {
+        "postgres_statements": 13238,
+        "postgres_milliseconds": 1038.1913740000002,
+        "claim_calls": 472,
+        "claim_milliseconds": 323.3528489999999,
+        "claimed_rows": 2000,
+        "redis_commands": 34230,
+        "redis_script_calls": 1024,
+        "messages": 2000,
+        "statements_per_message": 6.619,
+        "redis_commands_per_message": 17.115
+      },
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 200,
+          "calls_over_the_limit": 1000,
+          "request_rate": 88.4432013967154,
+          "accepted_rate": 88.44122560966038,
+          "longest_gap_seconds": 1.2799375,
+          "span_seconds": 21.348908125,
+          "retry_overhead": 0,
+          "completed_rate": 92.66055796790455,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 100,
+          "calls_in_second_after_longest_gap": 200,
+          "gaps_between_sends": {
+            "1-5 ms": 39,
+            "5-10 ms": 4,
+            "over 100 ms": 19,
+            "under 1 ms": 1937
+          },
+          "sends_within_2ms_of_each_other": {
+            "100": 5,
+            "14": 1,
+            "18": 1,
+            "29": 1,
+            "32": 1,
+            "33": 1,
+            "36": 2,
+            "4": 12,
+            "47": 1,
+            "49": 1,
+            "63": 1,
+            "64": 4,
+            "71": 1,
+            "96": 8
+          },
+          "busiest_second": {
+            "calls": 200,
+            "delayed": 100,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 1.146216083,
+            "their_rate_when_leaving": 173.61473368891822
+          }
+        }
+      },
+      "notes": [],
+      "violations": [
+        "email: 200 calls in one second at the provider, limit 100 (1000 calls over)"
+      ]
+    },
+    {
+      "name": "T06b network clears, 200ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 200ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 22.134427958,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 100,
+      "cost": {
+        "postgres_statements": 13238,
+        "postgres_milliseconds": 1093.2295390000002,
+        "claim_calls": 472,
+        "claim_milliseconds": 318.4274569999999,
+        "claimed_rows": 2000,
+        "redis_commands": 35014,
+        "redis_script_calls": 1024,
+        "messages": 2000,
+        "statements_per_message": 6.619,
+        "redis_commands_per_message": 17.507
+      },
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 200,
+          "calls_over_the_limit": 1000,
+          "request_rate": 88.47217094798441,
+          "accepted_rate": 88.44901120884836,
+          "longest_gap_seconds": 1.3250426659999999,
+          "span_seconds": 21.294805875,
+          "retry_overhead": 0,
+          "completed_rate": 92.41756494400497,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 100,
+          "calls_in_second_after_longest_gap": 200,
+          "gaps_between_sends": {
+            "1-5 ms": 50,
+            "5-10 ms": 5,
+            "over 100 ms": 19,
+            "under 1 ms": 1925
+          },
+          "sends_within_2ms_of_each_other": {
+            "100": 2,
+            "18": 1,
+            "32": 3,
+            "34": 1,
+            "4": 18,
+            "6": 1,
+            "62": 1,
+            "64": 3,
+            "78": 1,
+            "92": 1,
+            "94": 1,
+            "96": 11
+          },
+          "busiest_second": {
+            "calls": 200,
+            "delayed": 100,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 1.145107125,
+            "their_rate_when_leaving": 173.7828676945836
+          }
+        }
+      },
+      "notes": [],
+      "violations": [
+        "email: 200 calls in one second at the provider, limit 100 (1000 calls over)"
+      ]
+    },
+    {
+      "name": "T06b network clears, 250ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 250ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 22.179669834,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 100,
+      "cost": {
+        "postgres_statements": 13238,
+        "postgres_milliseconds": 1038.6696959999983,
+        "claim_calls": 472,
+        "claim_milliseconds": 320.18666,
+        "claimed_rows": 2000,
+        "redis_commands": 32606,
+        "redis_script_calls": 1024,
+        "messages": 2000,
+        "statements_per_message": 6.619,
+        "redis_commands_per_message": 16.303
+      },
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 200,
+          "calls_over_the_limit": 1000,
+          "request_rate": 88.42744410146099,
+          "accepted_rate": 88.44747139846255,
+          "longest_gap_seconds": 1.379061334,
+          "span_seconds": 21.248623375,
+          "retry_overhead": 0,
+          "completed_rate": 92.1524650246838,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 100,
+          "calls_in_second_after_longest_gap": 200,
+          "gaps_between_sends": {
+            "1-5 ms": 35,
+            "5-10 ms": 6,
+            "over 100 ms": 19,
+            "under 1 ms": 1939
+          },
+          "sends_within_2ms_of_each_other": {
+            "100": 4,
+            "16": 1,
+            "22": 1,
+            "3": 1,
+            "32": 2,
+            "36": 2,
+            "4": 15,
+            "60": 1,
+            "64": 3,
+            "74": 1,
+            "80": 1,
+            "87": 1,
+            "9": 1,
+            "93": 1,
+            "96": 8
+          },
+          "busiest_second": {
+            "calls": 200,
+            "delayed": 100,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 1.150529292,
+            "their_rate_when_leaving": 172.96387096244393
+          }
+        }
+      },
+      "notes": [],
+      "violations": [
+        "email: 200 calls in one second at the provider, limit 100 (1000 calls over)"
+      ]
+    },
+    {
+      "name": "T06b network clears, 300ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 300ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 22.197777125,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 100,
+      "cost": {
+        "postgres_statements": 13238,
+        "postgres_milliseconds": 1126.4797009999997,
+        "claim_calls": 472,
+        "claim_milliseconds": 325.005065,
+        "claimed_rows": 2000,
+        "redis_commands": 33502,
+        "redis_script_calls": 1024,
+        "messages": 2000,
+        "statements_per_message": 6.619,
+        "redis_commands_per_message": 16.751
+      },
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 200,
+          "calls_over_the_limit": 1000,
+          "request_rate": 88.41513711600592,
+          "accepted_rate": 88.40370841706783,
+          "longest_gap_seconds": 1.424360875,
+          "span_seconds": 21.200306042,
+          "retry_overhead": 0,
+          "completed_rate": 91.89056568751143,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 100,
+          "calls_in_second_after_longest_gap": 200,
+          "gaps_between_sends": {
+            "1-5 ms": 40,
+            "5-10 ms": 9,
+            "over 100 ms": 19,
+            "under 1 ms": 1931
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 1,
+            "100": 2,
+            "19": 1,
+            "23": 1,
+            "26": 1,
+            "32": 5,
+            "4": 16,
+            "45": 1,
+            "51": 1,
+            "64": 4,
+            "68": 1,
+            "73": 2,
+            "77": 1,
+            "96": 9
+          },
+          "busiest_second": {
+            "calls": 200,
+            "delayed": 100,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 1.149334875,
+            "their_rate_when_leaving": 173.1436192606615
+          }
+        }
+      },
+      "notes": [],
+      "violations": [
+        "email: 200 calls in one second at the provider, limit 100 (1000 calls over)"
+      ]
+    },
+    {
+      "name": "T07 1 workers",
+      "question": "Do more workers share the limit, and change the rate?",
+      "workers": 1,
+      "setup": "1 workers, 3000 messages on each channel, no faults.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 34.156647166,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 64,
+      "cost": {
+        "postgres_statements": 36914,
+        "postgres_milliseconds": 1434.3200999999988,
+        "claim_calls": 362,
+        "claim_milliseconds": 289.28030299999995,
+        "claimed_rows": 6000,
+        "redis_commands": 22510,
+        "redis_script_calls": 784,
+        "messages": 6000,
+        "statements_per_message": 6.152333333333333,
+        "redis_commands_per_message": 3.7516666666666665
+      },
+      "channels": {
+        "email": {
+          "requests": 3000,
+          "answers": {
+            "accept": 3000
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.3285419503212,
+          "accepted_rate": 88.36523432840114,
+          "longest_gap_seconds": 1.018151291,
+          "span_seconds": 32.94200075,
+          "retry_overhead": 0,
+          "completed_rate": 88.36867016442955,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 81,
+          "calls_in_100ms_after_longest_gap": 73,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 9,
+            "15-25 ms": 119,
+            "25-100 ms": 31,
+            "over 100 ms": 29,
+            "under 1 ms": 2811
+          },
+          "sends_within_2ms_of_each_other": {
+            "10": 11,
+            "11": 6,
+            "12": 2,
+            "13": 13,
+            "14": 17,
+            "15": 14,
+            "16": 13,
+            "17": 12,
+            "18": 10,
+            "19": 11,
+            "2": 1,
+            "20": 4,
+            "21": 3,
+            "22": 4,
+            "3": 1,
+            "32": 28,
+            "5": 5,
+            "6": 4,
+            "7": 5,
+            "8": 5,
+            "9": 14
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.129724708,
+            "their_rate_when_leaving": 763.154541076323
+          }
+        },
+        "sms": {
+          "requests": 3000,
+          "answers": {
+            "accept": 3000
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.39302463264357,
+          "accepted_rate": 88.37722428056246,
+          "longest_gap_seconds": 1.026940834,
+          "span_seconds": 32.944461417,
+          "retry_overhead": 0,
+          "completed_rate": 88.3751087382067,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 83,
+          "calls_in_100ms_after_longest_gap": 78,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 7,
+            "15-25 ms": 117,
+            "25-100 ms": 33,
+            "over 100 ms": 29,
+            "under 1 ms": 2813
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 2,
+            "10": 4,
+            "11": 10,
+            "12": 11,
+            "13": 12,
+            "14": 13,
+            "15": 12,
+            "16": 18,
+            "17": 13,
+            "18": 11,
+            "19": 8,
+            "2": 1,
+            "20": 1,
+            "21": 4,
+            "22": 2,
+            "23": 3,
+            "32": 29,
+            "4": 5,
+            "6": 6,
+            "7": 2,
+            "8": 4,
+            "9": 10
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.131621042,
+            "their_rate_when_leaving": 752.1593697761488
+          }
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T07 2 workers",
+      "question": "Do more workers share the limit, and change the rate?",
+      "workers": 2,
+      "setup": "2 workers, 3000 messages on each channel, no faults.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 34.177981916,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 128,
+      "cost": {
+        "postgres_statements": 37060,
+        "postgres_milliseconds": 2483.4332579999996,
+        "claim_calls": 300,
+        "claim_milliseconds": 703.2715120000006,
+        "claimed_rows": 6000,
+        "redis_commands": 22322,
+        "redis_script_calls": 720,
+        "messages": 6000,
+        "statements_per_message": 6.176666666666667,
+        "redis_commands_per_message": 3.7203333333333335
+      },
+      "channels": {
+        "email": {
+          "requests": 3000,
+          "answers": {
+            "accept": 3000
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.12927234506334,
+          "accepted_rate": 88.13895850099841,
+          "longest_gap_seconds": 1.0805905,
+          "span_seconds": 32.969943167,
+          "retry_overhead": 0,
+          "completed_rate": 88.13963668841758,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 100,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 39,
+            "15-25 ms": 29,
+            "25-100 ms": 30,
+            "5-10 ms": 7,
+            "over 100 ms": 29,
+            "under 1 ms": 2865
+          },
+          "sends_within_2ms_of_each_other": {
+            "10": 3,
+            "11": 3,
+            "13": 9,
+            "14": 10,
+            "15": 5,
+            "16": 4,
+            "17": 4,
+            "18": 1,
+            "19": 2,
+            "2": 4,
+            "22": 2,
+            "23": 1,
+            "27": 1,
+            "3": 3,
+            "30": 2,
+            "32": 7,
+            "33": 3,
+            "34": 2,
+            "4": 2,
+            "5": 1,
+            "6": 3,
+            "64": 27,
+            "7": 6,
+            "9": 6
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.070159167,
+            "their_rate_when_leaving": 1411.0771868200775
+          }
+        },
+        "sms": {
+          "requests": 3000,
+          "answers": {
+            "accept": 3000
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.14393755824544,
+          "accepted_rate": 88.1422742544485,
+          "longest_gap_seconds": 1.098308542,
+          "span_seconds": 32.969296875,
+          "retry_overhead": 0,
+          "completed_rate": 88.16492928421637,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 100,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 41,
+            "10-15 ms": 4,
+            "15-25 ms": 23,
+            "25-100 ms": 31,
+            "5-10 ms": 6,
+            "over 100 ms": 29,
+            "under 1 ms": 2865
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 3,
+            "10": 3,
+            "11": 4,
+            "12": 4,
+            "13": 6,
+            "14": 2,
+            "15": 8,
+            "16": 6,
+            "17": 3,
+            "18": 1,
+            "2": 1,
+            "20": 3,
+            "23": 1,
+            "24": 2,
+            "25": 1,
+            "27": 3,
+            "28": 1,
+            "29": 1,
+            "3": 3,
+            "30": 1,
+            "31": 1,
+            "32": 17,
+            "34": 1,
+            "35": 2,
+            "36": 2,
+            "37": 1,
+            "4": 3,
+            "40": 1,
+            "5": 2,
+            "53": 1,
+            "6": 1,
+            "63": 1,
+            "64": 17,
+            "7": 3,
+            "8": 4,
+            "9": 4
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.050303709,
+            "their_rate_when_leaving": 1968.0457359515974
+          }
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T07 4 workers",
+      "question": "Do more workers share the limit, and change the rate?",
+      "workers": 4,
+      "setup": "4 workers, 3000 messages on each channel, no faults.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 33.191287375,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 200,
+      "cost": {
+        "postgres_statements": 37382,
+        "postgres_milliseconds": 3648.785409000002,
+        "claim_calls": 240,
+        "claim_milliseconds": 986.423037,
+        "claimed_rows": 6000,
+        "redis_commands": 22137,
+        "redis_script_calls": 720,
+        "messages": 6000,
+        "statements_per_message": 6.230333333333333,
+        "redis_commands_per_message": 3.6895
+      },
+      "channels": {
+        "email": {
+          "requests": 3000,
+          "answers": {
+            "accept": 3000
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.2120301174952,
+          "accepted_rate": 88.23272498830181,
+          "longest_gap_seconds": 1.1327955,
+          "span_seconds": 32.877979792,
+          "retry_overhead": 0,
+          "completed_rate": 88.2236376416018,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 100,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 50,
+            "5-10 ms": 9,
+            "over 100 ms": 29,
+            "under 1 ms": 2911
+          },
+          "sends_within_2ms_of_each_other": {
+            "100": 3,
+            "17": 1,
+            "27": 1,
+            "32": 1,
+            "33": 1,
+            "36": 2,
+            "38": 1,
+            "4": 24,
+            "58": 1,
+            "63": 1,
+            "64": 2,
+            "68": 1,
+            "69": 1,
+            "79": 1,
+            "96": 20
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.009475458,
+            "their_rate_when_leaving": 10448.043777936644
+          }
+        },
+        "sms": {
+          "requests": 3000,
+          "answers": {
+            "accept": 3000
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.21415911500713,
+          "accepted_rate": 88.21090843974294,
+          "longest_gap_seconds": 1.130080125,
+          "span_seconds": 32.882052584,
+          "retry_overhead": 0,
+          "completed_rate": 88.21590679826083,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 100,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 67,
+            "10-15 ms": 1,
+            "5-10 ms": 10,
+            "over 100 ms": 29,
+            "under 1 ms": 2892
+          },
+          "sends_within_2ms_of_each_other": {
+            "100": 2,
+            "12": 1,
+            "14": 1,
+            "15": 1,
+            "17": 1,
+            "2": 2,
+            "24": 1,
+            "32": 5,
+            "33": 1,
+            "36": 5,
+            "39": 1,
+            "4": 18,
+            "41": 1,
+            "44": 1,
+            "45": 1,
+            "49": 1,
+            "50": 2,
+            "51": 1,
+            "52": 1,
+            "55": 1,
+            "57": 1,
+            "6": 1,
+            "62": 2,
+            "64": 4,
+            "68": 3,
+            "8": 1,
+            "88": 1,
+            "90": 1,
+            "96": 10
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.014340125,
+            "their_rate_when_leaving": 6903.705511632569
+          }
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T09 lost responses and a killed worker",
+      "question": "Does anyone get a message twice, and does anything get lost?",
+      "workers": 2,
+      "setup": "Two workers, 3000 emails, every 50th call is accepted with no answer, one worker gets SIGKILL after 1000 calls.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 72.195619417,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 60,
+      "calls_abandoned_by_the_caller": 13,
+      "most_messages_holding_a_lease": 51,
+      "cost": {
+        "postgres_statements": 20245,
+        "postgres_milliseconds": 1074.7131010000003,
+        "claim_calls": 770,
+        "claim_milliseconds": 221.9337959999999,
+        "claimed_rows": 3073,
+        "redis_commands": 52567,
+        "redis_script_calls": 1579,
+        "messages": 3000,
+        "statements_per_message": 6.748333333333333,
+        "redis_commands_per_message": 17.522333333333332
+      },
+      "channels": {
+        "email": {
+          "requests": 3073,
+          "answers": {
+            "accept": 3012,
+            "lost": 61
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 87.45939688685606,
+          "accepted_rate": 88.24791222230482,
+          "longest_gap_seconds": 20.457943958,
+          "span_seconds": 71.036743583,
+          "retry_overhead": 0.024333333333333332,
+          "completed_rate": 85.36727991674982,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3073,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 2,
+          "calls_in_second_after_longest_gap": 2,
+          "gaps_between_sends": {
+            "1-5 ms": 32,
+            "10-15 ms": 1,
+            "15-25 ms": 127,
+            "25-100 ms": 42,
+            "5-10 ms": 3,
+            "over 100 ms": 44,
+            "under 1 ms": 2823
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 13,
+            "10": 15,
+            "11": 22,
+            "12": 14,
+            "13": 18,
+            "14": 12,
+            "15": 5,
+            "16": 11,
+            "18": 4,
+            "19": 1,
+            "2": 5,
+            "20": 3,
+            "21": 1,
+            "24": 16,
+            "26": 2,
+            "27": 2,
+            "29": 3,
+            "3": 3,
+            "32": 1,
+            "34": 2,
+            "4": 1,
+            "5": 10,
+            "56": 5,
+            "58": 1,
+            "6": 6,
+            "60": 1,
+            "62": 1,
+            "64": 1,
+            "7": 13,
+            "8": 14,
+            "9": 18
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.062404292,
+            "their_rate_when_leaving": 1586.4293436739897
+          }
+        }
+      },
+      "notes": [
+        "Finished 62 s after the kill. The lease is 60 s.",
+        "Repeats the provider recognised by key: 60. Calls whose caller was gone before they were handled: 13.",
+        "Still marked as recovered from a lease at the end: 0."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T10a lost responses, provider remembers",
+      "question": "Is one message per person kept when a response is lost?",
+      "workers": 1,
+      "setup": "One worker, 600 emails, 30 accepted with no answer. The worker's send timeout is 5 s, so retries come after this point.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 10.170731666,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 30,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 32,
+      "cost": {
+        "postgres_statements": 4169,
+        "postgres_milliseconds": 266.47529700000007,
+        "claim_calls": 218,
+        "claim_milliseconds": 70.56012500000004,
+        "claimed_rows": 630,
+        "redis_commands": 8259,
+        "redis_script_calls": 465,
+        "messages": 600,
+        "statements_per_message": 6.948333333333333,
+        "redis_commands_per_message": 13.765
+      },
+      "channels": {
+        "email": {
+          "requests": 630,
+          "answers": {
+            "accept": 600,
+            "lost": 30
+          },
+          "unique_accepted": 600,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 75.64892300577577,
+          "accepted_rate": 73.41242155378387,
+          "longest_gap_seconds": 0.957173375,
+          "span_seconds": 9.500248084,
+          "retry_overhead": 0.05,
+          "completed_rate": 72.46497392066105,
+          "statuses": {
+            "SENT": 600
+          },
+          "attempts_used": 630,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 65,
+          "calls_in_100ms_after_longest_gap": 45,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 2,
+            "15-25 ms": 65,
+            "25-100 ms": 87,
+            "over 100 ms": 9,
+            "under 1 ms": 466
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 46,
+            "10": 1,
+            "11": 3,
+            "12": 3,
+            "14": 1,
+            "15": 1,
+            "17": 1,
+            "2": 42,
+            "22": 1,
+            "3": 14,
+            "32": 1,
+            "4": 15,
+            "5": 6,
+            "6": 9,
+            "7": 12,
+            "8": 3,
+            "9": 3
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.174105375,
+            "their_rate_when_leaving": 568.6211583071458
+          }
+        }
+      },
+      "notes": [
+        "Repeats the provider recognised by key: 30."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T10b lost responses, provider restarts",
+      "question": "Is one message per person kept when a response is lost?",
+      "workers": 1,
+      "setup": "One worker, 600 emails, 30 accepted with no answer. The worker's send timeout is 5 s, so retries come after this point. The provider forgets every key after 320 calls.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 10.124519292,
+      "duplicates_accepted": 29,
+      "repeats_recognised_by_key": 1,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 32,
+      "cost": {
+        "postgres_statements": 4136,
+        "postgres_milliseconds": 255.85764199999994,
+        "claim_calls": 217,
+        "claim_milliseconds": 59.143302999999996,
+        "claimed_rows": 630,
+        "redis_commands": 8206,
+        "redis_script_calls": 458,
+        "messages": 600,
+        "statements_per_message": 6.8933333333333335,
+        "redis_commands_per_message": 13.676666666666666
+      },
+      "channels": {
+        "email": {
+          "requests": 630,
+          "answers": {
+            "accept": 600,
+            "lost": 30
+          },
+          "unique_accepted": 629,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 75.28173351307774,
+          "accepted_rate": 75.87324567426298,
+          "longest_gap_seconds": 0.97306175,
+          "span_seconds": 9.33311475,
+          "retry_overhead": 0.001589825119236884,
+          "completed_rate": 72.07301476882847,
+          "statuses": {
+            "SENT": 600
+          },
+          "attempts_used": 630,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 66,
+          "calls_in_100ms_after_longest_gap": 48,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 3,
+            "15-25 ms": 55,
+            "25-100 ms": 96,
+            "over 100 ms": 10,
+            "under 1 ms": 465
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 38,
+            "10": 2,
+            "11": 3,
+            "12": 3,
+            "15": 1,
+            "16": 1,
+            "2": 51,
+            "22": 1,
+            "3": 12,
+            "32": 1,
+            "4": 11,
+            "5": 12,
+            "6": 10,
+            "7": 13,
+            "8": 2,
+            "9": 1
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.152429292,
+            "their_rate_when_leaving": 649.481465806454
+          }
+        }
+      },
+      "notes": [
+        "Repeats the provider recognised by key: 1."
+      ],
+      "violations": [
+        "29 messages accepted as new a second time"
+      ]
+    },
+    {
+      "name": "T02 usual faults",
+      "question": "How does a send recover under the demo's fault rates?",
+      "workers": 1,
+      "setup": "One worker, 3000 messages on each channel, every 50th call 429 and every 33rd 500.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 71.215283458,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 59,
+      "cost": {
+        "postgres_statements": 39341,
+        "postgres_milliseconds": 1892.8156769999996,
+        "claim_calls": 318,
+        "claim_milliseconds": 392.67610100000024,
+        "claimed_rows": 6314,
+        "redis_commands": 25637,
+        "redis_script_calls": 887,
+        "messages": 6000,
+        "statements_per_message": 6.5568333333333335,
+        "redis_commands_per_message": 4.272833333333334
+      },
+      "channels": {
+        "email": {
+          "requests": 3157,
+          "answers": {
+            "429": 63,
+            "500": 94,
+            "accept": 3000
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 79,
+          "calls_over_the_limit": 0,
+          "request_rate": 47.60310464282757,
+          "accepted_rate": 45.23384995751034,
+          "longest_gap_seconds": 1.848004833,
+          "span_seconds": 68.046916083,
+          "retry_overhead": 0.052333333333333336,
+          "completed_rate": 45.2328663347021,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3094,
+          "peak_sent_in_any_second": 79,
+          "peak_in_any_100ms": 79,
+          "calls_in_100ms_after_longest_gap": 1,
+          "calls_in_second_after_longest_gap": 1,
+          "gaps_between_sends": {
+            "1-5 ms": 16,
+            "15-25 ms": 33,
+            "25-100 ms": 46,
+            "over 100 ms": 62,
+            "under 1 ms": 2999
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 1,
+            "10": 1,
+            "11": 7,
+            "12": 9,
+            "13": 7,
+            "14": 9,
+            "15": 10,
+            "16": 5,
+            "17": 8,
+            "18": 7,
+            "19": 5,
+            "2": 2,
+            "20": 5,
+            "21": 6,
+            "22": 1,
+            "23": 1,
+            "3": 1,
+            "30": 2,
+            "32": 56,
+            "9": 3
+          },
+          "busiest_second": {
+            "calls": 79,
+            "delayed": 0,
+            "undelayed": 79,
+            "seconds_those_calls_took_to_leave": 0.08081075,
+            "their_rate_when_leaving": 965.2181176390517
+          }
+        },
+        "sms": {
+          "requests": 3157,
+          "answers": {
+            "429": 63,
+            "500": 94,
+            "accept": 3000
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 87,
+          "calls_over_the_limit": 0,
+          "request_rate": 45.93655326966488,
+          "accepted_rate": 43.661077335243334,
+          "longest_gap_seconds": 1.6084011660000002,
+          "span_seconds": 70.266634333,
+          "retry_overhead": 0.052333333333333336,
+          "completed_rate": 43.6640715330048,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3094,
+          "peak_sent_in_any_second": 87,
+          "peak_in_any_100ms": 82,
+          "calls_in_100ms_after_longest_gap": 1,
+          "calls_in_second_after_longest_gap": 1,
+          "gaps_between_sends": {
+            "1-5 ms": 2,
+            "15-25 ms": 29,
+            "25-100 ms": 45,
+            "over 100 ms": 65,
+            "under 1 ms": 3015
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 2,
+            "10": 6,
+            "11": 4,
+            "12": 4,
+            "13": 11,
+            "14": 5,
+            "15": 5,
+            "16": 9,
+            "17": 6,
+            "18": 6,
+            "19": 3,
+            "20": 4,
+            "21": 4,
+            "22": 2,
+            "23": 2,
+            "26": 1,
+            "29": 1,
+            "3": 1,
+            "30": 1,
+            "31": 1,
+            "32": 60,
+            "5": 1,
+            "6": 1
+          },
+          "busiest_second": {
+            "calls": 87,
+            "delayed": 0,
+            "undelayed": 87,
+            "seconds_those_calls_took_to_leave": 0.114706167,
+            "their_rate_when_leaving": 749.7417292306525
+          }
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T04 ten 429 in a row",
+      "question": "Do repeated 429s extend the pause correctly and cost no attempts?",
+      "workers": 1,
+      "setup": "One worker, 2000 emails, calls 501 to 510 answer 429.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 23.202150917,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 32,
+      "cost": {
+        "postgres_statements": 12661,
+        "postgres_milliseconds": 624.7691410000002,
+        "claim_calls": 224,
+        "claim_milliseconds": 117.64537199999995,
+        "claimed_rows": 2010,
+        "redis_commands": 15372,
+        "redis_script_calls": 478,
+        "messages": 2000,
+        "statements_per_message": 6.3305,
+        "redis_commands_per_message": 7.686
+      },
+      "channels": {
+        "email": {
+          "requests": 2010,
+          "answers": {
+            "429": 10,
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.64353307166195,
+          "accepted_rate": 88.08949305230827,
+          "longest_gap_seconds": 1.071218375,
+          "span_seconds": 22.671134875,
+          "retry_overhead": 0.005,
+          "completed_rate": 88.10165599788243,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 84,
+          "calls_in_100ms_after_longest_gap": 66,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 12,
+            "15-25 ms": 74,
+            "25-100 ms": 24,
+            "over 100 ms": 20,
+            "under 1 ms": 1879
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 1,
+            "10": 7,
+            "11": 7,
+            "12": 9,
+            "13": 3,
+            "14": 5,
+            "15": 11,
+            "16": 4,
+            "17": 7,
+            "18": 4,
+            "19": 6,
+            "20": 9,
+            "21": 3,
+            "22": 1,
+            "23": 2,
+            "3": 3,
+            "32": 21,
+            "4": 1,
+            "5": 2,
+            "7": 5,
+            "8": 2,
+            "9": 6
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.1260795,
+            "their_rate_when_leaving": 785.2188500113024
+          }
+        }
+      },
+      "notes": [
+        "Longest gap 1.07 s; first to last call 22.67 s."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T05 provider quota 50/s",
+      "question": "How well does a send fit a provider that really allows only 50 a second?",
+      "workers": 1,
+      "setup": "One worker, 1500 emails, calls past 50 in any second answer 429 with Retry-After: 1.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 34.176422292,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 32,
+      "cost": {
+        "postgres_statements": 12223,
+        "postgres_milliseconds": 661.0541619999998,
+        "claim_calls": 241,
+        "claim_milliseconds": 120.19684,
+        "claimed_rows": 1905,
+        "redis_commands": 19526,
+        "redis_script_calls": 944,
+        "messages": 1500,
+        "statements_per_message": 8.148666666666667,
+        "redis_commands_per_message": 13.017333333333333
+      },
+      "channels": {
+        "email": {
+          "requests": 1905,
+          "answers": {
+            "429": 405,
+            "accept": 1500
+          },
+          "unique_accepted": 1500,
+          "peak_in_any_second": 74,
+          "calls_over_the_limit": 0,
+          "request_rate": 55.227500927781094,
+          "accepted_rate": 43.43471954541088,
+          "longest_gap_seconds": 1.096086958,
+          "span_seconds": 33.438830375,
+          "retry_overhead": 0.27,
+          "completed_rate": 43.43524808347598,
+          "statuses": {
+            "SENT": 1500
+          },
+          "attempts_used": 1500,
+          "peak_sent_in_any_second": 74,
+          "peak_in_any_100ms": 74,
+          "calls_in_100ms_after_longest_gap": 56,
+          "calls_in_second_after_longest_gap": 56,
+          "gaps_between_sends": {
+            "1-5 ms": 12,
+            "15-25 ms": 27,
+            "25-100 ms": 30,
+            "over 100 ms": 29,
+            "under 1 ms": 1806
+          },
+          "sends_within_2ms_of_each_other": {
+            "10": 3,
+            "11": 2,
+            "12": 4,
+            "14": 5,
+            "15": 5,
+            "16": 7,
+            "17": 7,
+            "18": 5,
+            "19": 7,
+            "20": 2,
+            "21": 5,
+            "23": 2,
+            "24": 2,
+            "26": 1,
+            "32": 29,
+            "4": 1,
+            "9": 1
+          },
+          "busiest_second": {
+            "calls": 74,
+            "delayed": 0,
+            "undelayed": 74,
+            "seconds_those_calls_took_to_leave": 0.086634875,
+            "their_rate_when_leaving": 842.6167868309385
+          }
+        }
+      },
+      "notes": [
+        "1905 calls for 1500 messages, 405 of them 429. Accepted 43.4/s. First to last call 33.4 s (30.0 s is the quota's own pace)."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T08 email limited, sms not",
+      "question": "Does a limited channel leave the other one alone?",
+      "workers": 2,
+      "setup": "Two workers, 2000 sms and 500 emails, every email answers 429 for the first 15s.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 22.151114292,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 64,
+      "cost": {
+        "postgres_statements": 20026,
+        "postgres_milliseconds": 1035.279312999999,
+        "claim_calls": 162,
+        "claim_milliseconds": 238.9419239999999,
+        "claimed_rows": 3228,
+        "redis_commands": 14560,
+        "redis_script_calls": 1149,
+        "messages": 2500,
+        "statements_per_message": 8.0104,
+        "redis_commands_per_message": 5.824
+      },
+      "channels": {
+        "email": {
+          "requests": 1228,
+          "answers": {
+            "429": 728,
+            "accept": 500
+          },
+          "unique_accepted": 500,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 55.8140272570959,
+          "accepted_rate": 98.32363124901984,
+          "longest_gap_seconds": 1.097268458,
+          "span_seconds": 19.857510458,
+          "retry_overhead": 1.456,
+          "completed_rate": 98.37112715604918,
+          "statuses": {
+            "SENT": 500
+          },
+          "attempts_used": 500,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 64,
+          "calls_in_second_after_longest_gap": 64,
+          "gaps_between_sends": {
+            "1-5 ms": 15,
+            "15-25 ms": 7,
+            "25-100 ms": 5,
+            "5-10 ms": 1,
+            "over 100 ms": 18,
+            "under 1 ms": 1181
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 1,
+            "10": 1,
+            "16": 1,
+            "18": 1,
+            "19": 1,
+            "25": 1,
+            "30": 1,
+            "32": 20,
+            "36": 1,
+            "4": 7,
+            "6": 1,
+            "64": 6,
+            "7": 1,
+            "8": 1
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.062333334,
+            "their_rate_when_leaving": 1588.2352771311737
+          }
+        },
+        "sms": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 88.4502779726935,
+          "accepted_rate": 88.46745885794715,
+          "longest_gap_seconds": 1.096348875,
+          "span_seconds": 21.535392125,
+          "retry_overhead": 0,
+          "completed_rate": 93.13754785911703,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 100,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 15,
+            "15-25 ms": 17,
+            "25-100 ms": 20,
+            "5-10 ms": 1,
+            "over 100 ms": 19,
+            "under 1 ms": 1927
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 1,
+            "13": 2,
+            "15": 3,
+            "16": 3,
+            "18": 1,
+            "2": 1,
+            "21": 1,
+            "23": 2,
+            "27": 1,
+            "29": 2,
+            "3": 1,
+            "30": 5,
+            "32": 3,
+            "33": 1,
+            "35": 1,
+            "36": 3,
+            "4": 1,
+            "5": 2,
+            "6": 5,
+            "64": 19,
+            "7": 2,
+            "9": 1
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.067381292,
+            "their_rate_when_leaving": 1469.2505450919523
+          }
+        }
+      },
+      "notes": [
+        "Sms sent in that time: 1400. Its longest gap: 1.10 s. Emails tried: 1228 calls, 728 answered 429."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T11 redis goes down",
+      "question": "Does sending stop without the limiter, and restart without a burst?",
+      "workers": 2,
+      "setup": "Two workers, 1500 emails, Redis killed after 500 calls and started again 10s later.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 28.252427125,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 64,
+      "cost": {
+        "postgres_statements": 9701,
+        "postgres_milliseconds": 469.28166400000043,
+        "claim_calls": 223,
+        "claim_milliseconds": 102.50811899999998,
+        "claimed_rows": 1500,
+        "redis_commands": 11659,
+        "redis_script_calls": 336,
+        "messages": 1500,
+        "statements_per_message": 6.467333333333333,
+        "redis_commands_per_message": 7.772666666666667
+      },
+      "channels": {
+        "email": {
+          "requests": 1500,
+          "answers": {
+            "accept": 1500
+          },
+          "unique_accepted": 1500,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 49.796167227738835,
+          "accepted_rate": 49.802431448774584,
+          "longest_gap_seconds": 12.385185708,
+          "span_seconds": 27.2125015,
+          "retry_overhead": 0,
+          "completed_rate": 49.801700694877596,
+          "statuses": {
+            "SENT": 1500
+          },
+          "attempts_used": 1500,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 100,
+          "calls_in_second_after_longest_gap": 100,
+          "gaps_between_sends": {
+            "1-5 ms": 14,
+            "10-15 ms": 1,
+            "15-25 ms": 19,
+            "25-100 ms": 12,
+            "5-10 ms": 2,
+            "over 100 ms": 14,
+            "under 1 ms": 1437
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 2,
+            "10": 2,
+            "11": 1,
+            "13": 3,
+            "14": 2,
+            "15": 1,
+            "16": 1,
+            "17": 1,
+            "18": 2,
+            "19": 1,
+            "2": 1,
+            "20": 1,
+            "21": 2,
+            "23": 1,
+            "25": 1,
+            "28": 1,
+            "3": 2,
+            "32": 14,
+            "33": 1,
+            "34": 1,
+            "35": 1,
+            "4": 2,
+            "64": 9,
+            "8": 1,
+            "9": 1
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.063921125,
+            "their_rate_when_leaving": 1548.7837549792812
+          }
+        }
+      },
+      "notes": [
+        "Calls that left in the first second of the outage: 0. Later in it: 0. Longest gap 12.39 s; in the 100 ms after it 100 calls, in the second after it 100."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T12 postgres goes away",
+      "question": "Are messages and their state still right after losing the database mid-send?",
+      "workers": 2,
+      "setup": "Two workers, 1500 emails, every database connection cut after 500 calls and refused for 10s.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 66.239058166,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 29,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 93,
+      "cost": {
+        "postgres_statements": 11167,
+        "postgres_milliseconds": 559.8225529999999,
+        "claim_calls": 913,
+        "claim_milliseconds": 136.36043299999994,
+        "claimed_rows": 1529,
+        "redis_commands": 70036,
+        "redis_script_calls": 1896,
+        "messages": 1500,
+        "statements_per_message": 7.4446666666666665,
+        "redis_commands_per_message": 46.690666666666665
+      },
+      "channels": {
+        "email": {
+          "requests": 1529,
+          "answers": {
+            "accept": 1529
+          },
+          "unique_accepted": 1500,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 52.89527359059167,
+          "accepted_rate": 51.9168113786381,
+          "longest_gap_seconds": 38.966028875,
+          "span_seconds": 65.077084958,
+          "retry_overhead": 0.019333333333333334,
+          "completed_rate": 51.86704057039913,
+          "statuses": {
+            "SENT": 1500
+          },
+          "attempts_used": 1529,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 29,
+          "calls_in_second_after_longest_gap": 29,
+          "gaps_between_sends": {
+            "1-5 ms": 13,
+            "15-25 ms": 12,
+            "25-100 ms": 16,
+            "5-10 ms": 1,
+            "over 100 ms": 15,
+            "under 1 ms": 1471
+          },
+          "sends_within_2ms_of_each_other": {
+            "12": 2,
+            "13": 1,
+            "14": 1,
+            "15": 2,
+            "16": 1,
+            "17": 2,
+            "19": 2,
+            "20": 1,
+            "24": 1,
+            "28": 3,
+            "29": 2,
+            "3": 3,
+            "30": 1,
+            "32": 4,
+            "33": 3,
+            "36": 1,
+            "4": 1,
+            "5": 1,
+            "52": 1,
+            "6": 2,
+            "64": 12,
+            "7": 1,
+            "8": 3
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.062901542,
+            "their_rate_when_leaving": 1573.888284010589
+          }
+        }
+      },
+      "notes": [
+        "Calls that left over a second into the outage: 0. Finished 52 s after it ended. The lease is 60 s. Repeats recognised by key: 29. Abandoned: 0."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T13 every worker restarts",
+      "question": "Is there a burst after a restart, or when held messages come back?",
+      "workers": 2,
+      "setup": "Two workers, 1500 emails, both get SIGKILL after 500 calls and two new ones start at once.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 65.785498292,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 2,
+      "calls_abandoned_by_the_caller": 29,
+      "most_messages_holding_a_lease": 95,
+      "cost": {
+        "postgres_statements": 11545,
+        "postgres_milliseconds": 781.2331629999999,
+        "claim_calls": 1085,
+        "claim_milliseconds": 147.97417199999998,
+        "claimed_rows": 1531,
+        "redis_commands": 81848,
+        "redis_script_calls": 2204,
+        "messages": 1500,
+        "statements_per_message": 7.696666666666666,
+        "redis_commands_per_message": 54.565333333333335
+      },
+      "channels": {
+        "email": {
+          "requests": 1531,
+          "answers": {
+            "accept": 1531
+          },
+          "unique_accepted": 1500,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 87.19090702370403,
+          "accepted_rate": 85.28407560973436,
+          "longest_gap_seconds": 48.861485,
+          "span_seconds": 64.770503542,
+          "retry_overhead": 0.020666666666666667,
+          "completed_rate": 85.28259334890531,
+          "statuses": {
+            "SENT": 1500
+          },
+          "attempts_used": 1531,
+          "peak_sent_in_any_second": 100,
+          "peak_in_any_100ms": 100,
+          "calls_in_100ms_after_longest_gap": 31,
+          "calls_in_second_after_longest_gap": 31,
+          "gaps_between_sends": {
+            "1-5 ms": 12,
+            "10-15 ms": 1,
+            "15-25 ms": 8,
+            "25-100 ms": 15,
+            "5-10 ms": 1,
+            "over 100 ms": 15,
+            "under 1 ms": 1478
+          },
+          "sends_within_2ms_of_each_other": {
+            "11": 1,
+            "12": 1,
+            "14": 1,
+            "15": 1,
+            "18": 4,
+            "19": 1,
+            "2": 1,
+            "20": 1,
+            "27": 1,
+            "28": 3,
+            "29": 1,
+            "3": 1,
+            "31": 1,
+            "32": 2,
+            "33": 1,
+            "34": 1,
+            "36": 4,
+            "37": 1,
+            "5": 2,
+            "64": 13,
+            "7": 2,
+            "8": 3
+          },
+          "busiest_second": {
+            "calls": 100,
+            "delayed": 0,
+            "undelayed": 100,
+            "seconds_those_calls_took_to_leave": 0.0640655,
+            "their_rate_when_leaving": 1545.2934886951637
+          }
+        }
+      },
+      "notes": [
+        "Longest gap 48.86 s; in the 100 ms after it 31 calls, in the second after it 31. Repeats recognised by key: 2."
+      ],
+      "violations": []
+    }
+  ],
+  "scale": ""
+}

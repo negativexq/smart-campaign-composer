@@ -100,8 +100,16 @@ func run() error {
 	config.Unsubscribe = func(userID int64) string {
 		return publicURL + "/api/unsubscribe/" + unsubscribe.Token(unsubscribeSecret, userID)
 	}
-	worker := delivery.New(pool, delivery.NewHTTPSender(providerURL),
-		delivery.NewRedisLimiter(redisClient, ratePerSecond, "delivery"),
+	// An experiment: choose the limiter to compare them under the same load.
+	var limiter delivery.Limiter = delivery.NewRedisLimiter(redisClient, ratePerSecond, "delivery")
+	if os.Getenv("RATE_LIMITER") == "pacing" {
+		milliseconds, err := strconv.ParseFloat(server.Env("PACING_INTERVAL_MS", "12"), 64)
+		if err != nil || milliseconds <= 0 {
+			return fmt.Errorf("PACING_INTERVAL_MS must be a positive number")
+		}
+		limiter = delivery.NewRedisPacer(redisClient, time.Duration(milliseconds*float64(time.Millisecond)), "delivery")
+	}
+	worker := delivery.New(pool, delivery.NewHTTPSender(providerURL), limiter,
 		telemetry.NewMetrics(prometheus.DefaultRegisterer), otel.Tracer("delivery"), config)
 
 	var running sync.WaitGroup

@@ -422,3 +422,19 @@ Setup adds seven templates, their images and an example brand kit, so a new inst
 A row in `starter_content` records that this happened. Without it, every restart would either bring back a template someone deleted or need to tell "deleted" from "never added". A template with the same name or an existing brand kit is kept as it is, which also makes the load safe on an installation that already has its own.
 
 The starter images have no words drawn into them and the templates have no fixed text, so every word in an email follows the campaign's language.
+
+## Delivery is measured at the provider, and two limits are known
+
+`make test-load` runs real worker processes against real Postgres, Redis and HTTP, with a provider the scenario controls, and judges rules by what that provider saw. A broken rule fails its scenario. Rates are only recorded, because they depend on the machine. Runs are kept in `tests/load/results`.
+
+Measured once per scenario on an 8-core laptop, with the provider in the test process and Postgres and Redis in Docker:
+
+- A long send holds about 88.5 messages a second per channel, a little under the 91 the 1.1 second window allows. In any one second the provider saw at most 100, with 1, 2 or 4 workers. Calls leave in groups of up to 100 about every 1.13 seconds.
+- With the limit out of the way, 5,000 messages per channel ran at about 650 a second with one worker, 1,235 with two and 1,870 with four. The workers are far from being the bottleneck, though these runs lasted only 4 to 9 seconds.
+- One 429 with `Retry-After: 1` costs about one second, wherever it falls in a group, and no attempt.
+- With every 50th response lost and one worker killed, all 3,000 messages ended as SENT and none was accepted twice. The dead worker's messages came back when the 60 second lease ended.
+
+Two scenarios fail, and they are left failing because they describe real limits:
+
+- **The limit holds only up to about 100 ms of sudden change in network delay.** When one group of 100 is held up and the next is not, the provider saw 200 calls in one second at 150 and 200 ms of delay, and at most 100 at 50 and 100 ms. Random delay of 0 to 200 ms for each call stays within the limit, so this takes delay that moves together. Calling at an even pace would make it far smaller, and that has not been done.
+- **A provider that forgets idempotency keys sends a message twice.** When a response is lost and the provider restarts before the retry, 29 of 30 such messages were accepted again while our records showed each as sent once. No worker can see this: retrying risks a second message and not retrying risks none at all. Keeping keys is the provider's side of the contract, so making the mock keep them would only make the test pass. A real provider's key lifetime has to be checked before relying on one message per person.

@@ -1,0 +1,471 @@
+{
+  "commit": "3572234 with uncommitted changes",
+  "limit": 100,
+  "machine": "darwin/arm64, 8 CPUs, go1.26.6, limiter pacing 11 ms",
+  "results": [
+    {
+      "name": "T01 steady capacity",
+      "question": "What rate holds for a long send with no provider trouble?",
+      "workers": 1,
+      "setup": "One worker, 3000 messages on each channel, no faults, provider answers in 10-60 ms.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 35.145319125,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 3000,
+          "answers": {
+            "accept": 3000
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 96,
+          "calls_over_the_limit": 0,
+          "request_rate": 90.66505791984807,
+          "accepted_rate": 90.71123225345173,
+          "longest_gap_seconds": 0.12531525,
+          "span_seconds": 33.032641625,
+          "retry_overhead": 0,
+          "completed_rate": 90.721230760505,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3000
+        },
+        "sms": {
+          "requests": 3000,
+          "answers": {
+            "accept": 3000
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 96,
+          "calls_over_the_limit": 0,
+          "request_rate": 90.54096883439756,
+          "accepted_rate": 90.52765438995858,
+          "longest_gap_seconds": 0.128824958,
+          "span_seconds": 33.076780459,
+          "retry_overhead": 0,
+          "completed_rate": 90.61588901285366,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3000
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T03 429 at call 0",
+      "question": "What does a single 429 with Retry-After: 1 cost?",
+      "workers": 1,
+      "setup": "One worker, 600 emails, call 0 answers 429 (0 means none), everything else succeeds.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 7.532564625,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 600,
+          "answers": {
+            "accept": 600
+          },
+          "unique_accepted": 600,
+          "peak_in_any_second": 94,
+          "calls_over_the_limit": 0,
+          "request_rate": 89.40802943709699,
+          "accepted_rate": 89.36857933562199,
+          "longest_gap_seconds": 0.080130125,
+          "span_seconds": 6.670601,
+          "retry_overhead": 0,
+          "completed_rate": 89.61260470983936,
+          "statuses": {
+            "SENT": 600
+          },
+          "attempts_used": 600
+        }
+      },
+      "notes": [
+        "First to last call: 6.67 s. Longest gap: 0.08 s."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T03 429 at call 500",
+      "question": "What does a single 429 with Retry-After: 1 cost?",
+      "workers": 1,
+      "setup": "One worker, 600 emails, call 500 answers 429 (0 means none), everything else succeeds.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 8.537049459,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 601,
+          "answers": {
+            "429": 1,
+            "accept": 600
+          },
+          "unique_accepted": 600,
+          "peak_in_any_second": 93,
+          "calls_over_the_limit": 0,
+          "request_rate": 77.10702257939764,
+          "accepted_rate": 77.0604048105134,
+          "longest_gap_seconds": 1.04119,
+          "span_seconds": 7.646331208,
+          "retry_overhead": 0.0016666666666666668,
+          "completed_rate": 77.07132394404793,
+          "statuses": {
+            "SENT": 600
+          },
+          "attempts_used": 600
+        }
+      },
+      "notes": [
+        "First to last call: 7.65 s. Longest gap: 1.04 s."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T03 429 at call 550",
+      "question": "What does a single 429 with Retry-After: 1 cost?",
+      "workers": 1,
+      "setup": "One worker, 600 emails, call 550 answers 429 (0 means none), everything else succeeds.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 8.532377875,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 601,
+          "answers": {
+            "429": 1,
+            "accept": 600
+          },
+          "unique_accepted": 600,
+          "peak_in_any_second": 94,
+          "calls_over_the_limit": 0,
+          "request_rate": 78.11254534339956,
+          "accepted_rate": 78.00352106073986,
+          "longest_gap_seconds": 1.024516584,
+          "span_seconds": 7.578800792,
+          "retry_overhead": 0.0016666666666666668,
+          "completed_rate": 78.00727807904478,
+          "statuses": {
+            "SENT": 600
+          },
+          "attempts_used": 600
+        }
+      },
+      "notes": [
+        "First to last call: 7.58 s. Longest gap: 1.02 s."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T06 jitter, seed 1",
+      "question": "Does the limit hold when calls take 0-200 ms to reach the provider?",
+      "workers": 4,
+      "setup": "Four workers, 3000 emails, each call delayed 0-200 ms before it counts as arrived.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 34.577597583,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 3000,
+          "answers": {
+            "accept": 3000
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 99,
+          "calls_over_the_limit": 0,
+          "request_rate": 90.93798362114293,
+          "accepted_rate": 90.84453826674554,
+          "longest_gap_seconds": 0.08218775,
+          "span_seconds": 33.098278167,
+          "retry_overhead": 0,
+          "completed_rate": 90.92001049418965,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3000
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T06 jitter, seed 2",
+      "question": "Does the limit hold when calls take 0-200 ms to reach the provider?",
+      "workers": 4,
+      "setup": "Four workers, 3000 emails, each call delayed 0-200 ms before it counts as arrived.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 34.172955625,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 3000,
+          "answers": {
+            "accept": 3000
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 99,
+          "calls_over_the_limit": 0,
+          "request_rate": 90.81776847208931,
+          "accepted_rate": 90.7540246468492,
+          "longest_gap_seconds": 0.097877792,
+          "span_seconds": 33.199069833,
+          "retry_overhead": 0,
+          "completed_rate": 90.77245238959658,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3000
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T06 jitter, seed 3",
+      "question": "Does the limit hold when calls take 0-200 ms to reach the provider?",
+      "workers": 4,
+      "setup": "Four workers, 3000 emails, each call delayed 0-200 ms before it counts as arrived.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 34.088632042,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 3000,
+          "answers": {
+            "accept": 3000
+          },
+          "unique_accepted": 3000,
+          "peak_in_any_second": 100,
+          "calls_over_the_limit": 0,
+          "request_rate": 90.78068476349637,
+          "accepted_rate": 90.72582398096398,
+          "longest_gap_seconds": 0.095779375,
+          "span_seconds": 33.118476875,
+          "retry_overhead": 0,
+          "completed_rate": 90.74697159710536,
+          "statuses": {
+            "SENT": 3000
+          },
+          "attempts_used": 3000
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T07 1 workers",
+      "question": "Do more workers share the limit, and change the rate?",
+      "workers": 1,
+      "setup": "1 workers, 900 messages on each channel, no faults.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 10.533883125,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 900,
+          "answers": {
+            "accept": 900
+          },
+          "unique_accepted": 900,
+          "peak_in_any_second": 94,
+          "calls_over_the_limit": 0,
+          "request_rate": 90.99740527987656,
+          "accepted_rate": 90.76751879297353,
+          "longest_gap_seconds": 0.034493166,
+          "span_seconds": 9.863432791,
+          "retry_overhead": 0,
+          "completed_rate": 90.89364613016373,
+          "statuses": {
+            "SENT": 900
+          },
+          "attempts_used": 900
+        },
+        "sms": {
+          "requests": 900,
+          "answers": {
+            "accept": 900
+          },
+          "unique_accepted": 900,
+          "peak_in_any_second": 94,
+          "calls_over_the_limit": 0,
+          "request_rate": 90.9866755230266,
+          "accepted_rate": 90.87618951615539,
+          "longest_gap_seconds": 0.04062175,
+          "span_seconds": 9.860653583,
+          "retry_overhead": 0,
+          "completed_rate": 90.98603589005967,
+          "statuses": {
+            "SENT": 900
+          },
+          "attempts_used": 900
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T07 2 workers",
+      "question": "Do more workers share the limit, and change the rate?",
+      "workers": 2,
+      "setup": "2 workers, 900 messages on each channel, no faults.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 10.533541417,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 900,
+          "answers": {
+            "accept": 900
+          },
+          "unique_accepted": 900,
+          "peak_in_any_second": 94,
+          "calls_over_the_limit": 0,
+          "request_rate": 90.87249415894382,
+          "accepted_rate": 90.80431732081766,
+          "longest_gap_seconds": 0.029547042,
+          "span_seconds": 9.86194925,
+          "retry_overhead": 0,
+          "completed_rate": 90.97987345485849,
+          "statuses": {
+            "SENT": 900
+          },
+          "attempts_used": 900
+        },
+        "sms": {
+          "requests": 900,
+          "answers": {
+            "accept": 900
+          },
+          "unique_accepted": 900,
+          "peak_in_any_second": 95,
+          "calls_over_the_limit": 0,
+          "request_rate": 90.80390844124203,
+          "accepted_rate": 90.75542717093141,
+          "longest_gap_seconds": 0.025389875,
+          "span_seconds": 9.860304625,
+          "retry_overhead": 0,
+          "completed_rate": 90.84939133711796,
+          "statuses": {
+            "SENT": 900
+          },
+          "attempts_used": 900
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T07 4 workers",
+      "question": "Do more workers share the limit, and change the rate?",
+      "workers": 4,
+      "setup": "4 workers, 900 messages on each channel, no faults.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 11.540505875000001,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 900,
+          "answers": {
+            "accept": 900
+          },
+          "unique_accepted": 900,
+          "peak_in_any_second": 98,
+          "calls_over_the_limit": 0,
+          "request_rate": 90.22916830247647,
+          "accepted_rate": 90.23454631535144,
+          "longest_gap_seconds": 0.147358292,
+          "span_seconds": 9.933270792,
+          "retry_overhead": 0,
+          "completed_rate": 90.3150187855239,
+          "statuses": {
+            "SENT": 900
+          },
+          "attempts_used": 900
+        },
+        "sms": {
+          "requests": 900,
+          "answers": {
+            "accept": 900
+          },
+          "unique_accepted": 900,
+          "peak_in_any_second": 94,
+          "calls_over_the_limit": 0,
+          "request_rate": 89.91901668559753,
+          "accepted_rate": 89.77433392763355,
+          "longest_gap_seconds": 0.105727791,
+          "span_seconds": 9.958775666,
+          "retry_overhead": 0,
+          "completed_rate": 89.8109081224431,
+          "statuses": {
+            "SENT": 900
+          },
+          "attempts_used": 900
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T09 lost responses and a killed worker",
+      "question": "Does anyone get a message twice, and does anything get lost?",
+      "workers": 2,
+      "setup": "Two workers, 900 emails, every 50th call is accepted with no answer, one worker gets SIGKILL after 300 calls.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 65.148705625,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 17,
+      "calls_abandoned_by_the_caller": 2,
+      "channels": {
+        "email": {
+          "requests": 919,
+          "answers": {
+            "accept": 901,
+            "lost": 18
+          },
+          "unique_accepted": 900,
+          "peak_in_any_second": 94,
+          "calls_over_the_limit": 0,
+          "request_rate": 90.76413453728563,
+          "accepted_rate": 90.5865985515091,
+          "longest_gap_seconds": 44.472337708,
+          "span_seconds": 64.174595708,
+          "retry_overhead": 0.021111111111111112,
+          "completed_rate": 88.96941780609762,
+          "statuses": {
+            "SENT": 900
+          },
+          "attempts_used": 919
+        }
+      },
+      "notes": [
+        "Finished 62 s after the kill. The lease is 60 s.",
+        "Repeats the provider recognised by key: 17. Calls whose caller was gone before they were handled: 2.",
+        "Still marked as recovered from a lease at the end: 0."
+      ],
+      "violations": []
+    }
+  ],
+  "scale": "0.3"
+}

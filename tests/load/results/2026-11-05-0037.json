@@ -1,0 +1,150 @@
+{
+  "commit": "3572234 with uncommitted changes",
+  "limit": 100,
+  "machine": "darwin/arm64, 8 CPUs, go1.26.6, limiter pacing 11 ms",
+  "results": [
+    {
+      "name": "T06b network clears, 50ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 50ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 24.066455709,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 99,
+          "calls_over_the_limit": 0,
+          "request_rate": 90.95034355039597,
+          "accepted_rate": 90.92640347081696,
+          "longest_gap_seconds": 0.074783792,
+          "span_seconds": 21.893205292,
+          "retry_overhead": 0,
+          "completed_rate": 90.95830026830677,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000
+        }
+      },
+      "notes": [],
+      "violations": []
+    },
+    {
+      "name": "T06b network clears, 100ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 100ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 23.063488125,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 102,
+          "calls_over_the_limit": 459,
+          "request_rate": 90.92348885019463,
+          "accepted_rate": 90.94535671129388,
+          "longest_gap_seconds": 0.118559875,
+          "span_seconds": 21.862269875,
+          "retry_overhead": 0,
+          "completed_rate": 90.95165904163328,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000
+        }
+      },
+      "notes": [],
+      "violations": [
+        "email: 102 calls in one second at the provider, limit 100 (459 calls over)"
+      ]
+    },
+    {
+      "name": "T06b network clears, 150ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 150ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 23.06043425,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 107,
+          "calls_over_the_limit": 913,
+          "request_rate": 90.88882434919478,
+          "accepted_rate": 90.96337356872641,
+          "longest_gap_seconds": 0.173776417,
+          "span_seconds": 21.806491875,
+          "retry_overhead": 0,
+          "completed_rate": 90.96591244470284,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000
+        }
+      },
+      "notes": [],
+      "violations": [
+        "email: 107 calls in one second at the provider, limit 100 (913 calls over)"
+      ]
+    },
+    {
+      "name": "T06b network clears, 200ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 200ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 23.063116375,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 112,
+          "calls_over_the_limit": 991,
+          "request_rate": 90.91433723112003,
+          "accepted_rate": 90.96711058216545,
+          "longest_gap_seconds": 0.222042208,
+          "span_seconds": 21.755866833,
+          "retry_overhead": 0,
+          "completed_rate": 90.99884886456186,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000
+        }
+      },
+      "notes": [],
+      "violations": [
+        "email: 112 calls in one second at the provider, limit 100 (991 calls over)"
+      ]
+    }
+  ],
+  "scale": ""
+}

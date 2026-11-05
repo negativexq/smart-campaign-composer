@@ -109,6 +109,8 @@ type Permits struct {
 	Paused  bool
 	// id names this reservation, so settling it touches only its own permits.
 	id string
+	// issued is when a pacer granted these, by its own clock.
+	issued int64
 }
 
 // Limiter hands out permission to send on a channel.

@@ -1,0 +1,456 @@
+{
+  "commit": "3572234 with uncommitted changes",
+  "limit": 100,
+  "machine": "darwin/arm64, 8 CPUs, go1.26.6, limiter pacing 12.5 ms",
+  "results": [
+    {
+      "name": "T06b network clears, 50ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 50ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 27.056738625,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 9,
+      "cost": {
+        "postgres_statements": 15307,
+        "postgres_milliseconds": 1230.860689,
+        "claim_calls": 2395,
+        "claim_milliseconds": 484.8903149999999,
+        "claimed_rows": 2000,
+        "redis_commands": 30630,
+        "redis_script_calls": 7046,
+        "messages": 2000,
+        "statements_per_message": 7.6535,
+        "redis_commands_per_message": 15.315
+      },
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 86,
+          "calls_over_the_limit": 0,
+          "request_rate": 79.95484579578138,
+          "accepted_rate": 79.94840056319796,
+          "longest_gap_seconds": 0.066554708,
+          "span_seconds": 24.924590625,
+          "retry_overhead": 0,
+          "completed_rate": 80.03675999456817,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 83,
+          "peak_in_any_100ms": 14,
+          "calls_in_100ms_after_longest_gap": 8,
+          "calls_in_second_after_longest_gap": 80,
+          "gaps_between_sends": {
+            "1-5 ms": 70,
+            "10-15 ms": 896,
+            "15-25 ms": 515,
+            "25-100 ms": 17,
+            "5-10 ms": 400,
+            "under 1 ms": 101
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 1775,
+            "2": 111,
+            "3": 1
+          },
+          "busiest_second": {
+            "calls": 86,
+            "delayed": 75,
+            "undelayed": 11,
+            "seconds_those_calls_took_to_leave": 1.04499325,
+            "their_rate_when_leaving": 81.34023832211355
+          }
+        }
+      },
+      "notes": [
+        "Turns given per reservation: 1 turns: 1804 times, 2 turns: 99 times, 3 turns: 22 times.",
+        "Send time against its turn, around the median, in ms: p1 -15.7, p50 0, p99 13.8, max 19.9 (2000 sends, 2068 turns)."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T06b network clears, 100ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 100ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 26.2207035,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 13,
+      "cost": {
+        "postgres_statements": 15293,
+        "postgres_milliseconds": 1036.8571879999997,
+        "claim_calls": 2389,
+        "claim_milliseconds": 386.2760519999995,
+        "claimed_rows": 2000,
+        "redis_commands": 30555,
+        "redis_script_calls": 7029,
+        "messages": 2000,
+        "statements_per_message": 7.6465,
+        "redis_commands_per_message": 15.2775
+      },
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 90,
+          "calls_over_the_limit": 0,
+          "request_rate": 79.98957084243553,
+          "accepted_rate": 80.03682345912442,
+          "longest_gap_seconds": 0.125906833,
+          "span_seconds": 24.867468,
+          "retry_overhead": 0,
+          "completed_rate": 80.05331194783227,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 83,
+          "peak_in_any_100ms": 17,
+          "calls_in_100ms_after_longest_gap": 9,
+          "calls_in_second_after_longest_gap": 81,
+          "gaps_between_sends": {
+            "1-5 ms": 64,
+            "10-15 ms": 923,
+            "15-25 ms": 513,
+            "25-100 ms": 17,
+            "5-10 ms": 375,
+            "under 1 ms": 107
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 1763,
+            "2": 117,
+            "3": 1
+          },
+          "busiest_second": {
+            "calls": 90,
+            "delayed": 79,
+            "undelayed": 11,
+            "seconds_those_calls_took_to_leave": 1.096064333,
+            "their_rate_when_leaving": 81.19961330773457
+          }
+        }
+      },
+      "notes": [
+        "Turns given per reservation: 1 turns: 1798 times, 2 turns: 101 times, 3 turns: 21 times.",
+        "Send time against its turn, around the median, in ms: p1 -8.1, p50 0, p99 12.3, max 25.3 (2000 sends, 2063 turns)."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T06b network clears, 150ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 150ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 26.238236084,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 19,
+      "cost": {
+        "postgres_statements": 15267,
+        "postgres_milliseconds": 1034.7723439999984,
+        "claim_calls": 2363,
+        "claim_milliseconds": 381.7937809999989,
+        "claimed_rows": 2000,
+        "redis_commands": 30419,
+        "redis_script_calls": 7001,
+        "messages": 2000,
+        "statements_per_message": 7.6335,
+        "redis_commands_per_message": 15.2095
+      },
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 94,
+          "calls_over_the_limit": 0,
+          "request_rate": 80.01584002459775,
+          "accepted_rate": 80.02707256466991,
+          "longest_gap_seconds": 0.173929458,
+          "span_seconds": 24.811515,
+          "retry_overhead": 0,
+          "completed_rate": 80.0391587137387,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 83,
+          "peak_in_any_100ms": 19,
+          "calls_in_100ms_after_longest_gap": 9,
+          "calls_in_second_after_longest_gap": 82,
+          "gaps_between_sends": {
+            "1-5 ms": 67,
+            "10-15 ms": 850,
+            "15-25 ms": 532,
+            "25-100 ms": 30,
+            "5-10 ms": 389,
+            "under 1 ms": 131
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 1715,
+            "2": 141,
+            "3": 1
+          },
+          "busiest_second": {
+            "calls": 94,
+            "delayed": 62,
+            "undelayed": 32,
+            "seconds_those_calls_took_to_leave": 1.135839125,
+            "their_rate_when_leaving": 81.87779233260696
+          }
+        }
+      },
+      "notes": [
+        "Turns given per reservation: 1 turns: 1747 times, 2 turns: 127 times, 3 turns: 22 times.",
+        "Send time against its turn, around the median, in ms: p1 -6.9, p50 0, p99 11.6, max 25.0 (2000 sends, 2067 turns)."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T06b network clears, 200ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 200ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 26.240058042,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 21,
+      "cost": {
+        "postgres_statements": 15317,
+        "postgres_milliseconds": 1083.661523999999,
+        "claim_calls": 2413,
+        "claim_milliseconds": 405.9336099999994,
+        "claimed_rows": 2000,
+        "redis_commands": 30695,
+        "redis_script_calls": 7058,
+        "messages": 2000,
+        "statements_per_message": 7.6585,
+        "redis_commands_per_message": 15.3475
+      },
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 98,
+          "calls_over_the_limit": 0,
+          "request_rate": 80.01992792456878,
+          "accepted_rate": 80.02566097153999,
+          "longest_gap_seconds": 0.218825625,
+          "span_seconds": 24.7576775,
+          "retry_overhead": 0,
+          "completed_rate": 80.04035100895531,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 83,
+          "peak_in_any_100ms": 18,
+          "calls_in_100ms_after_longest_gap": 9,
+          "calls_in_second_after_longest_gap": 81,
+          "gaps_between_sends": {
+            "1-5 ms": 104,
+            "10-15 ms": 792,
+            "15-25 ms": 586,
+            "25-100 ms": 15,
+            "5-10 ms": 418,
+            "under 1 ms": 84
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 1801,
+            "2": 98,
+            "3": 1
+          },
+          "busiest_second": {
+            "calls": 98,
+            "delayed": 77,
+            "undelayed": 21,
+            "seconds_those_calls_took_to_leave": 1.200076042,
+            "their_rate_when_leaving": 80.82821138429159
+          }
+        }
+      },
+      "notes": [
+        "Turns given per reservation: 1 turns: 1842 times, 2 turns: 80 times, 3 turns: 22 times.",
+        "Send time against its turn, around the median, in ms: p1 -6.9, p50 0, p99 9.9, max 27.2 (2000 sends, 2068 turns)."
+      ],
+      "violations": []
+    },
+    {
+      "name": "T06b network clears, 250ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 250ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 26.236331584,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 25,
+      "cost": {
+        "postgres_statements": 15293,
+        "postgres_milliseconds": 1130.561996,
+        "claim_calls": 2389,
+        "claim_milliseconds": 426.8435949999996,
+        "claimed_rows": 2000,
+        "redis_commands": 30563,
+        "redis_script_calls": 7031,
+        "messages": 2000,
+        "statements_per_message": 7.6465,
+        "redis_commands_per_message": 15.2815
+      },
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 102,
+          "calls_over_the_limit": 327,
+          "request_rate": 79.99521125200184,
+          "accepted_rate": 80.028420464505,
+          "longest_gap_seconds": 0.27483425,
+          "span_seconds": 24.7176085,
+          "retry_overhead": 0,
+          "completed_rate": 80.03418704763176,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 82,
+          "peak_in_any_100ms": 18,
+          "calls_in_100ms_after_longest_gap": 9,
+          "calls_in_second_after_longest_gap": 82,
+          "gaps_between_sends": {
+            "1-5 ms": 69,
+            "10-15 ms": 957,
+            "15-25 ms": 480,
+            "25-100 ms": 22,
+            "5-10 ms": 367,
+            "under 1 ms": 104
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 1771,
+            "2": 113,
+            "3": 1
+          },
+          "busiest_second": {
+            "calls": 102,
+            "delayed": 74,
+            "undelayed": 28,
+            "seconds_those_calls_took_to_leave": 1.2493345,
+            "their_rate_when_leaving": 80.84304083494052
+          }
+        }
+      },
+      "notes": [
+        "Turns given per reservation: 1 turns: 1795 times, 2 turns: 103 times, 3 turns: 22 times.",
+        "Send time against its turn, around the median, in ms: p1 -6.6, p50 0, p99 13.6, max 24.4 (2000 sends, 2067 turns)."
+      ],
+      "violations": [
+        "email: 102 calls in one second at the provider, limit 100 (327 calls over)"
+      ]
+    },
+    {
+      "name": "T06b network clears, 300ms",
+      "question": "Does the limit hold when one group of calls is delayed and the next is not?",
+      "workers": 4,
+      "setup": "Four workers, 2000 emails, every other 100 calls delayed 300ms on the way to the provider.",
+      "campaign_status": "COMPLETED",
+      "seconds_from_start_to_finished": 26.216169333,
+      "duplicates_accepted": 0,
+      "repeats_recognised_by_key": 0,
+      "calls_abandoned_by_the_caller": 0,
+      "most_messages_holding_a_lease": 30,
+      "cost": {
+        "postgres_statements": 15302,
+        "postgres_milliseconds": 986.1669439999994,
+        "claim_calls": 2398,
+        "claim_milliseconds": 364.38009999999963,
+        "claimed_rows": 2000,
+        "redis_commands": 30572,
+        "redis_script_calls": 7031,
+        "messages": 2000,
+        "statements_per_message": 7.651,
+        "redis_commands_per_message": 15.286
+      },
+      "channels": {
+        "email": {
+          "requests": 2000,
+          "answers": {
+            "accept": 2000
+          },
+          "unique_accepted": 2000,
+          "peak_in_any_second": 107,
+          "calls_over_the_limit": 680,
+          "request_rate": 79.99553254460201,
+          "accepted_rate": 80.02323088974741,
+          "longest_gap_seconds": 0.315483208,
+          "span_seconds": 24.662787667,
+          "retry_overhead": 0,
+          "completed_rate": 80.04740229280664,
+          "statuses": {
+            "SENT": 2000
+          },
+          "attempts_used": 2000,
+          "peak_sent_in_any_second": 82,
+          "peak_in_any_100ms": 18,
+          "calls_in_100ms_after_longest_gap": 9,
+          "calls_in_second_after_longest_gap": 84,
+          "gaps_between_sends": {
+            "1-5 ms": 79,
+            "10-15 ms": 877,
+            "15-25 ms": 520,
+            "25-100 ms": 29,
+            "5-10 ms": 398,
+            "under 1 ms": 96
+          },
+          "sends_within_2ms_of_each_other": {
+            "1": 1786,
+            "2": 104,
+            "3": 2
+          },
+          "busiest_second": {
+            "calls": 107,
+            "delayed": 75,
+            "undelayed": 32,
+            "seconds_those_calls_took_to_leave": 1.298980625,
+            "their_rate_when_leaving": 81.60244884329973
+          }
+        }
+      },
+      "notes": [
+        "Turns given per reservation: 1 turns: 1816 times, 2 turns: 93 times, 3 turns: 21 times.",
+        "Send time against its turn, around the median, in ms: p1 -6.8, p50 0, p99 15.3, max 26.8 (2000 sends, 2065 turns)."
+      ],
+      "violations": [
+        "email: 107 calls in one second at the provider, limit 100 (680 calls over)"
+      ]
+    }
+  ],
+  "scale": ""
+}
