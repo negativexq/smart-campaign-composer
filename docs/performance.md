@@ -240,3 +240,32 @@ Each step is measured with the same scenario as the baseline and compared with i
 | Step | Change | Finding | Result against the baseline |
 |---|---|---|---|
 | 0 | Baseline: instrumentation and this profile | — | 26 campaigns, 200 RPS target: 44.9 successful RPS, 3.5% errors |
+| 1 | Shared memory for PostgreSQL; approved audience read from the snapshot; channel use counted in one pass and reused for 5 s; delivery filters join only what they read; progress counted from an index | 1, 2, 3, 8, 9 | 200 RPS target: 200 RPS with a 7–10 ms median and no errors, against 77–82 RPS with a 7 s median for the baseline code on the same data |
+
+### Step 1: the read path
+
+A short A/B run, not a repeat of the full profile. Both versions read the same data: 116k users and 6 approved campaigns with 232k deliveries, 174k of them accepted within the last hour and 30% reported opened. The deliveries were written directly to the database instead of being sent, so the read path could be measured without a long send. This is about half the baseline's 474k deliveries, so the baseline code does better here than in the profile above. The new code ran first; then the old index and 64 MB of shared memory were put back and the baseline image served the same database. Faults were off, the worker was stopped, and each load ran 40 s, twice.
+
+The same six-endpoint mix as the profile:
+
+| Target RPS | Baseline code: served RPS | Median (ms) | p95 (ms) | Errors | New code: served RPS | Median (ms) | p95 (ms) | Errors |
+|---|---|---|---|---|---|---|---|---|
+| 100 | 84.0–88.4 | 536–1,397 | 3,366–4,696 | 0.3–0.4% | 100 | 9.8–10.0 | 18.8–19.0 | 0% |
+| 200 | 77.1–82.2 | 6,826–7,070 | 13,425–14,390 | 0.3–0.4% | 200 | 7.1–10.1 | 18.7–19.0 | 0% |
+
+With the baseline code, the API's 8 connections were busy all the time and almost every acquire had to wait. With the new code, 1.5–1.7 connections were in use on average at 200 RPS.
+
+Each endpoint alone, one client in a loop for 15 s:
+
+| Endpoint | Baseline: requests/s | Median (ms) | New: requests/s | Median (ms) | Change |
+|---|---|---|---|---|---|
+| `/api/campaigns/{id}` | 15.6 | 62.5 | 1,543 | 0.6 | about 100× |
+| `/api/campaigns/{id}/deliveries` | 33.0 | 29.7 | 185 | 5.2 | 5.6× |
+| `/api/overview` | 21.8 | 44.0 | 83.2 | 11.6 | 3.8× |
+| `/api/campaigns/{id}/progress` | 49.6 | 19.4 | 97.9 | 10.0 | 2.0× |
+| `/api/campaigns` | 58.0 | 16.9 | 56.1 | 17.4 | no change |
+| `/api/campaigns/{id}/report` | 3.3 | 291 | 3.1 | 314 | no change |
+
+- The campaign list did not get faster: dropping the channel from its count changed nothing measurable.
+- The report is now the most expensive read by far, about 300 ms each. It was not in the profile's mix, and step 1 did not touch it.
+- The new code's ceiling was not found, because 200 RPS was the highest target. The 100/s overruns at the provider (finding 4) are not part of this step.
