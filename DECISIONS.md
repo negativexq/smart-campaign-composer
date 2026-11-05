@@ -159,6 +159,8 @@ Known limit: a person who starts matching later can have a longer first name tha
 
 A fixed one-second bucket allows up to 200 messages across a bucket boundary. A Lua script keeps a sliding window for each channel, so no one-second span goes over 100, however many workers run. If Redis is unavailable, messages wait and no attempt is used: sending without the limiter would risk breaking a hard limit.
 
+Known limit: the limit holds for what workers send. Permits are granted close together, so if one group of calls is delayed by 150 ms or more on the way and the next is not, the provider can see up to 200 in a second, as measured in a test that forces this. Spreading permits evenly fixes that at the cost of about 9% of the rate and twice the Postgres CPU. It is on the branch `experiment/single-permit-limiter`.
+
 ## An earlier timeout makes the result UNKNOWN
 
 A timeout means the provider may have accepted the message. Retrying with the same idempotency key is safe, but if the retries end in failure, that failure does not prove the first call failed. So a delivery with any earlier timeout ends as UNKNOWN unless a later call is accepted.
