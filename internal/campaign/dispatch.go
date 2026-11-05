@@ -109,7 +109,7 @@ func (s *Service) Approve(ctx context.Context, id string) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
-	snapshot, err := json.Marshal(AudienceSnapshot{Counts: view.Audience, Breakdown: breakdown})
+	snapshot, err := json.Marshal(AudienceSnapshot{Counts: view.Audience, Breakdown: breakdown, Languages: view.Languages, Variants: view.VariantAudience})
 	if err != nil {
 		return View{}, fmt.Errorf("encode audience snapshot: %w", err)
 	}
@@ -545,56 +545,97 @@ func (s *Service) recordExport(ctx context.Context, id string) error {
 	return nil
 }
 
-// deliveriesMatching is which deliveries a filter keeps, shared by the list and its total.
-const deliveriesMatching = `
-	FROM campaign_deliveries d
-	JOIN users u ON u.id = d.user_id
-	LEFT JOIN delivery_events opened ON opened.delivery_id = d.id AND opened.event_type = 'opened'
-	` + arrivalLateral + `
-	WHERE d.campaign_id = $1 AND ($2 = '' OR d.status = $2) AND ($3 = '' OR d.channel = $3)
-	  AND ($4 = '' OR d.last_error = $4)
-	  AND ($10 = '' OR ($10 = 'yes') = (opened.delivery_id IS NOT NULL))
-	  AND ($11 = '' OR ($11 = 'delivered' AND arrival.delivered_at IS NOT NULL) OR ($11 = 'bounced' AND arrival.bounced_at IS NOT NULL)
-	       OR ($11 = 'waiting' AND d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL))
-	  AND ($12 = '' OR d.variant = $12)
-	  AND ($13 = '' OR u.city = $13)
-	  AND ($5::int < 0 OR (SELECT count(*) FROM delivery_attempts a WHERE a.delivery_id = d.id) BETWEEN $5::int AND $6::int)
-	  AND (($7 = '' AND $8::timestamptz IS NULL AND $9::timestamptz IS NULL) OR EXISTS (
-		SELECT 1 FROM delivery_attempts a
-		WHERE a.delivery_id = d.id AND ($7 = '' OR a.outcome = $7)
-		  AND ($8::timestamptz IS NULL OR a.occurred_at >= $8) AND ($9::timestamptz IS NULL OR a.occurred_at < $9)
-	  ))`
-
-// args checks a filter and gives the values deliveriesMatching asks for.
-func (f DeliveryFilter) args(id string) ([]any, error) {
+// matching gives the FROM and WHERE of the deliveries a filter keeps, shared by the
+// list and its total, with their arguments. It reads only the tables the filter
+// needs, so an unfiltered total counts from the campaign's index instead of joining
+// people and events for every delivery.
+func (f DeliveryFilter) matching(id string) (string, []any, error) {
 	if f.Status != "" && !slices.Contains(deliveryStatuses, f.Status) {
-		return nil, ErrUnknownFilter
+		return "", nil, ErrUnknownFilter
 	}
 	if f.Channel != "" && !slices.Contains(channels, f.Channel) {
-		return nil, ErrUnknownFilter
+		return "", nil, ErrUnknownFilter
 	}
 	if f.Outcome != "" && !slices.Contains(attemptOutcomes, f.Outcome) {
-		return nil, ErrUnknownFilter
+		return "", nil, ErrUnknownFilter
 	}
 	if f.Opened != "" && f.Opened != "yes" && f.Opened != "no" {
-		return nil, ErrUnknownFilter
+		return "", nil, ErrUnknownFilter
 	}
 	if f.Arrival != "" && !slices.Contains(arrivals, f.Arrival) {
-		return nil, ErrUnknownFilter
+		return "", nil, ErrUnknownFilter
 	}
 	if f.Variant != "" && f.Variant != "A" && f.Variant != "B" {
-		return nil, ErrUnknownFilter
+		return "", nil, ErrUnknownFilter
 	}
 	fewestCalls, mostCalls, err := callRange(f.Calls)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	return []any{id, f.Status, f.Channel, f.Reason, fewestCalls, mostCalls, f.Outcome, f.From, f.To, f.Opened, f.Arrival, f.Variant, f.City}, nil
+
+	args := []any{id}
+	param := func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	from := " FROM campaign_deliveries d"
+	where := []string{"d.campaign_id = $1"}
+	if f.Status != "" {
+		where = append(where, "d.status = "+param(f.Status))
+	}
+	if f.Channel != "" {
+		where = append(where, "d.channel = "+param(f.Channel))
+	}
+	if f.Reason != "" {
+		where = append(where, "d.last_error = "+param(f.Reason))
+	}
+	if f.Variant != "" {
+		where = append(where, "d.variant = "+param(f.Variant))
+	}
+	if f.City != "" {
+		from += " JOIN users u ON u.id = d.user_id"
+		where = append(where, "u.city = "+param(f.City))
+	}
+	if f.Opened != "" {
+		opened := "EXISTS (SELECT 1 FROM delivery_events e WHERE e.delivery_id = d.id AND e.event_type = 'opened')"
+		if f.Opened == "no" {
+			opened = "NOT " + opened
+		}
+		where = append(where, opened)
+	}
+	if f.Arrival != "" {
+		from += " " + arrivalLateral
+		switch f.Arrival {
+		case "delivered":
+			where = append(where, "arrival.delivered_at IS NOT NULL")
+		case "bounced":
+			where = append(where, "arrival.bounced_at IS NOT NULL")
+		case "waiting":
+			where = append(where, "d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL")
+		}
+	}
+	if fewestCalls >= 0 {
+		where = append(where, "(SELECT count(*) FROM delivery_attempts a WHERE a.delivery_id = d.id) BETWEEN "+param(fewestCalls)+" AND "+param(mostCalls))
+	}
+	if f.Outcome != "" || f.From != nil || f.To != nil {
+		calls := []string{"a.delivery_id = d.id"}
+		if f.Outcome != "" {
+			calls = append(calls, "a.outcome = "+param(f.Outcome))
+		}
+		if f.From != nil {
+			calls = append(calls, "a.occurred_at >= "+param(*f.From))
+		}
+		if f.To != nil {
+			calls = append(calls, "a.occurred_at < "+param(*f.To))
+		}
+		where = append(where, "EXISTS (SELECT 1 FROM delivery_attempts a WHERE "+strings.Join(calls, " AND ")+")")
+	}
+	return from + " WHERE " + strings.Join(where, " AND "), args, nil
 }
 
 // CountDeliveries says how many deliveries a filter keeps across every page.
 func (s *Service) CountDeliveries(ctx context.Context, id string, filter DeliveryFilter) (int, error) {
-	args, err := filter.args(id)
+	matching, args, err := filter.matching(id)
 	if err != nil {
 		return 0, err
 	}
@@ -602,14 +643,14 @@ func (s *Service) CountDeliveries(ctx context.Context, id string, filter Deliver
 		return 0, err
 	}
 	var total int
-	if err := s.db.QueryRow(ctx, `SELECT count(*)`+deliveriesMatching, args...).Scan(&total); err != nil {
+	if err := s.db.QueryRow(ctx, "SELECT count(*)"+matching, args...).Scan(&total); err != nil {
 		return 0, fmt.Errorf("count deliveries: %w", err)
 	}
 	return total, nil
 }
 
 func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilter) ([]Delivery, error) {
-	args, err := filter.args(id)
+	matching, args, err := filter.matching(id)
 	if err != nil {
 		return nil, err
 	}
@@ -626,9 +667,9 @@ func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilt
 		SELECT d.id::text, d.user_id, u.first_name, u.city, d.channel, d.status, COALESCE(d.variant, ''), d.attempts,
 		       (SELECT count(*) FROM delivery_attempts a WHERE a.delivery_id = d.id), last.response_code,
 		       COALESCE(d.last_error, ''), COALESCE(d.provider_message_id, ''), d.next_attempt_at, d.sent_at, arrival.delivered_at, arrival.bounced_at, opened.occurred_at, d.updated_at
-		FROM (SELECT d.id`+deliveriesMatching+`
+		FROM (SELECT d.id`+matching+`
 			ORDER BY d.user_id, d.channel
-			LIMIT $14 OFFSET $15) page
+			LIMIT `+fmt.Sprintf("$%d OFFSET $%d", len(args)+1, len(args)+2)+`) page
 		JOIN campaign_deliveries d ON d.id = page.id
 		JOIN users u ON u.id = d.user_id
 		LEFT JOIN delivery_events opened ON opened.delivery_id = d.id AND opened.event_type = 'opened'

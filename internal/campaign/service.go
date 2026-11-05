@@ -126,6 +126,7 @@ type Service struct {
 	metrics  *telemetry.Metrics
 	tracer   trace.Tracer
 	now      func() time.Time
+	channels channelUseCache
 }
 
 // NewService builds a service.
@@ -842,8 +843,12 @@ func (s *Service) get(ctx context.Context, q segment.Querier, id string) (View, 
 		return view, nil
 	}
 	view.Conditions = segment.Describe(view.Proposal.Segment)
-	if view.AudienceSnapshot != nil {
-		view.Audience = view.AudienceSnapshot.Counts
+	// An approved version reads its audience from the snapshot instead of counting the
+	// customer base again. Snapshots from before languages were kept count them live.
+	if snapshot := view.AudienceSnapshot; snapshot != nil {
+		view.Audience = snapshot.Counts
+		view.Languages = snapshot.Languages
+		view.VariantAudience = snapshot.Variants
 	} else if view.Audience, err = segment.Count(ctx, q, view.Proposal.Segment, view.AudienceAsOf); err != nil {
 		return View{}, err
 	}
@@ -857,18 +862,15 @@ func (s *Service) get(ctx context.Context, q segment.Querier, id string) (View, 
 	for _, blocker := range blockersFor(*view.Proposal, view.Audience) {
 		view.Blockers = append(view.Blockers, blocker.message)
 	}
-	lengths, err := segment.LongestNames(ctx, q, view.Proposal.Segment, view.AudienceAsOf)
-	if err != nil {
-		return View{}, err
+	if view.Languages == nil {
+		if view.Languages, err = segment.Languages(ctx, q, view.Proposal.Segment, view.AudienceAsOf); err != nil {
+			return View{}, err
+		}
 	}
-	view.ContentLimits = content.Limits{
-		SMSName: lengths.SMS, EmailName: lengths.Email,
-		SkipSMS: !slices.Contains(view.Channels, "sms"), SkipEmail: !slices.Contains(view.Channels, "email"),
-	}
-	if view.Languages, err = segment.Languages(ctx, q, view.Proposal.Segment, view.AudienceAsOf); err != nil {
-		return View{}, err
-	}
+	view.ContentLimits = content.Limits{SkipSMS: !slices.Contains(view.Channels, "sms"), SkipEmail: !slices.Contains(view.Channels, "email")}
 	for i := range view.Languages {
+		view.ContentLimits.SMSName = max(view.ContentLimits.SMSName, view.Languages[i].SMSName)
+		view.ContentLimits.EmailName = max(view.ContentLimits.EmailName, view.Languages[i].EmailName)
 		// Reachable means on a channel this campaign uses.
 		if !slices.Contains(view.Channels, "sms") {
 			view.Languages[i].SMS = 0
@@ -877,7 +879,7 @@ func (s *Service) get(ctx context.Context, q segment.Querier, id string) (View, 
 			view.Languages[i].Email = 0
 		}
 	}
-	if view.ABTest {
+	if view.ABTest && view.VariantAudience == nil {
 		if view.VariantAudience, err = s.variantAudience(ctx, q, view); err != nil {
 			return View{}, err
 		}
@@ -989,6 +991,9 @@ func (s *Service) loadFrom(ctx context.Context, q segment.Querier, id string) (V
 type AudienceSnapshot struct {
 	Counts    segment.Counts    `json:"counts"`
 	Breakdown segment.Breakdown `json:"breakdown"`
+	// Languages and Variants are left out of snapshots made before they were kept.
+	Languages []segment.LanguageAudience `json:"languages,omitempty"`
+	Variants  []VariantAudience          `json:"variants,omitempty"`
 }
 
 type blocker struct {

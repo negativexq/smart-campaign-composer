@@ -284,6 +284,9 @@ func TestOverviewShowsWhatEachChannelsCallsDid(t *testing.T) {
 		}
 		calls += channel.Calls
 		notAccepted += channel.NotAccepted
+		if channel.BusiestSecond > channel.Calls || (channel.Calls > 0) != (channel.BusiestSecond > 0) {
+			t.Fatalf("busiest second does not fit the calls: %+v", channel)
+		}
 		if channel.LastAcceptedAt != nil {
 			accepted++
 		}

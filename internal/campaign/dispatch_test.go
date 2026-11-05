@@ -870,6 +870,12 @@ func TestApprovalFreezesTheAudienceCounts(t *testing.T) {
 	if later.Audience != approved.Audience {
 		t.Fatalf("audience moved after approval: %+v became %+v", approved.Audience, later.Audience)
 	}
+	if len(approved.Languages) == 0 || !slices.Equal(later.Languages, approved.Languages) {
+		t.Fatalf("languages moved after approval: %+v became %+v", approved.Languages, later.Languages)
+	}
+	if later.ContentLimits != approved.ContentLimits || approved.ContentLimits.SMSName+approved.ContentLimits.EmailName == 0 {
+		t.Fatalf("name limits moved after approval: %+v became %+v", approved.ContentLimits, later.ContentLimits)
+	}
 	after, err := h.service.AudienceBreakdown(ctx, id)
 	if err != nil {
 		t.Fatal(err)

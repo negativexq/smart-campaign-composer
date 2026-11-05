@@ -151,31 +151,6 @@ func MatchingUserIDs(ctx context.Context, db Querier, spec Spec, now time.Time) 
 	return ids, nil
 }
 
-// NameLengths is the longest first name per consented channel, in characters.
-type NameLengths struct {
-	SMS   int
-	Email int
-}
-
-// LongestNames tells how long {{first_name}} can become for people who can
-// actually receive each channel.
-func LongestNames(ctx context.Context, db Querier, spec Spec, now time.Time) (NameLengths, error) {
-	where, args := Compile(spec, now)
-	query := `
-		SELECT COALESCE(max(char_length(u.first_name)) FILTER (WHERE sms.allowed), 0),
-		       COALESCE(max(char_length(u.first_name)) FILTER (WHERE email.allowed), 0)
-		FROM users u
-		LEFT JOIN consents sms ON sms.user_id = u.id AND sms.channel = 'sms'
-		LEFT JOIN consents email ON email.user_id = u.id AND email.channel = 'email'
-		WHERE ` + where
-
-	var lengths NameLengths
-	if err := db.QueryRow(ctx, query, args...).Scan(&lengths.SMS, &lengths.Email); err != nil {
-		return NameLengths{}, fmt.Errorf("longest names: %w", err)
-	}
-	return lengths, nil
-}
-
 // Sample is an audience member shown in a message preview.
 type Sample struct {
 	ID        int64  `json:"id"`

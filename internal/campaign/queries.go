@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -129,13 +131,9 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 			LIMIT $5 OFFSET $6
 		) c
 		LEFT JOIN LATERAL (
-			SELECT sum(n)::bigint AS total,
-			       (sum(n) FILTER (WHERE status IN ('SENT', 'FAILED', 'SKIPPED', 'UNKNOWN')))::bigint AS processed
-			FROM (
-				SELECT channel, status, count(*) AS n
-				FROM campaign_deliveries WHERE campaign_id = c.id
-				GROUP BY channel, status
-			) counts
+			SELECT count(*) AS total,
+			       count(*) FILTER (WHERE status IN ('SENT', 'FAILED', 'SKIPPED', 'UNKNOWN')) AS processed
+			FROM campaign_deliveries WHERE campaign_id = c.id
 		) d ON true
 		ORDER BY `+order, append(args, limit, max(filter.Offset, 0))...)
 	if err != nil {
@@ -344,23 +342,42 @@ func (s *Service) readActivity(ctx context.Context, query string, args ...any) (
 	return entries, nil
 }
 
+// channelUseFresh is how long a reading of channel use is reused. Counting an hour of
+// calls costs in proportion to the calls, so under read load every overview counting
+// again made it the most expensive query; a few seconds' lag on an hour's totals is not
+// something anyone can see.
+const channelUseFresh = 5 * time.Second
+
+// channelUseCache keeps the last reading. Callers that arrive while it is being read
+// wait for that reading instead of starting their own.
+type channelUseCache struct {
+	mu     sync.Mutex
+	use    []ChannelUse
+	readAt time.Time
+}
+
 func (s *Service) channelUse(ctx context.Context) ([]ChannelUse, error) {
+	cache := &s.channels
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if cache.use != nil && time.Since(cache.readAt) < channelUseFresh {
+		return slices.Clone(cache.use), nil
+	}
+	// One pass over the hour: calls per second, then their sum and the busiest.
 	rows, err := s.db.Query(ctx, `
 		SELECT ch.channel, $2::text,
 		       (SELECT a.occurred_at FROM delivery_attempts a
 		        WHERE a.channel = ch.channel AND a.outcome = 'accepted' ORDER BY a.occurred_at DESC LIMIT 1),
-		       recent.calls, recent.not_accepted, COALESCE(busiest.calls, 0)
+		       COALESCE(sum(second.calls), 0)::int, COALESCE(sum(second.not_accepted), 0)::int, COALESCE(max(second.calls), 0)::int
 		FROM unnest($1::text[]) AS ch (channel)
-		CROSS JOIN LATERAL (
+		LEFT JOIN LATERAL (
 			SELECT count(*) AS calls, count(*) FILTER (WHERE a.outcome <> 'accepted') AS not_accepted
 			FROM delivery_attempts a
 			WHERE a.channel = ch.channel AND a.occurred_at >= $3
-		) recent
-		LEFT JOIN LATERAL (
-			SELECT count(*) AS calls FROM delivery_attempts a
-			WHERE a.channel = ch.channel AND a.occurred_at >= $3
-			GROUP BY date_trunc('second', a.occurred_at) ORDER BY 1 DESC LIMIT 1
-		) busiest ON true`, channels, mockProviderName, s.now().Add(-time.Hour))
+			GROUP BY date_trunc('second', a.occurred_at)
+		) second ON true
+		GROUP BY ch.channel
+		ORDER BY array_position($1::text[], ch.channel)`, channels, mockProviderName, s.now().Add(-time.Hour))
 	if err != nil {
 		return nil, fmt.Errorf("channel use: %w", err)
 	}
@@ -368,7 +385,8 @@ func (s *Service) channelUse(ctx context.Context) ([]ChannelUse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("channel use: %w", err)
 	}
-	return use, nil
+	cache.use, cache.readAt = use, time.Now()
+	return slices.Clone(use), nil
 }
 
 // CustomerCount is how many customers exist, whether or not they can be messaged.
