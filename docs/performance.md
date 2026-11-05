@@ -241,6 +241,7 @@ Each step is measured with the same scenario as the baseline and compared with i
 |---|---|---|---|
 | 0 | Baseline: instrumentation and this profile | — | 26 campaigns, 200 RPS target: 44.9 successful RPS, 3.5% errors |
 | 1 | Shared memory for PostgreSQL; approved audience read from the snapshot; channel use counted in one pass and reused for 5 s; delivery filters join only what they read; progress counted from an index | 1, 2, 3, 8, 9 | 200 RPS target: 200 RPS with a 7–10 ms median and no errors, against 77–82 RPS with a 7 s median for the baseline code on the same data |
+| 2 | The report reads a campaign's events and calls once instead of once per delivery; index on `delivery_events (campaign_id)` | — (found in step 1) | Report with one client: 109 ms median instead of 287 ms, 9.0 instead of 3.4 requests/s |
 
 ### Step 1: the read path
 
@@ -269,3 +270,22 @@ Each endpoint alone, one client in a loop for 15 s:
 - The campaign list did not get faster: dropping the channel from its count changed nothing measurable.
 - The report is now the most expensive read by far, about 300 ms each. It was not in the profile's mix, and step 1 did not touch it.
 - The new code's ceiling was not found, because 200 RPS was the highest target. The 100/s overruns at the provider (finding 4) are not part of this step.
+
+### Step 2: the report
+
+After step 1 the report was the most expensive read. It runs seven queries, and on the largest campaign (81k deliveries) the lifecycle query took 334 ms of them:
+
+- For every delivery it looked up that delivery's events and checked for a provider call, which meant 81k index lookups in each table.
+- That plan's cost estimate was high enough for PostgreSQL to compile the query with JIT on every request, which took 114 ms of the 334.
+
+The lifecycle and variant queries now read the campaign's events and calls once and join them by hash. The lifecycle query fell to 79 ms, and its estimate is now too low to trigger JIT. A new index on `delivery_events (campaign_id)` keeps that read to the one campaign; without it, every campaign's events were scanned.
+
+Same data and method as step 1, with the step 1 image against the step 2 image. The report alone was measured for 20 s, and the six-endpoint mix with one report per second for 40 s, twice:
+
+| Load | Step 1 | Step 2 |
+|---|---|---|
+| Report, 1 client | 3.4 requests/s, median 287 ms | 9.0 requests/s, median 109 ms |
+| Report, 20 clients | 12.8 requests/s, median 1,503 ms | 21.3 requests/s, median 919 ms |
+| Mix at 200 RPS and 1 report/s | 199.5–199.6 RPS, median 10.0–10.2 ms, p95 19–20 ms | 200.3–200.4 RPS, median 11.8–13.7 ms, p95 24–27 ms |
+
+The mix was already served in full after step 1, so the report change does not show there. Its median and p95 came out a few milliseconds higher in step 2; two runs of 40 s cannot tell whether that is noise. The remaining report time is spread over several queries that each read the whole campaign: lifecycle about 79 ms, provider problems and engagement about 36 ms each.
