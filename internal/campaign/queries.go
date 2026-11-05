@@ -130,10 +130,17 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 			ORDER BY `+order+`
 			LIMIT $5 OFFSET $6
 		) c
+		-- Finished runs kept their counts; only a run still sending is counted here.
 		LEFT JOIN LATERAL (
-			SELECT count(*) AS total,
-			       count(*) FILTER (WHERE status IN ('SENT', 'FAILED', 'SKIPPED', 'UNKNOWN')) AS processed
-			FROM campaign_deliveries WHERE campaign_id = c.id
+			SELECT COALESCE(sum(r.total), 0) + COALESCE(sum(live.total), 0) AS total,
+			       COALESCE(sum(r.total), 0) + COALESCE(sum(live.processed), 0) AS processed
+			FROM campaign_runs r
+			LEFT JOIN LATERAL (
+				SELECT count(*) AS total,
+				       count(*) FILTER (WHERE status IN ('SENT', 'FAILED', 'SKIPPED', 'UNKNOWN')) AS processed
+				FROM campaign_deliveries WHERE run_id = r.id AND r.finished_at IS NULL
+			) live ON true
+			WHERE r.campaign_id = c.id
 		) d ON true
 		ORDER BY `+order, append(args, limit, max(filter.Offset, 0))...)
 	if err != nil {

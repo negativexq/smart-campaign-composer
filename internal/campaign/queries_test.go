@@ -106,9 +106,10 @@ func TestListProgressComesFromDeliveries(t *testing.T) {
 		t.Fatalf("propose: %v", err)
 	}
 	if _, err := h.pool.Exec(ctx, `
-		INSERT INTO campaign_deliveries (campaign_id, campaign_version_id, user_id, channel, idempotency_key, status)
-		SELECT $1::uuid, v.id, s.user_id, s.channel, $1::uuid::text || s.user_id || s.channel, s.status
-		FROM campaign_versions v,
+		WITH run AS (INSERT INTO campaign_runs (campaign_id, number) VALUES ($1, 1) RETURNING id)
+		INSERT INTO campaign_deliveries (campaign_id, run_id, campaign_version_id, user_id, channel, idempotency_key, status)
+		SELECT $1::uuid, run.id, v.id, s.user_id, s.channel, $1::uuid::text || s.user_id || s.channel, s.status
+		FROM run, campaign_versions v,
 		     (VALUES (1::bigint, 'sms', 'SENT'), (1, 'email', 'FAILED'), (3, 'sms', 'QUEUED')) AS s(user_id, channel, status)
 		WHERE v.campaign_id = $1::uuid`, id); err != nil {
 		t.Fatalf("insert deliveries: %v", err)

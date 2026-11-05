@@ -253,19 +253,20 @@ A schedule is a row in `campaign_schedules`, including its next run time, so it 
 ```mermaid
 flowchart TD
     due[next_run_at has passed] --> lock[Lock the schedule and campaign]
-    lock --> kind{One-time or repeating?}
+    lock --> run[Open a run]
+    run --> kind{One-time or repeating?}
     kind -->|One-time| kept[Use the recipients kept at approval]
     kind -->|Repeating| match[Find who matches now]
     kept --> insert[Add deliveries]
     match --> insert
-    insert --> unique[The unique key leaves out<br/>anyone already reached]
+    insert --> unique[Leave out anyone<br/>an earlier run reached]
     unique --> next[Work out the next run]
     next --> status{Anyone new, or<br/>was this the last run?}
     status -->|Yes| dispatching[Status DISPATCHING]
     status -->|No| stay[Stays SCHEDULED]
 ```
 
-Missed runs are not replayed one by one: after downtime, one run covers them, because each run already reaches everyone still owed the message.
+Missed runs are not replayed one by one: after downtime, one run covers them, because each run already reaches everyone still owed the message. A run's counts are kept once its last delivery finishes.
 
 ## Provider reports
 

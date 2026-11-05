@@ -8,9 +8,11 @@
 
 The 100 messages per second limit is per channel across all workers, so workers need a shared counter. Redis with an atomic Lua script provides it. If Redis is down, sending stops rather than risking the limit.
 
-## One delivery per campaign, recipient and channel
+## One delivery per run, recipient and channel
 
-The official requirement says the same person must not get the same message twice. The unique key is on campaign, user and channel, not on campaign version, so cancelling a campaign and approving a new version cannot message someone an earlier version already reached. Two separate campaigns may reach the same person; that is a product policy question and is out of scope.
+The official requirement says the same person must not get the same message twice. Each send of a campaign is a run: the single dispatch of a one-time campaign, or one firing of a repeating schedule. The unique key is on run, user and channel, and every delivery's idempotency key names its run, so a crash, a retry, a lost response or a run picked up again cannot message anyone twice within it. A later run of a repeating campaign leaves out everyone an earlier run reached. Two separate campaigns may reach the same person; the "not messaged in the last N days" rule is how a campaign holds back people any campaign reached recently.
+
+A finished run keeps its counts in `campaign_runs`, written in the same statement that marks it finished. A run gets all its deliveries when it opens and a finished delivery does not change, so those counts are final, and lists and progress read them instead of counting every delivery a campaign ever made. Only runs still sending are counted live. Existing deliveries became each campaign's first run.
 
 ## A separate UNKNOWN delivery status
 
@@ -147,7 +149,7 @@ Regeneration replaces every message rather than one, which keeps the validation 
 
 A campaign can be sent now, once at a chosen time, at regular intervals, or on chosen weekdays. Marketers pick from these forms instead of writing a cron expression, which is easy to get wrong and hard to read back. A loop in the worker plays the part of the cron job, and its state lives in `campaign_schedules`, so it survives restarts.
 
-"The same person never gets the same message twice" is a hard rule, so a repeat cannot mean sending again to everyone. Each run counts the audience again and queues only people without a delivery, and the unique key on campaign, user and channel enforces this. People who were only skipped can be queued later if they consent. A repeating campaign is therefore a way to reach people who match later, and a run can correctly queue nothing. To send new content to the same people, a marketer creates a new campaign.
+"The same person never gets the same message twice" is a hard rule, so a repeat cannot mean sending again to everyone. Each run counts the audience again and queues only people without an earlier delivery, which the campaign-wide index finds. People who were only skipped can be queued later if they consent. A repeating campaign is therefore a way to reach people who match later, and a run can correctly queue nothing. To send new content to the same people, a marketer creates a new campaign.
 
 Missed runs are not replayed one by one. After downtime one run covers them, because each run already reaches everyone who is still owed the message.
 

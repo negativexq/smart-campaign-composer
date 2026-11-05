@@ -249,8 +249,8 @@ func (s *Scheduler) runOne(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("decode segment: %w", err)
 	}
 	// A one-time send goes to the people approved. A repeating one finds who matches
-	// now, and the unique key on deliveries keeps everyone already reached out of it.
-	queued, skipped, err := insertDeliveries(ctx, tx, id, version, channels, testShare(abTest, variantAPercent), proposal.Segment, kept && spec.Kind == schedule.KindOnce, now, traceParent(ctx))
+	// now, leaving out everyone an earlier run already reached.
+	queued, skipped, err := queueRun(ctx, tx, id, now, version, channels, testShare(abTest, variantAPercent), proposal.Segment, kept && spec.Kind == schedule.KindOnce, now, traceParent(ctx))
 	if err != nil {
 		return false, err
 	}

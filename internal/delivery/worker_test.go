@@ -768,6 +768,30 @@ func TestARepeatingCampaignWaitsForItsNextRun(t *testing.T) {
 	}
 }
 
+// A finished run keeps what it counted, so reading it later needs no recount.
+func TestAFinishedRunKeepsItsCounts(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, always(accepted, nil))
+	ctx := context.Background()
+	r.drain(t)
+
+	var finished bool
+	var total int
+	var counts, responses, recounted, recalled []byte
+	if err := r.pool.QueryRow(ctx, `
+		SELECT r.finished_at IS NOT NULL, r.total, r.counts, r.responses,
+		       (SELECT jsonb_agg(jsonb_build_array(channel, status, n, a) ORDER BY channel, status)
+		        FROM (SELECT channel, status, count(*) AS n, sum(attempts) AS a FROM campaign_deliveries WHERE run_id = r.id GROUP BY 1, 2) s),
+		       (SELECT jsonb_object_agg(code, n)
+		        FROM (SELECT response_code::text AS code, count(*) AS n FROM delivery_attempts WHERE run_id = r.id AND response_code IS NOT NULL GROUP BY 1) s)
+		FROM campaign_runs r WHERE r.campaign_id = $1`, r.id).Scan(&finished, &total, &counts, &responses, &recounted, &recalled); err != nil {
+		t.Fatal(err)
+	}
+	if !finished || total == 0 || string(counts) != string(recounted) || string(responses) != string(recalled) {
+		t.Fatalf("finished %v total %d counts %s (recounted %s) responses %s (recalled %s)", finished, total, counts, recounted, responses, recalled)
+	}
+}
+
 // crash leaves deliveries as a killed worker would: claimed, with the lease run out.
 func (r *rig) crash(t *testing.T, count, attempts int, lease string) {
 	t.Helper()

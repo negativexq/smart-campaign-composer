@@ -221,8 +221,13 @@ func TestAudienceSkipsPeopleMessagedRecently(t *testing.T) {
 	deliver := func(user int64, channel, status string, at time.Time) {
 		t.Helper()
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO campaign_deliveries (campaign_id, campaign_version_id, user_id, channel, idempotency_key, status, updated_at)
-			VALUES ($1, $2, $3, $4, gen_random_uuid()::text, $5, $6)`, campaignID, versionID, user, channel, status, at); err != nil {
+			WITH run AS (
+				INSERT INTO campaign_runs (campaign_id, number)
+				SELECT $1, COALESCE(max(number), 0) + 1 FROM campaign_runs WHERE campaign_id = $1
+				RETURNING id
+			)
+			INSERT INTO campaign_deliveries (campaign_id, run_id, campaign_version_id, user_id, channel, idempotency_key, status, updated_at)
+			SELECT $1, run.id, $2, $3, $4, gen_random_uuid()::text, $5, $6 FROM run`, campaignID, versionID, user, channel, status, at); err != nil {
 			t.Fatal(err)
 		}
 	}

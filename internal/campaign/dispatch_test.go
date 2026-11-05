@@ -31,7 +31,11 @@ func readyCampaign(t *testing.T) (*harness, string) {
 
 func deliveryRows(t *testing.T, h *harness, id string) map[string]string {
 	t.Helper()
-	rows, err := h.pool.Query(context.Background(), `SELECT user_id::text || ':' || channel, status FROM campaign_deliveries WHERE campaign_id = $1`, id)
+	// A later run's row wins, so this is where each person stands now.
+	rows, err := h.pool.Query(context.Background(), `
+		SELECT d.user_id::text || ':' || d.channel, d.status
+		FROM campaign_deliveries d JOIN campaign_runs r ON r.id = d.run_id
+		WHERE d.campaign_id = $1 ORDER BY r.number`, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,6 +455,39 @@ func TestARepeatingScheduleNeverMessagesAnyoneTwice(t *testing.T) {
 	if view.Schedule.Runs != 2 || view.Schedule.NextRunAt == nil {
 		t.Fatalf("schedule: %+v", view.Schedule)
 	}
+	var runs, secondQueued int
+	if err := h.pool.QueryRow(ctx, `SELECT count(*), max(queued) FILTER (WHERE number = 2) FROM campaign_runs WHERE campaign_id = $1`, id).Scan(&runs, &secondQueued); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 2 || secondQueued != 2 {
+		t.Fatalf("each firing is its own run: %d runs, the second queued %d", runs, secondQueued)
+	}
+}
+
+// A run that has to go again keeps the idempotency keys it was given, and a later
+// run gets keys of its own, so a provider does not take its messages for repeats.
+func TestEachRunHasItsOwnIdempotencyKeys(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindInterval, EveryHours: 24}); err != nil {
+		t.Fatal(err)
+	}
+	first := referenceTime.Add(24 * time.Hour)
+	for _, at := range []time.Time{first, first.Add(24 * time.Hour)} {
+		if _, err := scheduler(h, at.Add(time.Second)).RunDue(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var reused int
+	if err := h.pool.QueryRow(ctx, `
+		SELECT count(*) FROM campaign_deliveries d
+		WHERE d.campaign_id = $1 AND d.idempotency_key <> d.run_id::text || ':' || d.user_id || ':' || d.channel`, id).Scan(&reused); err != nil {
+		t.Fatal(err)
+	}
+	if reused != 0 {
+		t.Fatalf("%d deliveries carry a key that is not their run's", reused)
+	}
 }
 
 // changeWhoMatches makes one approved person stop matching the rule and one other
@@ -542,8 +579,9 @@ func TestARecentMessageSinceApprovalStillHoldsBackACampaignThatAsked(t *testing.
 		t.Fatal(err)
 	}
 	if _, err := h.pool.Exec(ctx, `
-		INSERT INTO campaign_deliveries (campaign_id, campaign_version_id, user_id, channel, idempotency_key, status, updated_at)
-		VALUES ($1, $2, $3, 'sms', 'other', 'SENT', $4)`, other, version, seed.FixtureCartNoPurchase, referenceTime.Add(-time.Hour)); err != nil {
+		WITH run AS (INSERT INTO campaign_runs (campaign_id, number) VALUES ($1, 1) RETURNING id)
+		INSERT INTO campaign_deliveries (campaign_id, run_id, campaign_version_id, user_id, channel, idempotency_key, status, updated_at)
+		SELECT $1, run.id, $2, $3, 'sms', 'other', 'SENT', $4 FROM run`, other, version, seed.FixtureCartNoPurchase, referenceTime.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.service.Dispatch(ctx, id); err != nil {

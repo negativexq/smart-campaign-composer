@@ -216,8 +216,8 @@ func TestDeliveryMonitorListsWhatNeedsWatchingAcrossCampaigns(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := h.pool.Exec(ctx, `
-		INSERT INTO delivery_attempts (delivery_id, campaign_id, channel, attempt, outcome)
-		SELECT id, campaign_id, channel, 1, 'timeout' FROM campaign_deliveries WHERE id = $1`, failed); err != nil {
+		INSERT INTO delivery_attempts (delivery_id, campaign_id, run_id, channel, attempt, outcome)
+		SELECT id, campaign_id, run_id, channel, 1, 'timeout' FROM campaign_deliveries WHERE id = $1`, failed); err != nil {
 		t.Fatal(err)
 	}
 
@@ -448,8 +448,8 @@ func TestAnalyticsComparesCampaignsInsideTheWindow(t *testing.T) {
 	}
 
 	if _, err := h.pool.Exec(ctx, `
-		INSERT INTO delivery_attempts (delivery_id, campaign_id, channel, attempt, outcome)
-		SELECT id, campaign_id, channel, 90, 'timeout' FROM campaign_deliveries WHERE id = $1`, named["accepted"]); err != nil {
+		INSERT INTO delivery_attempts (delivery_id, campaign_id, run_id, channel, attempt, outcome)
+		SELECT id, campaign_id, run_id, channel, 90, 'timeout' FROM campaign_deliveries WHERE id = $1`, named["accepted"]); err != nil {
 		t.Fatal(err)
 	}
 	withCall, err := h.service.Analytics(ctx, 7)

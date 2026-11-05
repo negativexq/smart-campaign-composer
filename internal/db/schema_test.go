@@ -65,9 +65,20 @@ func insertVersion(t *testing.T, pool *pgxpool.Pool, campaignID string, version 
 }
 
 func insertDelivery(pool *pgxpool.Pool, campaignID, versionID string, userID int64, channel, key string) error {
+	return insertDeliveryInRun(pool, campaignID, versionID, 1, userID, channel, key)
+}
+
+// insertDeliveryInRun adds a delivery to the campaign's run with that number,
+// opening the run if it is not there yet.
+func insertDeliveryInRun(pool *pgxpool.Pool, campaignID, versionID string, run int, userID int64, channel, key string) error {
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO campaign_deliveries (campaign_id, campaign_version_id, user_id, channel, idempotency_key)
-		VALUES ($1, $2, $3, $4, $5)`, campaignID, versionID, userID, channel, key)
+		WITH opened AS (
+			INSERT INTO campaign_runs (campaign_id, number) VALUES ($1, $6)
+			ON CONFLICT (campaign_id, number) DO UPDATE SET number = EXCLUDED.number
+			RETURNING id
+		)
+		INSERT INTO campaign_deliveries (campaign_id, run_id, campaign_version_id, user_id, channel, idempotency_key)
+		SELECT $1, opened.id, $2, $3, $4, $5 FROM opened`, campaignID, versionID, userID, channel, key, run)
 	return err
 }
 
@@ -77,7 +88,7 @@ func TestMigrateCreatesAllTables(t *testing.T) {
 
 	for _, table := range []string{
 		"users", "consents", "cart_events", "purchase_events",
-		"campaigns", "campaign_versions", "campaign_deliveries", "delivery_attempts",
+		"campaigns", "campaign_versions", "campaign_runs", "campaign_deliveries", "delivery_attempts",
 	} {
 		var exists bool
 		err := pool.QueryRow(context.Background(), `SELECT to_regclass($1) IS NOT NULL`, table).Scan(&exists)
@@ -138,8 +149,8 @@ func TestDeliveryAllowsOnePerRecipientAndChannel(t *testing.T) {
 	requirePgError(t, err, pgUniqueViolation)
 }
 
-// A campaign that is cancelled and approved again as a new version must not
-// message people who were already reached by the earlier version.
+// A run approved again as a new version must not message people the earlier
+// version already reached in it.
 func TestDeliveryUniquenessSpansCampaignVersions(t *testing.T) {
 	t.Parallel()
 	pool := testsupport.NewDatabase(t)
@@ -154,6 +165,22 @@ func TestDeliveryUniquenessSpansCampaignVersions(t *testing.T) {
 
 	err := insertDelivery(pool, campaign, v2, 1, "sms", "key-v2")
 	requirePgError(t, err, pgUniqueViolation)
+}
+
+// A repeating campaign may reach someone again in a later run.
+func TestALaterRunCanReachTheSamePerson(t *testing.T) {
+	t.Parallel()
+	pool := testsupport.NewDatabase(t)
+	insertUser(t, pool, 1)
+	campaign := insertCampaign(t, pool)
+	v1 := insertVersion(t, pool, campaign, 1)
+
+	if err := insertDeliveryInRun(pool, campaign, v1, 1, 1, "sms", "run-1"); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if err := insertDeliveryInRun(pool, campaign, v1, 2, 1, "sms", "run-2"); err != nil {
+		t.Fatalf("a later run must be allowed to reach the same person: %v", err)
+	}
 }
 
 func TestDeliveryIdempotencyKeyIsUnique(t *testing.T) {

@@ -243,6 +243,7 @@ Each step is measured with the same scenario as the baseline and compared with i
 | 1 | Shared memory for PostgreSQL; approved audience read from the snapshot; channel use counted in one pass and reused for 5 s; delivery filters join only what they read; progress counted from an index | 1, 2, 3, 8, 9 | 200 RPS target: 200 RPS with a 7–10 ms median and no errors, against 77–82 RPS with a 7 s median for the baseline code on the same data |
 | 2 | The report reads a campaign's events and calls once instead of once per delivery; index on `delivery_events (campaign_id)` | — (found in step 1) | Report with one client: 109 ms median instead of 287 ms, 9.0 instead of 3.4 requests/s |
 | 3 | The mock provider stamps a call when it comes in, under a lock of its own | 4 | No call passed 100/s at the provider in 24 channel runs; the old measurement showed 102, 104 and 117 in the same runs |
+| 4 | Each send of a campaign is a run that keeps its counts once finished; the campaign list and progress count only runs still sending | Ceiling after step 3 | Six-endpoint mix on 494k deliveries: 600 RPS with a sub-millisecond median and 800 RPS served, against about 300 RPS after step 3; campaign list query 0.04–0.08 ms instead of 57.7 ms |
 
 ### Step 1: the read path
 
@@ -305,4 +306,57 @@ To tell the candidates apart, a temporary build of the mock recorded both peaks 
 | After the body, under the shared lock | 3 of 24 | 102, 104, 117 |
 
 The overruns came from the measurement, not from the limiter: in the same runs the calls reached the provider at no more than 100 a second. All three were in runs with 5xx answers or 3 workers, as in the baseline. The limit noted in [`DECISIONS.md`](../DECISIONS.md) still holds: if one group of calls is held up on the way by 150 ms or more and the next is not, the provider can see more than 100 in a second. These runs did not produce such a delay.
+
+
+### Ceiling after step 3
+
+Steps 1 and 2 were measured at 200 RPS at most, on half the baseline's data. This run looked for the new ceiling on data close to the baseline's: 116k users and 13 completed campaigns with 494k deliveries, 371k of them accepted within the last hour. As in step 1, the deliveries were written to the database instead of being sent. The same six-endpoint mix ran at each target for 40 s, twice, with the worker stopped.
+
+| Target RPS | Served RPS | Median (ms) | p95 (ms) | Errors | Busy PostgreSQL connections (of 8) |
+|---|---|---|---|---|---|
+| 200 | 199.8–199.9 | 10–14 | 45–68 | 0% | 2.7–3.7 |
+| 300 | 285.5–299.8 | 14–144 | 69–1,103 | 0% | 5.2–7.1 |
+| 400 | 292.0–355.6 | 1,061–2,189 | 3,264–4,482 | 0% | 7.4–7.6 |
+| 600 | 280.0–339.3 | 1,974–2,474 | 3,738–4,738 | 0% | 7.6 |
+| 800 | 273.6–309.9 | 2,353–2,595 | 4,434–4,835 | 0% | 7.4 |
+
+The ceiling is about 300 successful RPS, against about 45 in the baseline on similar data. Past it, requests wait instead of failing.
+
+At saturation every PostgreSQL connection was running on the CPU, with no lock or disk waits, so PostgreSQL's CPU is the limit again, not the Go code. Database time at 800 RPS (`pg_stat_statements`):
+
+| Query | Endpoint | Mean (ms) | Share of database time |
+|---|---|---|---|
+| Campaign list with each campaign's delivery counts | `/api/campaigns`, `/api/overview` | 57.7 | 78% |
+| Progress counts | `/api/campaigns/{id}/progress` | 15.4 | 10% |
+| Unfiltered delivery count | `/api/campaigns/{id}/deliveries` | 9.4 | 6% |
+| Response codes for progress | `/api/campaigns/{id}/progress` | 6.5 | 4% |
+
+The next bottleneck is the campaign list. For every campaign on the page it counts all of that campaign's deliveries, about 38k each here, on every request, including campaigns that finished long ago and whose counts can no longer change. Progress does the same for one campaign.
+
+### Step 4: runs keep their counts
+
+A campaign's sends are now runs: the one dispatch of a one-time campaign, or each firing of a repeating schedule. When a run's last delivery finishes, the worker writes its totals, per channel and status counts and response codes into `campaign_runs` in the same statement that marks it finished. Nothing in a finished run changes after that, so the campaign list and progress add up those rows and count deliveries only for runs still sending. The run is also what the no-duplicate rule is about now; see DECISIONS.md.
+
+Same data, mix and method as the ceiling after step 3. The migration turned each of the 13 campaigns into one finished run, in about 30 s.
+
+| Target RPS | Served RPS | Median (ms) | p95 (ms) | Errors | Busy PostgreSQL connections (of 8) |
+|---|---|---|---|---|---|
+| 200 | 200.0 | 0.9 | 8.1 | 0% | 0.3–0.4 |
+| 300 | 300.0 | 0.8 | 7.1–8.0 | 0% | 0.3–0.7 |
+| 400 | 399.8–400.0 | 0.7 | 6.6 | 0% | 0.5 |
+| 600 | 599.1–600.0 | 0.7–0.9 | 6.3–36.5 | 0% | 0.7–1.8 |
+| 800 | 796.1–798.9 | 0.7–4.2 | 6.4–89.8 | 0% | 0.9–4.1 |
+
+At 800 RPS the second run started to queue: connections waited for the pool and the p95 rose to 90 ms. k6 also skipped 42 and 156 of the planned requests there for want of virtual users, and it ran on the same machine. So the ceiling on this machine is between 600 and 800 RPS, against about 300 after step 3.
+
+Database time at 600 and 800 RPS:
+
+| Query | Endpoint | Mean (ms) | Share of database time |
+|---|---|---|---|
+| Unfiltered delivery count | `/api/campaigns/{id}/deliveries` | 4.0–10.9 | 76–81% |
+| Delivery page | `/api/campaigns/{id}/deliveries` | 0.5–2.0 | 10–14% |
+| Campaign detail | `/api/campaigns/{id}` | 0.05–0.20 | 4–6% |
+| Campaign list | `/api/campaigns`, `/api/overview` | 0.04–0.14 | 2% |
+
+All campaigns here had finished. A campaign that is still sending is counted live for its open run, as every campaign was before; that cost now stays with the runs in flight instead of growing with history. The next bottleneck is the delivery tab's total, which still counts all of a campaign's deliveries when no filter is set.
 

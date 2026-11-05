@@ -443,12 +443,12 @@ func (w *Worker) runHousekeeping(ctx context.Context) {
 }
 
 type claim struct {
-	id, token, campaignID, channel, key string
-	userID                              int64
-	attempts                            int
-	traceContext                        *string
-	firstName, email, phone             string
-	consented                           bool
+	id, token, campaignID, runID, channel, key string
+	userID                                     int64
+	attempts                                   int
+	traceContext                               *string
+	firstName, email, phone                    string
+	consented                                  bool
 	// probe marks a call testing whether a failing provider is back.
 	probe   bool
 	content content.Content
@@ -527,7 +527,7 @@ func (w *Worker) claim(ctx context.Context, channel string, limit int) ([]claim,
 		SET status = 'SENDING', claim_token = gen_random_uuid(), lease_expires_at = now() + make_interval(secs => $2), updated_at = now()
 		FROM next, users u, campaign_versions v
 		WHERE d.id = next.id AND u.id = d.user_id AND v.id = d.campaign_version_id
-		RETURNING d.id::text, d.claim_token::text, d.campaign_id::text, d.channel, d.idempotency_key, d.user_id, d.attempts, d.trace_context,
+		RETURNING d.id::text, d.claim_token::text, d.campaign_id::text, d.run_id::text, d.channel, d.idempotency_key, d.user_id, d.attempts, d.trace_context,
 		          GREATEST(EXTRACT(EPOCH FROM now() - d.next_attempt_at), 0)::float8,
 		          u.first_name, u.email, u.phone, u.language, COALESCE(d.variant, ''),
 		          COALESCE((SELECT allowed FROM consents WHERE user_id = d.user_id AND channel = d.channel), false),
@@ -547,7 +547,7 @@ func (w *Worker) claim(ctx context.Context, channel string, limit int) ([]claim,
 			variant  string
 			age      float64
 		)
-		if err := row.Scan(&item.id, &item.token, &item.campaignID, &item.channel, &item.key, &item.userID, &item.attempts, &item.traceContext,
+		if err := row.Scan(&item.id, &item.token, &item.campaignID, &item.runID, &item.channel, &item.key, &item.userID, &item.attempts, &item.traceContext,
 			&age, &item.firstName, &item.email, &item.phone, &language, &variant, &item.consented, &encoded); err != nil {
 			return claim{}, err
 		}
@@ -834,8 +834,8 @@ func (w *Worker) record(ctx context.Context, item claim, next update, attempt *a
 		return nil
 	}
 	if attempt != nil {
-		if _, err := tx.Exec(ctx, `INSERT INTO delivery_attempts (delivery_id, campaign_id, channel, attempt, response_code, outcome, error) VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''))`,
-			item.id, item.campaignID, item.channel, attempt.number, attempt.code, attempt.outcome, attempt.err); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO delivery_attempts (delivery_id, campaign_id, run_id, channel, attempt, response_code, outcome, error) VALUES ($1, $2, $8, $3, $4, $5, $6, NULLIF($7, ''))`,
+			item.id, item.campaignID, item.channel, attempt.number, attempt.code, attempt.outcome, attempt.err, item.runID); err != nil {
 			return fmt.Errorf("record attempt: %w", err)
 		}
 	}
@@ -865,10 +865,10 @@ func (w *Worker) RecoverExpired(ctx context.Context) (int, error) {
 			    claim_token = NULL, lease_expires_at = NULL, updated_at = now()
 			FROM expired
 			WHERE d.id = expired.id
-			RETURNING d.id, d.campaign_id, d.attempts, d.channel
+			RETURNING d.id, d.campaign_id, d.run_id, d.attempts, d.channel
 		), recorded AS (
-			INSERT INTO delivery_attempts (delivery_id, campaign_id, channel, attempt, outcome, error)
-			SELECT id, campaign_id, channel, attempts, $4, 'worker stopped before recording an outcome' FROM recovered
+			INSERT INTO delivery_attempts (delivery_id, campaign_id, run_id, channel, attempt, outcome, error)
+			SELECT id, campaign_id, run_id, channel, attempts, $4, 'worker stopped before recording an outcome' FROM recovered
 		)
 		SELECT channel, count(*) FROM recovered GROUP BY channel`,
 		recoverBatch, w.config.MaxAttempts, reasonLeaseExpired, outcomeTimeout)
@@ -898,10 +898,34 @@ func (w *Worker) RecoverExpired(ctx context.Context) (int, error) {
 	return total, nil
 }
 
-// FinishCampaigns closes campaigns with nothing left to do. It runs after outcomes
-// are committed and on a timer, because two workers finishing the last deliveries
-// at once could each still see the other's as open.
+// finishRuns keeps the counts of every run in where (a condition on r) that has
+// nothing left to send. A run gets all its deliveries when it opens and a finished
+// delivery does not change, so these counts are final. A run finishing in another
+// transaction at the same time is passed over once that one commits.
+const finishRuns = `
+	UPDATE campaign_runs r
+	SET finished_at = now(),
+	    total = (SELECT count(*) FROM campaign_deliveries d WHERE d.run_id = r.id),
+	    counts = COALESCE((
+		SELECT jsonb_agg(jsonb_build_array(s.channel, s.status, s.deliveries, s.attempts) ORDER BY s.channel, s.status)
+		FROM (SELECT channel, status, count(*) AS deliveries, sum(attempts) AS attempts
+		      FROM campaign_deliveries WHERE run_id = r.id GROUP BY channel, status) s), '[]'),
+	    responses = COALESCE((
+		SELECT jsonb_object_agg(s.code, s.calls)
+		FROM (SELECT response_code::text AS code, count(*) AS calls
+		      FROM delivery_attempts WHERE run_id = r.id AND response_code IS NOT NULL GROUP BY response_code) s), '{}')
+	WHERE r.finished_at IS NULL AND NOT EXISTS (
+		SELECT 1 FROM campaign_deliveries d WHERE d.run_id = r.id AND d.status IN ('QUEUED', 'SENDING', 'RETRYING')
+	)`
+
+// FinishCampaigns closes runs and campaigns with nothing left to do. It runs after
+// outcomes are committed and on a timer, because two workers finishing the last
+// deliveries at once could each still see the other's as open.
 func (w *Worker) FinishCampaigns(ctx context.Context) error {
+	// A repeating campaign's run can finish while a later one is sending.
+	if _, err := w.db.Exec(ctx, finishRuns); err != nil {
+		return fmt.Errorf("finish runs: %w", err)
+	}
 	rows, err := w.db.Query(ctx, `
 		SELECT c.id::text FROM campaigns c
 		WHERE c.status = 'DISPATCHING' AND NOT EXISTS (
@@ -948,8 +972,15 @@ func (w *Worker) finishCampaign(ctx context.Context, id string) error {
 		return nil
 	}
 
+	if _, err := tx.Exec(ctx, finishRuns+` AND r.campaign_id = $1`, id); err != nil {
+		return fmt.Errorf("finish runs: %w", err)
+	}
 	counts := map[string]int{}
-	rows, err := tx.Query(ctx, `SELECT status, count(*) FROM campaign_deliveries WHERE campaign_id = $1 GROUP BY status`, id)
+	rows, err := tx.Query(ctx, `
+		SELECT c->>1, sum((c->>2)::int)
+		FROM campaign_runs r, jsonb_array_elements(r.counts) c
+		WHERE r.campaign_id = $1
+		GROUP BY 1`, id)
 	if err != nil {
 		return fmt.Errorf("count deliveries: %w", err)
 	}

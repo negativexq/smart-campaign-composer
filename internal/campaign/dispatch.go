@@ -202,7 +202,7 @@ func (s *Service) Dispatch(ctx context.Context, id string) (view View, err error
 	if kept {
 		asOf = s.now()
 	}
-	queued, skipped, err := insertDeliveries(ctx, tx, id, stored.Version, stored.Channels, testShare(stored.ABTest, stored.VariantAPercent), stored.Proposal.Segment, kept, asOf, traceParent(ctx))
+	queued, skipped, err := queueRun(ctx, tx, id, s.now(), stored.Version, stored.Channels, testShare(stored.ABTest, stored.VariantAPercent), stored.Proposal.Segment, kept, asOf, traceParent(ctx))
 	if err != nil {
 		return View{}, err
 	}
@@ -272,10 +272,41 @@ func testShare(abTest bool, percent int) int {
 	return 0
 }
 
+// openRun starts the next send of a campaign, whose row the caller holds locked.
+func openRun(ctx context.Context, tx pgx.Tx, id string, startedAt time.Time) (string, error) {
+	var runID string
+	err := tx.QueryRow(ctx, `
+		INSERT INTO campaign_runs (campaign_id, number, started_at)
+		SELECT $1, COALESCE(max(number), 0) + 1, $2 FROM campaign_runs WHERE campaign_id = $1
+		RETURNING id::text`, id, startedAt).Scan(&runID)
+	if err != nil {
+		return "", fmt.Errorf("open run: %w", err)
+	}
+	return runID, nil
+}
+
+// queueRun opens a run and queues its deliveries.
+func queueRun(ctx context.Context, tx pgx.Tx, id string, startedAt time.Time, version int, channels []string, variantAPercent int, spec segment.Spec, kept bool, asOf time.Time, parent string) (queued, skipped int, err error) {
+	runID, err := openRun(ctx, tx, id, startedAt)
+	if err != nil {
+		return 0, 0, err
+	}
+	queued, skipped, err = insertDeliveries(ctx, tx, id, runID, version, channels, variantAPercent, spec, kept, asOf, parent)
+	if err != nil {
+		return 0, 0, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE campaign_runs SET queued = $2, skipped = $3 WHERE id = $1`, runID, queued, skipped); err != nil {
+		return 0, 0, fmt.Errorf("record run size: %w", err)
+	}
+	return queued, skipped, nil
+}
+
 // insertDeliveries queues the people the rule finds at asOf or, with kept, the people
 // approval kept. Those were settled then, except that a message sent to one of them
 // since must still hold back a campaign that promised to leave recent ones alone.
-func insertDeliveries(ctx context.Context, tx pgx.Tx, id string, version int, channels []string, variantAPercent int, spec segment.Spec, kept bool, asOf time.Time, parent string) (queued, skipped int, err error) {
+// Someone an earlier run of the campaign already reached, or still is reaching, on a
+// channel is left out of it; one who was skipped there, say for lack of consent, is not.
+func insertDeliveries(ctx context.Context, tx pgx.Tx, id, runID string, version int, channels []string, variantAPercent int, spec segment.Spec, kept bool, asOf time.Time, parent string) (queued, skipped int, err error) {
 	where, args := segment.Compile(spec, asOf)
 	if kept {
 		where, args = "TRUE", nil
@@ -288,7 +319,8 @@ func insertDeliveries(ctx context.Context, tx pgx.Tx, id string, version int, ch
 	traceParam := fmt.Sprintf("$%d", len(args)+3)
 	channelsParam := fmt.Sprintf("$%d", len(args)+4)
 	testParam := fmt.Sprintf("$%d", len(args)+5)
-	args = append(args, id, version, parent, channels, variantAPercent)
+	runParam := fmt.Sprintf("$%d", len(args)+6)
+	args = append(args, id, version, parent, channels, variantAPercent, runID)
 	if kept {
 		where += ` AND u.id IN (
 			SELECT r.user_id FROM campaign_recipients r
@@ -300,10 +332,10 @@ func insertDeliveries(ctx context.Context, tx pgx.Tx, id string, version int, ch
 	// all of their values stay parameters.
 	err = tx.QueryRow(ctx, `
 		WITH inserted AS (
-			INSERT INTO campaign_deliveries (campaign_id, campaign_version_id, user_id, channel, idempotency_key, status, last_error, trace_context, variant)
-			SELECT `+campaignParam+`::uuid,
+			INSERT INTO campaign_deliveries (campaign_id, run_id, campaign_version_id, user_id, channel, idempotency_key, status, last_error, trace_context, variant)
+			SELECT `+campaignParam+`::uuid, `+runParam+`::uuid,
 			       (SELECT v.id FROM campaign_versions v WHERE v.campaign_id = `+campaignParam+`::uuid AND v.version = `+versionParam+`::int),
-			       u.id, ch.channel, `+campaignParam+`::uuid::text || ':' || u.id || ':' || ch.channel,
+			       u.id, ch.channel, `+runParam+`::uuid::text || ':' || u.id || ':' || ch.channel,
 			       CASE WHEN consent.allowed THEN 'QUEUED' ELSE 'SKIPPED' END,
 			       CASE WHEN consent.allowed THEN NULL ELSE '`+reasonWithoutConsent+`' END,
 			       NULLIF(`+traceParam+`::text, ''),
@@ -312,9 +344,10 @@ func insertDeliveries(ctx context.Context, tx pgx.Tx, id string, version int, ch
 			CROSS JOIN unnest(`+channelsParam+`::text[]) AS ch (channel)
 			LEFT JOIN consents consent ON consent.user_id = u.id AND consent.channel = ch.channel
 			WHERE `+where+`
-			ON CONFLICT (campaign_id, user_id, channel) DO UPDATE
-			SET status = 'QUEUED', last_error = NULL, next_attempt_at = now(), updated_at = now(), trace_context = EXCLUDED.trace_context
-			WHERE campaign_deliveries.status = 'SKIPPED' AND EXCLUDED.status = 'QUEUED'
+			  AND NOT EXISTS (
+				SELECT 1 FROM campaign_deliveries reached
+				WHERE reached.campaign_id = `+campaignParam+`::uuid AND reached.user_id = u.id
+				  AND reached.channel = ch.channel AND reached.status <> 'SKIPPED')
 			RETURNING status
 		)
 		SELECT count(*) FILTER (WHERE status = 'QUEUED'), count(*) FILTER (WHERE status = 'SKIPPED') FROM inserted`, args...).Scan(&queued, &skipped)
@@ -366,7 +399,17 @@ func (s *Service) Progress(ctx context.Context, id string) (Progress, error) {
 		progress.ByChannel[channel] = map[string]int{}
 	}
 
-	rows, err := s.db.Query(ctx, `SELECT channel, status, count(*), sum(attempts) FROM campaign_deliveries WHERE campaign_id = $1 GROUP BY channel, status`, id)
+	// Finished runs kept their counts; only runs still sending are counted. One
+	// statement, so a run finishing meanwhile is counted once.
+	rows, err := s.db.Query(ctx, `
+		SELECT c->>0, c->>1, (c->>2)::int, (c->>3)::int
+		FROM campaign_runs r, jsonb_array_elements(r.counts) c
+		WHERE r.campaign_id = $1 AND r.finished_at IS NOT NULL
+		UNION ALL
+		SELECT d.channel, d.status, count(*)::int, sum(d.attempts)::int
+		FROM campaign_runs r JOIN campaign_deliveries d ON d.run_id = r.id
+		WHERE r.campaign_id = $1 AND r.finished_at IS NULL
+		GROUP BY d.channel, d.status`, id)
 	if err != nil {
 		return Progress{}, fmt.Errorf("read progress: %w", err)
 	}
@@ -382,7 +425,7 @@ func (s *Service) Progress(ctx context.Context, id string) (Progress, error) {
 		progress.Total += count
 		progress.Attempts += attempts
 		progress.ByStatus[status] += count
-		progress.ByChannel[channel][status] = count
+		progress.ByChannel[channel][status] += count
 		if slices.Contains(terminalStatuses, status) {
 			progress.Processed += count
 		}
@@ -392,10 +435,16 @@ func (s *Service) Progress(ctx context.Context, id string) (Progress, error) {
 	}
 
 	responses, err := s.db.Query(ctx, `
-		SELECT a.response_code::text, count(*)
-		FROM delivery_attempts a
-		WHERE a.campaign_id = $1 AND a.response_code IS NOT NULL
-		GROUP BY a.response_code`, id)
+		SELECT code, sum(calls)::int FROM (
+			SELECT e.key AS code, e.value::int AS calls
+			FROM campaign_runs r, jsonb_each_text(r.responses) e
+			WHERE r.campaign_id = $1 AND r.finished_at IS NOT NULL
+			UNION ALL
+			SELECT a.response_code::text, count(*)::int
+			FROM campaign_runs r JOIN delivery_attempts a ON a.run_id = r.id
+			WHERE r.campaign_id = $1 AND r.finished_at IS NULL AND a.response_code IS NOT NULL
+			GROUP BY a.response_code
+		) s GROUP BY code`, id)
 	if err != nil {
 		return Progress{}, fmt.Errorf("read responses: %w", err)
 	}
