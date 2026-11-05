@@ -464,6 +464,71 @@ func TestARepeatingScheduleNeverMessagesAnyoneTwice(t *testing.T) {
 	}
 }
 
+// queuedInRun counts the messages a run of the campaign queued.
+func queuedInRun(t *testing.T, h *harness, id string, number int) int {
+	t.Helper()
+	var queued int
+	if err := h.pool.QueryRow(context.Background(), `SELECT queued FROM campaign_runs WHERE campaign_id = $1 AND number = $2`, id, number).Scan(&queued); err != nil {
+		t.Fatalf("run %d: %v", number, err)
+	}
+	return queued
+}
+
+func TestARepeatingScheduleCanReachPeopleAgainOnceTheyHaveRested(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindInterval, EveryHours: 24, Reach: schedule.ReachAfter, ReachAfterDays: 2}); err != nil {
+		t.Fatal(err)
+	}
+	first := referenceTime.Add(24 * time.Hour)
+	if _, err := scheduler(h, first.Add(time.Second)).RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reached := queuedInRun(t, h, id, 1)
+	if _, err := h.pool.Exec(ctx, `UPDATE campaign_deliveries SET status = 'SENT', updated_at = $2 WHERE campaign_id = $1 AND status = 'QUEUED'`, id, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scheduler(h, first.Add(24*time.Hour+time.Second)).RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := queuedInRun(t, h, id, 2); got != 0 {
+		t.Fatalf("a day later %d people were messaged again before resting two days", got)
+	}
+	if _, err := scheduler(h, first.Add(72*time.Hour+time.Second)).RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := queuedInRun(t, h, id, 3); got != reached || reached == 0 {
+		t.Fatalf("after resting, run 3 queued %d of the %d reached first", got, reached)
+	}
+}
+
+func TestReachingEveryoneEachTimeStillWaitsForMessagesUnderWay(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindInterval, EveryHours: 24, Reach: schedule.ReachEveryone}); err != nil {
+		t.Fatal(err)
+	}
+	first := referenceTime.Add(24 * time.Hour)
+	if _, err := scheduler(h, first.Add(time.Second)).RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reached := queuedInRun(t, h, id, 1)
+	// One message is still on its way; the rest went out.
+	if _, err := h.pool.Exec(ctx, `
+		UPDATE campaign_deliveries SET status = 'SENT', updated_at = $2
+		WHERE campaign_id = $1 AND status = 'QUEUED' AND id <> (SELECT min(id::text)::uuid FROM campaign_deliveries WHERE campaign_id = $1 AND status = 'QUEUED')`, id, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scheduler(h, first.Add(24*time.Hour+time.Second)).RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := queuedInRun(t, h, id, 2); got != reached-1 || reached < 2 {
+		t.Fatalf("run 2 queued %d; want everyone reached (%d) but the one still under way", got, reached)
+	}
+}
+
 // A run that has to go again keeps the idempotency keys it was given, and a later
 // run gets keys of its own, so a provider does not take its messages for repeats.
 func TestEachRunHasItsOwnIdempotencyKeys(t *testing.T) {

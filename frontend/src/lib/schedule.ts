@@ -1,4 +1,4 @@
-import type { ScheduleSpec } from "../api/campaigns";
+import type { ScheduleReach, ScheduleSpec } from "../api/campaigns";
 
 export type ScheduleMode = "now" | "once" | "interval" | "weekly";
 export type IntervalUnit = "hours" | "days";
@@ -13,6 +13,8 @@ export type ScheduleForm = {
   time: string;
   timezone: string;
   endsAt: string;
+  reach: ScheduleReach;
+  reachAfterDays: number;
 };
 
 export const WEEKDAYS = [
@@ -40,7 +42,22 @@ export function emptyScheduleForm(): ScheduleForm {
     time: "09:00",
     timezone: browserTimezone(),
     endsAt: "",
+    reach: "new",
+    reachAfterDays: 7,
   };
+}
+
+// A sensible rest before someone is reached again: one interval, or a week for
+// sends on chosen days.
+export function suggestedRestDays(form: ScheduleForm): number {
+  if (form.mode !== "interval") return 7;
+  const hours = form.unit === "days" ? form.every * 24 : form.every;
+  return Math.min(365, Math.max(1, Math.round(hours / 24)));
+}
+
+function reachOf(form: ScheduleForm): Pick<ScheduleSpec, "reach" | "reach_after_days"> {
+  if (form.reach === "after") return { reach: "after", reach_after_days: form.reachAfterDays };
+  return form.reach === "everyone" ? { reach: "everyone" } : {};
 }
 
 // datetime-local gives a time without a zone, which means the browser's own.
@@ -60,13 +77,21 @@ export function scheduleProblem(form: ScheduleForm): string {
     case "once":
       return toInstant(form.at) ? "" : "Choose a date and time.";
     case "interval":
-      return Number.isInteger(form.every) && form.every >= 1 ? "" : "Choose how often to send.";
+      if (!Number.isInteger(form.every) || form.every < 1) return "Choose how often to send.";
+      return restProblem(form);
     case "weekly":
       if (!form.days.length) return "Choose at least one day.";
-      return form.time ? "" : "Choose a time.";
+      return form.time ? restProblem(form) : "Choose a time.";
     default:
       return "";
   }
+}
+
+function restProblem(form: ScheduleForm): string {
+  if (form.reach !== "after") return "";
+  return Number.isInteger(form.reachAfterDays) && form.reachAfterDays >= 1 && form.reachAfterDays <= 365
+    ? ""
+    : "Choose a waiting time from 1 to 365 days.";
 }
 
 // Null means send now.
@@ -81,9 +106,10 @@ export function buildSchedule(form: ScheduleForm): ScheduleSpec | null {
         every_hours: form.unit === "days" ? form.every * 24 : form.every,
         ...(toInstant(form.startsAt) ? { starts_at: toInstant(form.startsAt) } : {}),
         ...(ends ? { ends_at: ends } : {}),
+        ...reachOf(form),
       };
     case "weekly":
-      return { kind: "weekly", days: form.days, time: form.time, timezone: form.timezone, ...(ends ? { ends_at: ends } : {}) };
+      return { kind: "weekly", days: form.days, time: form.time, timezone: form.timezone, ...(ends ? { ends_at: ends } : {}), ...reachOf(form) };
     default:
       return null;
   }

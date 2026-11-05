@@ -10,7 +10,7 @@ The 100 messages per second limit is per channel across all workers, so workers 
 
 ## One delivery per run, recipient and channel
 
-The official requirement says the same person must not get the same message twice. Each send of a campaign is a run: the single dispatch of a one-time campaign, or one firing of a repeating schedule. The unique key is on run, user and channel, and every delivery's idempotency key names its run, so a crash, a retry, a lost response or a run picked up again cannot message anyone twice within it. A later run of a repeating campaign leaves out everyone an earlier run reached. Two separate campaigns may reach the same person; the "not messaged in the last N days" rule is how a campaign holds back people any campaign reached recently.
+The official requirement says the same person must not get the same message twice. Each send of a campaign is a run: the single dispatch of a one-time campaign, or one firing of a repeating schedule. The unique key is on run, user and channel, and every delivery's idempotency key names its run, so a crash, a retry, a lost response or a run picked up again cannot message anyone twice within it. A later run can only reach someone again when its schedule says so (see the scheduling section). Two separate campaigns may reach the same person; the "not messaged in the last N days" rule is how a campaign holds back people any campaign reached recently.
 
 A finished run keeps its counts in `campaign_runs`, written in the same statement that marks it finished. A run gets all its deliveries when it opens and a finished delivery does not change, so those counts are final, and lists and progress read them instead of counting every delivery a campaign ever made. Only runs still sending are counted live. Existing deliveries became each campaign's first run.
 
@@ -145,11 +145,17 @@ The model returns, for each filter, the exact words of the brief or refinement b
 
 Regeneration replaces every message rather than one, which keeps the validation of the offer across channels simple. The `there` fallback for a missing name is English and reads awkwardly in a Turkish message; per-language fallbacks belong with per-language content.
 
-## Scheduling repeats a campaign without repeating a message
+## Scheduling repeats a campaign, and the schedule says who may get it again
 
 A campaign can be sent now, once at a chosen time, at regular intervals, or on chosen weekdays. Marketers pick from these forms instead of writing a cron expression, which is easy to get wrong and hard to read back. A loop in the worker plays the part of the cron job, and its state lives in `campaign_schedules`, so it survives restarts.
 
-"The same person never gets the same message twice" is a hard rule, so a repeat cannot mean sending again to everyone. Each run counts the audience again and queues only people without an earlier delivery, which the campaign-wide index finds. People who were only skipped can be queued later if they consent. A repeating campaign is therefore a way to reach people who match later, and a run can correctly queue nothing. To send new content to the same people, a marketer creates a new campaign.
+Each run counts the audience again. Whom it may reach a second time is a choice on the schedule, shown only for the repeating forms, as Braze's re-eligibility and Insider One's "multiple times" setting do:
+
+- **Only people who haven't received it yet** (the default): nobody an earlier run reached is queued again, so a repeating campaign reaches people who start matching later, and a run can correctly queue nothing.
+- **People who haven't received it in the last N days**: someone reached before is queued again once N days have passed since their last message from it. N starts at one interval, or a week for chosen days. This is the abandoned-cart case: the same person can leave a cart again next month.
+- **Everyone who matches, every time**: the picker warns that people who keep matching get every send.
+
+In every case someone whose message from an earlier run is still being sent is left out, and people who were only skipped, for example for lack of consent, count as not reached. The rule is part of the schedule, so the audit trail and the campaign page describe it with the timing.
 
 Missed runs are not replayed one by one. After downtime one run covers them, because each run already reaches everyone who is still owed the message.
 

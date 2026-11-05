@@ -259,7 +259,7 @@ flowchart TD
     kind -->|Repeating| match[Find who matches now]
     kept --> insert[Add deliveries]
     match --> insert
-    insert --> unique[Leave out anyone<br/>an earlier run reached]
+    insert --> unique[Leave out anyone an earlier run reached,<br/>unless the schedule lets them in again]
     unique --> next[Work out the next run]
     next --> status{Anyone new, or<br/>was this the last run?}
     status -->|Yes| dispatching[Status DISPATCHING]

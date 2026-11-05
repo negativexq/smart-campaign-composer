@@ -228,6 +228,31 @@ describe("review", () => {
     expect(wrapper.find("[data-testid=once-per-person]").text()).toContain("Nobody gets this message twice");
   });
 
+  it("asks whom later sends reach only for a repeating send, and sends the choice", async () => {
+    const { wrapper, fetchMock } = await open();
+    expect(wrapper.find("[data-testid=schedule-reach]").exists()).toBe(false);
+    await wrapper.findAll("input[type=radio]")[1].setValue(true);
+    expect(wrapper.find("[data-testid=schedule-reach]").exists()).toBe(false);
+
+    await wrapper.findAll("input[type=radio]")[2].setValue(true);
+    expect((wrapper.find("[data-testid=reach-new]").element as HTMLInputElement).checked).toBe(true);
+    await wrapper.find("[data-testid=schedule-every]").setValue("3");
+    await wrapper.find("[aria-label='Interval unit']").setValue("days");
+    await wrapper.find("[data-testid=reach-after]").setValue(true);
+    expect((wrapper.find("[data-testid=reach-after-days]").element as HTMLInputElement).value).toBe("3");
+    expect(wrapper.find("[data-testid=once-per-person]").text()).toContain("3 days have passed");
+
+    await wrapper.find("[data-testid=reach-everyone]").setValue(true);
+    expect(wrapper.find("[data-testid=reach-everyone-warning]").exists()).toBe(true);
+    // It sits above the mode's own fields, so it does not move between repeating modes.
+    const order = wrapper.html();
+    expect(order.indexOf("schedule-reach")).toBeLessThan(order.indexOf("schedule-every"));
+    await wrapper.find("[data-testid=approve]").trigger("click");
+    await flushPromises();
+    const [[, init]] = called(fetchMock, "POST", "/api/campaigns/c1/schedule");
+    expect(JSON.parse(String(init?.body))).toMatchObject({ kind: "interval", every_hours: 72, reach: "everyone" });
+  });
+
   it("can be retried when the second step fails", async () => {
     const { wrapper, fetchMock } = await open(ready, {
       "POST /api/campaigns/c1/dispatch": { status: 500, body: { error: "Something broke." } },

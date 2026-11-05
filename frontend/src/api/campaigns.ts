@@ -26,7 +26,12 @@ export type ScheduleSpec = {
   time?: string;
   timezone?: string;
   ends_at?: string;
+  /** Whom later runs of a repeating send may message again. */
+  reach?: ScheduleReach;
+  reach_after_days?: number;
 };
+
+export type ScheduleReach = "new" | "after" | "everyone";
 
 export interface BriefPart {
   text: string;

@@ -281,7 +281,7 @@ func TestScheduling(t *testing.T) {
 		t.Fatalf("schedule: %d %+v", status, view)
 	}
 	rule := view["schedule"].(map[string]any)
-	if rule["description"] != "Monday and Wednesday at 09:30 (Europe/Istanbul)" || rule["next_run_at"] == nil {
+	if rule["description"] != "Monday and Wednesday at 09:30 (Europe/Istanbul), reaching only people not reached before" || rule["next_run_at"] == nil {
 		t.Fatalf("rule: %+v", rule)
 	}
 	if status, _ := call(t, api, http.MethodPost, "/api/campaigns/"+id+"/dispatch", ""); status != http.StatusConflict {

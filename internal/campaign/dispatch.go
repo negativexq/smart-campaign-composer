@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/negativexq/smart-campaign-composer/internal/content"
+	"github.com/negativexq/smart-campaign-composer/internal/schedule"
 	"github.com/negativexq/smart-campaign-composer/internal/segment"
 )
 
@@ -202,7 +203,7 @@ func (s *Service) Dispatch(ctx context.Context, id string) (view View, err error
 	if kept {
 		asOf = s.now()
 	}
-	queued, skipped, err := queueRun(ctx, tx, id, s.now(), stored.Version, stored.Channels, testShare(stored.ABTest, stored.VariantAPercent), stored.Proposal.Segment, kept, asOf, traceParent(ctx))
+	queued, skipped, err := queueRun(ctx, tx, id, s.now(), schedule.Spec{}, stored.Version, stored.Channels, testShare(stored.ABTest, stored.VariantAPercent), stored.Proposal.Segment, kept, asOf, traceParent(ctx))
 	if err != nil {
 		return View{}, err
 	}
@@ -286,12 +287,12 @@ func openRun(ctx context.Context, tx pgx.Tx, id string, startedAt time.Time) (st
 }
 
 // queueRun opens a run and queues its deliveries.
-func queueRun(ctx context.Context, tx pgx.Tx, id string, startedAt time.Time, version int, channels []string, variantAPercent int, spec segment.Spec, kept bool, asOf time.Time, parent string) (queued, skipped int, err error) {
+func queueRun(ctx context.Context, tx pgx.Tx, id string, startedAt time.Time, rule schedule.Spec, version int, channels []string, variantAPercent int, spec segment.Spec, kept bool, asOf time.Time, parent string) (queued, skipped int, err error) {
 	runID, err := openRun(ctx, tx, id, startedAt)
 	if err != nil {
 		return 0, 0, err
 	}
-	queued, skipped, err = insertDeliveries(ctx, tx, id, runID, version, channels, variantAPercent, spec, kept, asOf, parent)
+	queued, skipped, err = insertDeliveries(ctx, tx, id, runID, rule, version, channels, variantAPercent, spec, kept, asOf, parent)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -304,9 +305,11 @@ func queueRun(ctx context.Context, tx pgx.Tx, id string, startedAt time.Time, ve
 // insertDeliveries queues the people the rule finds at asOf or, with kept, the people
 // approval kept. Those were settled then, except that a message sent to one of them
 // since must still hold back a campaign that promised to leave recent ones alone.
-// Someone an earlier run of the campaign already reached, or still is reaching, on a
-// channel is left out of it; one who was skipped there, say for lack of consent, is not.
-func insertDeliveries(ctx context.Context, tx pgx.Tx, id, runID string, version int, channels []string, variantAPercent int, spec segment.Spec, kept bool, asOf time.Time, parent string) (queued, skipped int, err error) {
+// Someone an earlier run of the campaign still is reaching on a channel is left out of
+// it, and so is someone it already reached, unless the rule lets them in again and
+// they have waited as long as it asks. One who was skipped, say for lack of consent,
+// was never reached.
+func insertDeliveries(ctx context.Context, tx pgx.Tx, id, runID string, rule schedule.Spec, version int, channels []string, variantAPercent int, spec segment.Spec, kept bool, asOf time.Time, parent string) (queued, skipped int, err error) {
 	where, args := segment.Compile(spec, asOf)
 	if kept {
 		where, args = "TRUE", nil
@@ -321,6 +324,12 @@ func insertDeliveries(ctx context.Context, tx pgx.Tx, id, runID string, version 
 	testParam := fmt.Sprintf("$%d", len(args)+5)
 	runParam := fmt.Sprintf("$%d", len(args)+6)
 	args = append(args, id, version, parent, channels, variantAPercent, runID)
+	reached := `reached.status <> 'SKIPPED'`
+	if wait, again := rule.ReachesAgainAfter(); again {
+		reached = `(reached.status IN ('QUEUED', 'SENDING', 'RETRYING') OR (reached.status <> 'SKIPPED' AND reached.updated_at > ` +
+			fmt.Sprintf("$%d", len(args)+1) + `::timestamptz))`
+		args = append(args, asOf.Add(-wait))
+	}
 	if kept {
 		where += ` AND u.id IN (
 			SELECT r.user_id FROM campaign_recipients r
@@ -347,7 +356,7 @@ func insertDeliveries(ctx context.Context, tx pgx.Tx, id, runID string, version 
 			  AND NOT EXISTS (
 				SELECT 1 FROM campaign_deliveries reached
 				WHERE reached.campaign_id = `+campaignParam+`::uuid AND reached.user_id = u.id
-				  AND reached.channel = ch.channel AND reached.status <> 'SKIPPED')
+				  AND reached.channel = ch.channel AND `+reached+`)
 			RETURNING status
 		)
 		SELECT count(*) FILTER (WHERE status = 'QUEUED'), count(*) FILTER (WHERE status = 'SKIPPED') FROM inserted`, args...).Scan(&queued, &skipped)

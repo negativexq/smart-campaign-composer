@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
 
-import { WEEKDAYS, type ScheduleForm, type ScheduleMode } from "../lib/schedule";
+import type { ScheduleReach } from "../api/campaigns";
+import { WEEKDAYS, suggestedRestDays, type ScheduleForm, type ScheduleMode } from "../lib/schedule";
 
 const props = defineProps<{ modelValue: ScheduleForm }>();
 const emit = defineEmits<{ "update:modelValue": [value: ScheduleForm] }>();
@@ -13,6 +14,30 @@ const options: { mode: ScheduleMode; label: string; hint: string }[] = [
   { mode: "interval", label: "At regular intervals", hint: "Sends again every few hours or days." },
   { mode: "weekly", label: "On chosen days", hint: "Sends on the same days each week." },
 ];
+
+const reaches: { reach: ScheduleReach; label: string }[] = [
+  { reach: "new", label: "Only people who haven't received it yet" },
+  { reach: "after", label: "People who haven't received it in the last" },
+  { reach: "everyone", label: "Everyone who matches, every time" },
+];
+
+// Choosing a wait starts from one interval, which the person can then change.
+function chooseReach(reach: ScheduleReach) {
+  const next = { ...props.modelValue, reach };
+  if (reach === "after" && props.modelValue.reach !== "after") next.reachAfterDays = suggestedRestDays(props.modelValue);
+  emit("update:modelValue", next);
+}
+
+const reachNote = computed(() => {
+  switch (props.modelValue.reach) {
+    case "after":
+      return `Each send finds who matches at that time. Someone reached before gets it again once ${props.modelValue.reachAfterDays === 1 ? "a day has" : `${props.modelValue.reachAfterDays} days have`} passed since their last one.`;
+    case "everyone":
+      return "Each send finds who matches at that time and messages all of them, including people earlier sends reached. Only someone whose message is still being sent is left out.";
+    default:
+      return "Each send finds who matches at that time, so the number can change. Nobody gets this message twice: only people who have not received it yet are reached.";
+  }
+});
 
 const timezones = computed(() => {
   const supported = Intl.supportedValuesOf?.("timeZone") ?? [];
@@ -47,6 +72,42 @@ function inputValue(event: Event) {
         </span>
       </label>
     </div>
+
+    <!-- Above the details, so it stays put when switching between the repeating modes. -->
+    <fieldset v-if="repeats" class="reach" data-testid="schedule-reach">
+      <legend class="small muted">Later sends reach</legend>
+      <label v-for="option in reaches" :key="option.reach" class="reach-option">
+        <input
+          type="radio"
+          :name="`${id}-reach`"
+          :value="option.reach"
+          :checked="modelValue.reach === option.reach"
+          :data-testid="`reach-${option.reach}`"
+          @change="chooseReach(option.reach)"
+        />
+        <span>{{ option.label }}</span>
+        <template v-if="option.reach === 'after'">
+          <input
+            class="field rest"
+            type="number"
+            min="1"
+            max="365"
+            step="1"
+            aria-label="Days to wait before reaching someone again"
+            data-testid="reach-after-days"
+            :disabled="modelValue.reach !== 'after'"
+            :value="modelValue.reachAfterDays"
+            @input="change('reachAfterDays', Number(inputValue($event)))"
+          />
+          <span>days</span>
+        </template>
+      </label>
+      <p v-if="modelValue.reach === 'everyone'" class="small warning" data-testid="reach-everyone-warning">
+        People who match again get this message on every send. Make sure that is what they would want.
+      </p>
+    </fieldset>
+
+    <p v-if="repeats" class="muted small" data-testid="once-per-person">{{ reachNote }}</p>
 
     <div v-if="modelValue.mode === 'once'" class="details">
       <label class="control">
@@ -118,11 +179,7 @@ function inputValue(event: Event) {
       <span class="small muted">Stop after (optional)</span>
       <input class="field" type="datetime-local" :value="modelValue.endsAt" @input="change('endsAt', inputValue($event))" />
     </label>
-
-    <p v-if="repeats" class="muted small" data-testid="once-per-person">
-      Each send finds who matches at that time, so the number can change. Nobody gets this message twice: only people who have not received it yet are reached.
-    </p>
-    <p v-else class="muted small" data-testid="approved-people">Goes to the people you approve now. Anyone who withdraws consent before the send is left out.</p>
+    <p v-if="!repeats" class="muted small" data-testid="approved-people">Goes to the people you approve now. Anyone who withdraws consent before the send is left out.</p>
   </fieldset>
 </template>
 
@@ -223,6 +280,37 @@ function inputValue(event: Event) {
   border-radius: var(--radius-sm);
   font: inherit;
   cursor: pointer;
+}
+
+.reach {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.reach legend {
+  margin-bottom: var(--space-1);
+  padding: 0;
+}
+
+.reach-option {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  cursor: pointer;
+}
+
+.rest {
+  width: 80px;
+}
+
+.warning {
+  margin: 0;
+  color: var(--color-warning);
 }
 
 .day--active {

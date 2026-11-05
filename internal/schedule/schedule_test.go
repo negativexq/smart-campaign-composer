@@ -112,18 +112,23 @@ func TestValidate(t *testing.T) {
 		}
 	}
 	invalid := map[string]schedule.Spec{
-		"unknown kind":      {Kind: "cron"},
-		"once without time": {Kind: schedule.KindOnce},
-		"once in the past":  {Kind: schedule.KindOnce, At: at("2026-11-03T11:00:00Z")},
-		"too far ahead":     {Kind: schedule.KindOnce, At: at("2028-01-01T00:00:00Z")},
-		"no interval":       {Kind: schedule.KindInterval},
-		"interval too long": {Kind: schedule.KindInterval, EveryHours: 10000},
-		"no days":           {Kind: schedule.KindWeekly, Time: "09:00", Timezone: "UTC"},
-		"unknown day":       {Kind: schedule.KindWeekly, Days: []string{"funday"}, Time: "09:00", Timezone: "UTC"},
-		"bad time":          {Kind: schedule.KindWeekly, Days: []string{"mon"}, Time: "25:00", Timezone: "UTC"},
-		"bad zone":          {Kind: schedule.KindWeekly, Days: []string{"mon"}, Time: "09:00", Timezone: "Mars/Olympus"},
-		"ends before start": {Kind: schedule.KindInterval, EveryHours: 1, StartsAt: at("2026-11-05T00:00:00Z"), EndsAt: at("2026-11-04T00:00:00Z")},
-		"ends in the past":  {Kind: schedule.KindInterval, EveryHours: 1, EndsAt: at("2026-11-01T00:00:00Z")},
+		"unknown kind":       {Kind: "cron"},
+		"once without time":  {Kind: schedule.KindOnce},
+		"once in the past":   {Kind: schedule.KindOnce, At: at("2026-11-03T11:00:00Z")},
+		"too far ahead":      {Kind: schedule.KindOnce, At: at("2028-01-01T00:00:00Z")},
+		"no interval":        {Kind: schedule.KindInterval},
+		"interval too long":  {Kind: schedule.KindInterval, EveryHours: 10000},
+		"no days":            {Kind: schedule.KindWeekly, Time: "09:00", Timezone: "UTC"},
+		"unknown day":        {Kind: schedule.KindWeekly, Days: []string{"funday"}, Time: "09:00", Timezone: "UTC"},
+		"bad time":           {Kind: schedule.KindWeekly, Days: []string{"mon"}, Time: "25:00", Timezone: "UTC"},
+		"bad zone":           {Kind: schedule.KindWeekly, Days: []string{"mon"}, Time: "09:00", Timezone: "Mars/Olympus"},
+		"ends before start":  {Kind: schedule.KindInterval, EveryHours: 1, StartsAt: at("2026-11-05T00:00:00Z"), EndsAt: at("2026-11-04T00:00:00Z")},
+		"ends in the past":   {Kind: schedule.KindInterval, EveryHours: 1, EndsAt: at("2026-11-01T00:00:00Z")},
+		"unknown reach":      {Kind: schedule.KindInterval, EveryHours: 1, Reach: "sometimes"},
+		"no waiting time":    {Kind: schedule.KindInterval, EveryHours: 1, Reach: schedule.ReachAfter},
+		"waits too long":     {Kind: schedule.KindInterval, EveryHours: 1, Reach: schedule.ReachAfter, ReachAfterDays: 400},
+		"stray wait":         {Kind: schedule.KindInterval, EveryHours: 1, Reach: schedule.ReachEveryone, ReachAfterDays: 3},
+		"once reaches again": {Kind: schedule.KindOnce, At: at("2026-11-06T00:00:00Z"), Reach: schedule.ReachEveryone},
 	}
 	for name, spec := range invalid {
 		var problem *schedule.InvalidError
@@ -139,11 +144,14 @@ func TestDescribeReadsLikeASentence(t *testing.T) {
 		spec schedule.Spec
 		want string
 	}{
-		{schedule.Spec{Kind: schedule.KindInterval, EveryHours: 1}, "Every hour"},
-		{schedule.Spec{Kind: schedule.KindInterval, EveryHours: 6}, "Every 6 hours"},
-		{schedule.Spec{Kind: schedule.KindInterval, EveryHours: 48}, "Every 2 days"},
-		{schedule.Spec{Kind: schedule.KindWeekly, Days: []string{"wed", "mon"}, Time: "09:30", Timezone: "Europe/Istanbul"}, "Monday and Wednesday at 09:30 (Europe/Istanbul)"},
-		{schedule.Spec{Kind: schedule.KindWeekly, Days: []string{"mon", "tue", "wed"}, Time: "08:00", Timezone: "UTC"}, "Monday, Tuesday and Wednesday at 08:00 (UTC)"},
+		{schedule.Spec{Kind: schedule.KindInterval, EveryHours: 1}, "Every hour, reaching only people not reached before"},
+		{schedule.Spec{Kind: schedule.KindInterval, EveryHours: 6}, "Every 6 hours, reaching only people not reached before"},
+		{schedule.Spec{Kind: schedule.KindInterval, EveryHours: 48}, "Every 2 days, reaching only people not reached before"},
+		{schedule.Spec{Kind: schedule.KindWeekly, Days: []string{"wed", "mon"}, Time: "09:30", Timezone: "Europe/Istanbul"}, "Monday and Wednesday at 09:30 (Europe/Istanbul), reaching only people not reached before"},
+		{schedule.Spec{Kind: schedule.KindWeekly, Days: []string{"mon", "tue", "wed"}, Time: "08:00", Timezone: "UTC"}, "Monday, Tuesday and Wednesday at 08:00 (UTC), reaching only people not reached before"},
+		{schedule.Spec{Kind: schedule.KindInterval, EveryHours: 24, Reach: schedule.ReachAfter, ReachAfterDays: 7}, "Every day, reaching people again after 7 days"},
+		{schedule.Spec{Kind: schedule.KindInterval, EveryHours: 24, Reach: schedule.ReachAfter, ReachAfterDays: 1}, "Every day, reaching people again after 1 day"},
+		{schedule.Spec{Kind: schedule.KindInterval, EveryHours: 24, Reach: schedule.ReachEveryone}, "Every day, reaching everyone who matches each time"},
 	} {
 		if got := tt.spec.Describe(); got != tt.want {
 			t.Errorf("got %q, want %q", got, tt.want)

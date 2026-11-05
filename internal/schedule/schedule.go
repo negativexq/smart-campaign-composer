@@ -22,6 +22,16 @@ const (
 	maxAhead      = 366 * 24 * time.Hour
 )
 
+// Whom later runs of a repeating rule reach. ReachNew, the default, leaves out
+// everyone an earlier run reached.
+const (
+	ReachNew      = "new"
+	ReachAfter    = "after"
+	ReachEveryone = "everyone"
+
+	maxReachAfterDays = 365
+)
+
 var weekdays = []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
 
 // Spec is a sending rule.
@@ -39,6 +49,11 @@ type Spec struct {
 	Timezone string   `json:"timezone,omitempty"`
 	// EndsAt optionally stops a repeating rule, inclusive.
 	EndsAt *time.Time `json:"ends_at,omitempty"`
+	// Reach says whom a repeating rule's later runs may message again. Within one run
+	// nobody gets the message twice, whatever it says.
+	Reach string `json:"reach,omitempty"`
+	// ReachAfterDays is how long someone rests before ReachAfter lets them in again.
+	ReachAfterDays int `json:"reach_after_days,omitempty"`
 }
 
 // InvalidError says what is wrong with a rule, in words for the person choosing it.
@@ -89,6 +104,21 @@ func (s Spec) Validate(now time.Time) error {
 		}
 	default:
 		return invalid("Choose how this campaign should be scheduled.")
+	}
+	switch s.Reach {
+	case "", ReachNew, ReachEveryone:
+		if s.ReachAfterDays != 0 {
+			return invalid("A waiting time only goes with reaching people again after some days.")
+		}
+	case ReachAfter:
+		if s.ReachAfterDays < 1 || s.ReachAfterDays > maxReachAfterDays {
+			return invalid("The waiting time must be between 1 and 365 days.")
+		}
+	default:
+		return invalid("Choose whom later sends may reach again.")
+	}
+	if s.Kind == KindOnce && s.Reach != "" && s.Reach != ReachNew {
+		return invalid("A one-time send has no later sends.")
 	}
 	if s.EndsAt != nil && !s.EndsAt.After(now) {
 		return invalid("The end must be in the future.")
@@ -164,6 +194,38 @@ var dayNames = map[string]string{
 
 // Describe says what the rule does, for people.
 func (s Spec) Describe() string {
+	when := s.describeWhen()
+	switch {
+	case when == "" || s.Kind == KindOnce:
+		return when
+	case s.Reach == ReachAfter:
+		return when + ", reaching people again after " + plural(s.ReachAfterDays, "day")
+	case s.Reach == ReachEveryone:
+		return when + ", reaching everyone who matches each time"
+	}
+	return when + ", reaching only people not reached before"
+}
+
+// ReachesAgainAfter is how long since their last message someone in a later run
+// must have waited: zero for no wait, and false when nobody is reached twice.
+func (s Spec) ReachesAgainAfter() (time.Duration, bool) {
+	switch s.Reach {
+	case ReachAfter:
+		return time.Duration(s.ReachAfterDays) * 24 * time.Hour, true
+	case ReachEveryone:
+		return 0, true
+	}
+	return 0, false
+}
+
+func plural(count int, unit string) string {
+	if count == 1 {
+		return "1 " + unit
+	}
+	return strconv.Itoa(count) + " " + unit + "s"
+}
+
+func (s Spec) describeWhen() string {
 	switch s.Kind {
 	case KindOnce:
 		if s.At != nil {

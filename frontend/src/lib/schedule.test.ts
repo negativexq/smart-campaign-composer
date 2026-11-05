@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildSchedule, emptyScheduleForm, scheduleProblem } from "./schedule";
+import { buildSchedule, emptyScheduleForm, scheduleProblem, suggestedRestDays } from "./schedule";
 
 describe("schedule form", () => {
   it("means send now by default", () => {
@@ -41,5 +41,27 @@ describe("schedule form", () => {
   it("includes an end only when one is chosen", () => {
     const form = { ...emptyScheduleForm(), mode: "weekly" as const, days: ["mon"], endsAt: "2026-12-01T00:00" };
     expect(new Date(buildSchedule(form)?.ends_at ?? "").getTime()).toBe(new Date("2026-12-01T00:00").getTime());
+  });
+
+  it("sends whom later runs reach only when it is not the default", () => {
+    const form = { ...emptyScheduleForm(), mode: "interval" as const, every: 3, unit: "days" as const };
+    expect(buildSchedule(form)).not.toHaveProperty("reach");
+    expect(buildSchedule({ ...form, reach: "after", reachAfterDays: 3 })).toMatchObject({ reach: "after", reach_after_days: 3 });
+    expect(buildSchedule({ ...form, reach: "everyone" })).toEqual({ kind: "interval", every_hours: 72, reach: "everyone" });
+  });
+
+  it("asks for a waiting time from 1 to 365 days", () => {
+    const form = { ...emptyScheduleForm(), mode: "interval" as const, reach: "after" as const };
+    for (const reachAfterDays of [0, 366, 2.5]) {
+      expect(scheduleProblem({ ...form, reachAfterDays })).not.toBe("");
+    }
+    expect(scheduleProblem({ ...form, reachAfterDays: 30 })).toBe("");
+  });
+
+  it("suggests waiting one interval, or a week for chosen days", () => {
+    const form = emptyScheduleForm();
+    expect(suggestedRestDays({ ...form, mode: "interval", every: 14, unit: "days" })).toBe(14);
+    expect(suggestedRestDays({ ...form, mode: "interval", every: 6, unit: "hours" })).toBe(1);
+    expect(suggestedRestDays({ ...form, mode: "weekly" })).toBe(7);
   });
 });
