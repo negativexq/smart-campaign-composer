@@ -1,7 +1,8 @@
 // Package mockprovider imitates an SMS and email gateway, including the ways a
-// real one misbehaves. It sends nothing. Like a real gateway it remembers
-// idempotency keys, and it measures the rate it receives, so the rate limit can be
-// checked from the receiving side.
+// real one misbehaves. It sends nothing. Like a real gateway it does not lose what it
+// has accepted when it restarts: idempotency keys, the inbox and reports it still owes.
+// It also measures the rate it receives, so the rate limit can be checked from the
+// receiving side.
 package mockprovider
 
 import (
@@ -39,8 +40,12 @@ type Behavior struct {
 	ReportMaxDelay time.Duration
 	// InboxSize is how many messages the test inbox keeps; the default is 5,000.
 	InboxSize int
-	// OnEvent receives what the provider reports after accepting a message.
-	OnEvent func(Event)
+	// OnEvent receives what the provider reports after accepting a message. An error
+	// means the sender did not get it, and the report is tried again later.
+	OnEvent func(Event) error
+	// ReportRetryWait is the first wait before a report is tried again; the default is
+	// one second. It doubles each time, up to maxReportRetryWait.
+	ReportRetryWait time.Duration
 	// Roll overrides the random source in tests.
 	Roll func() float64
 }
@@ -75,10 +80,16 @@ type Server struct {
 	behavior Behavior
 	mu       sync.Mutex
 	accepted map[string]string
-	keys     *keyLog
-	stats    map[string]*ChannelStats
-	recent   map[string][]time.Time
-	inbox    inbox
+	journal  *journal
+	// pending holds the reports still owed to the sender.
+	pending map[string]Event
+	slots   chan struct{}
+	stop    chan struct{}
+	closed  bool
+	// stats and recent describe this run of the process and start over with it.
+	stats  map[string]*ChannelStats
+	recent map[string][]time.Time
+	inbox  inbox
 }
 
 // New builds a provider.
@@ -89,28 +100,62 @@ func New(behavior Behavior) *Server {
 	if behavior.InboxSize <= 0 {
 		behavior.InboxSize = defaultInboxSize
 	}
+	if behavior.ReportRetryWait <= 0 {
+		behavior.ReportRetryWait = time.Second
+	}
 	return &Server{
 		behavior: behavior,
 		accepted: map[string]string{},
+		pending:  map[string]Event{},
+		slots:    make(chan struct{}, reportConcurrency),
+		stop:     make(chan struct{}),
 		stats:    map[string]*ChannelStats{"sms": {}, "email": {}},
 		recent:   map[string][]time.Time{},
 		inbox:    inbox{size: behavior.InboxSize, byKey: map[string]*InboxMessage{}},
 	}
 }
 
-// Open builds a provider that remembers its idempotency keys in the file at path, across
-// restarts. Without a path they last as long as the process.
+// Open builds a provider that keeps what it has accepted in the journal at path, across
+// restarts, and goes on sending the reports it still owes. Without a path everything
+// lasts as long as the process.
 func Open(behavior Behavior, path string) (*Server, error) {
 	server := New(behavior)
 	if path == "" {
 		return server, nil
 	}
-	keys, accepted, err := openKeyLog(path)
+	opened, records, err := openJournal(path)
 	if err != nil {
 		return nil, err
 	}
-	server.keys, server.accepted = keys, accepted
+	server.replay(records)
+	// Starting from a clean file also removes a line cut off by a crash.
+	if err := opened.replace(server.snapshot()); err != nil {
+		_ = opened.file.Close()
+		return nil, err
+	}
+	server.journal = opened
+	// A report already due can finish and change pending while this loop runs.
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	for _, event := range server.pending {
+		server.schedule(event)
+	}
 	return server, nil
+}
+
+// Close stops sending reports and closes the journal. What is unsent stays owed.
+func (s *Server) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	close(s.stop)
+	if s.journal != nil {
+		return s.journal.file.Close()
+	}
+	return nil
 }
 
 // Register adds the provider's routes to mux.
@@ -218,8 +263,9 @@ func (s *Server) pause(ctx context.Context) bool {
 	}
 }
 
-// accept stores the message once, whatever happens to the response. The key is safe
-// before the message counts as delivered, so no restart can make a retry look new.
+// accept stores the message once, whatever happens to the response. The key, the inbox
+// entry and the report are safe before the message counts as delivered, so no restart
+// can make a retry look new or lose what the sender was owed.
 func (s *Server) accept(message request, key string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -228,23 +274,35 @@ func (s *Server) accept(message request, key string) (string, bool, error) {
 	if id, known := s.accepted[key]; known {
 		stats.Duplicates++
 		s.inbox.repeat(key)
+		// A count for reading only, not worth waiting for the disk or failing a call over.
+		s.save(record{Kind: recordRepeated, Key: key}, false)
 		return id, true, nil
 	}
 	id := "mock_" + cryptorand.Text()
-	if s.keys != nil {
-		if err := s.keys.add(key, id); err != nil {
+	// A bounced message reached nobody, so there is nothing to find in the inbox.
+	bounced := s.behavior.OnEvent != nil && s.behavior.Roll() < s.behavior.BounceRate
+	entry := record{Kind: recordAccepted, Key: key, ID: id}
+	if !bounced {
+		entry.Message = newInboxMessage(id, message)
+	}
+	if s.behavior.OnEvent != nil {
+		entry.Reports = []Event{{
+			Event: arrivalEvent(bounced), Channel: channel, MessageID: id, IdempotencyKey: key,
+			OccurredAt: time.Now().Add(s.reportDelay()).UTC(),
+		}}
+	}
+	if s.journal != nil {
+		if err := s.journal.add(entry, true); err != nil {
 			return "", false, err
 		}
 	}
 	s.accepted[key] = id
 	stats.Accepted++
-	// A bounced message reached nobody, so there is nothing to find in the inbox.
-	bounced := s.behavior.OnEvent != nil && s.behavior.Roll() < s.behavior.BounceRate
-	if !bounced {
-		s.inbox.add(key, id, message)
+	if entry.Message != nil {
+		s.inbox.add(key, entry.Message)
 	}
-	s.reportArrival(Event{Event: arrivalEvent(bounced), Channel: channel, MessageID: id, IdempotencyKey: key})
-
+	s.owe(entry.Reports)
+	s.compactIfLarge()
 	return id, false, nil
 }
 
@@ -271,21 +329,12 @@ func arrivalEvent(bounced bool) string {
 	return eventDelivered
 }
 
-// reportArrival tells the sender what became of a message some time after accepting
-// it, as a real gateway does. A lost response does not stop it, because the message
-// got through whether or not the caller heard.
-func (s *Server) reportArrival(event Event) {
-	if s.behavior.OnEvent == nil {
-		return
-	}
+func (s *Server) reportDelay() time.Duration {
 	delay := s.behavior.ReportMinDelay
 	if spread := s.behavior.ReportMaxDelay - s.behavior.ReportMinDelay; spread > 0 {
 		delay += rand.N(spread)
 	}
-	time.AfterFunc(delay, func() {
-		event.OccurredAt = time.Now().UTC()
-		s.behavior.OnEvent(event)
-	})
+	return delay
 }
 
 func (s *Server) count(channel string, change func(*ChannelStats)) {

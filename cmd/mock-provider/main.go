@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
-	"time"
 
 	"github.com/negativexq/smart-campaign-composer/internal/health"
 	"github.com/negativexq/smart-campaign-composer/internal/mockprovider"
@@ -26,17 +25,21 @@ func main() {
 	health.Register(mux, nil)
 	behavior := behaviorFromEnv()
 	if url := os.Getenv("PROVIDER_EVENTS_URL"); url != "" {
-		behavior.OnEvent = mockprovider.NewWebhook(url, os.Getenv("PROVIDER_WEBHOOK_SECRET"), time.Second)
+		behavior.OnEvent = mockprovider.NewWebhook(url, os.Getenv("PROVIDER_WEBHOOK_SECRET"))
 	}
-	provider, err := mockprovider.Open(behavior, os.Getenv("MOCK_KEY_FILE"))
+	provider, err := mockprovider.Open(behavior, os.Getenv("MOCK_JOURNAL_FILE"))
 	if err != nil {
-		slog.Error("mock provider cannot remember its keys", "error", err)
+		slog.Error("mock provider cannot read its journal", "error", err)
 		os.Exit(1)
 	}
 	provider.Register(mux)
 
-	if err := server.Run(ctx, ":"+server.Env("PORT", "8080"), mux); err != nil {
-		slog.Error("mock provider failed", "error", err)
+	runErr := server.Run(ctx, ":"+server.Env("PORT", "8080"), mux)
+	if err := provider.Close(); err != nil {
+		slog.Error("close journal", "error", err)
+	}
+	if runErr != nil {
+		slog.Error("mock provider failed", "error", runErr)
 		os.Exit(1)
 	}
 }

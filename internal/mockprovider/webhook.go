@@ -7,17 +7,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 )
 
 const (
-	eventOpened     = "opened"
-	eventDelivered  = "delivered"
-	eventBounced    = "bounced"
-	webhookAttempts = 5
-	webhookTimeout  = 5 * time.Second
+	eventOpened    = "opened"
+	eventDelivered = "delivered"
+	eventBounced   = "bounced"
+	webhookTimeout = 5 * time.Second
 )
 
 // Event is what a provider reports after accepting a message. It carries the
@@ -31,53 +31,41 @@ type Event struct {
 	OccurredAt     time.Time `json:"occurred_at"`
 }
 
-// NewWebhook posts events to url, signed with secret. It retries in the background
-// with growing waits; an event still unsent after that, or when the provider
-// restarts, is lost, as this is a test tool.
-func NewWebhook(url, secret string, wait time.Duration) func(Event) {
+// NewWebhook posts each event to url once, signed with secret. An error means it is
+// worth trying again; a refusal is not, since repeating it would not change the answer.
+func NewWebhook(url, secret string) func(Event) error {
 	client := &http.Client{Timeout: webhookTimeout}
-	return func(event Event) {
+	return func(event Event) error {
 		body, err := json.Marshal(event)
 		if err != nil {
 			slog.Error("encode event", "error", err)
-			return
+			return nil
 		}
 		mac := hmac.New(sha256.New, []byte(secret))
 		mac.Write(body)
-		signature := hex.EncodeToString(mac.Sum(nil))
-		go func() {
-			delay := wait
-			for attempt := 1; attempt <= webhookAttempts; attempt++ {
-				if postEvent(client, url, signature, body) {
-					return
-				}
-				if attempt < webhookAttempts {
-					time.Sleep(delay)
-					delay *= 2
-				}
-			}
-			slog.Warn("event not delivered", "event", event.Event)
-		}()
+		return postEvent(client, url, hex.EncodeToString(mac.Sum(nil)), body)
 	}
 }
 
-// postEvent says whether to stop: a 4xx will not change by repeating it.
-func postEvent(client *http.Client, url, signature string, body []byte) bool {
+func postEvent(client *http.Client, url, signature string, body []byte) error {
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		slog.Error("build event request", "error", err)
-		return true
+		return nil
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Provider-Signature", signature)
 	response, err := client.Do(request)
 	if err != nil {
-		return false
+		return fmt.Errorf("post event: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode >= 400 && response.StatusCode < 500 {
 		slog.Warn("event refused", "status", response.StatusCode)
-		return true
+		return nil
 	}
-	return response.StatusCode < 400
+	if response.StatusCode >= 500 {
+		return fmt.Errorf("post event: status %d", response.StatusCode)
+	}
+	return nil
 }

@@ -272,7 +272,7 @@ func TestNothingIsSentWithoutTheRateLimiter(t *testing.T) {
 	checkEveryMessageEnded(t, waitForEnd(t, id, 2*time.Minute), before)
 }
 
-// The mock provider keeps its records in memory, so its counts start over here and
+// The mock provider keeps its counters in memory, so its counts start over here and
 // are not compared with the deliveries.
 func TestAProviderOutageIsWaitedOut(t *testing.T) {
 	id := startSending(t)

@@ -103,7 +103,7 @@ services:
       <<: *backend-env
       PROVIDER_EVENTS_URL: http://api:8080/api/provider/events
       PROVIDER_WEBHOOK_SECRET: ${PROVIDER_WEBHOOK_SECRET:-local-mock-webhook-secret}
-      MOCK_KEY_FILE: /data/provider/keys.log
+      MOCK_JOURNAL_FILE: /data/provider/journal.log
     volumes:
       - provider-data:/data/provider
     ports:

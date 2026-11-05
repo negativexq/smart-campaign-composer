@@ -197,12 +197,7 @@ func TestInboxOverHTTP(t *testing.T) {
 func TestOpeningAMessageReportsOnceWithItsKey(t *testing.T) {
 	t.Parallel()
 	behavior := rolling(0.9)
-	var events []mockprovider.Event
-	behavior.OnEvent = func(event mockprovider.Event) {
-		if event.Event == "opened" {
-			events = append(events, event)
-		}
-	}
+	events := reports(&behavior)
 	provider, sender := start(t, behavior)
 	if _, err := sender.Send(context.Background(), mail); err != nil {
 		t.Fatalf("send: %v", err)
@@ -216,8 +211,17 @@ func TestOpeningAMessageReportsOnceWithItsKey(t *testing.T) {
 			t.Fatal("open")
 		}
 	}
-	if len(events) != 1 || events[0].Event != "opened" || events[0].IdempotencyKey != mail.IdempotencyKey || events[0].OccurredAt.IsZero() {
-		t.Fatalf("events: %+v", events)
+	event := nextReport(t, events)
+	for event.Event != "opened" {
+		event = nextReport(t, events)
+	}
+	if event.IdempotencyKey != mail.IdempotencyKey || event.OccurredAt.IsZero() {
+		t.Fatalf("event: %+v", event)
+	}
+	select {
+	case extra := <-events:
+		t.Fatalf("opened twice: %+v", extra)
+	case <-time.After(100 * time.Millisecond):
 	}
 	page := provider.Inbox("", "", 10)
 	if page.Messages[0].OpenedAt == nil || page.Unopened != 0 {
@@ -228,48 +232,41 @@ func TestOpeningAMessageReportsOnceWithItsKey(t *testing.T) {
 	}
 }
 
-func TestWebhookSignsTheEventAndRetriesUntilAnswered(t *testing.T) {
+func TestWebhookSignsTheEventAndAsksForARetryWhileTheSenderIsFailing(t *testing.T) {
 	t.Parallel()
-	calls := make(chan string, 3)
-	failures := 2
+	signatures := make(chan string, 2)
+	failing := true
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls <- r.Header.Get("X-Provider-Signature")
-		if failures > 0 {
-			failures--
+		signatures <- r.Header.Get("X-Provider-Signature")
+		if failing {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(server.Close)
-	notify := mockprovider.NewWebhook(server.URL, "secret", time.Millisecond)
-	notify(mockprovider.Event{Event: "opened", IdempotencyKey: "k", OccurredAt: time.Now()})
-	for range 3 {
-		select {
-		case signature := <-calls:
-			if len(signature) != 64 {
-				t.Fatalf("signature: %q", signature)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("the webhook stopped retrying")
-		}
+	notify := mockprovider.NewWebhook(server.URL, "secret")
+	event := mockprovider.Event{Event: "opened", IdempotencyKey: "k", OccurredAt: time.Now()}
+	if err := notify(event); err == nil {
+		t.Fatal("a 503 is worth trying again")
+	}
+	failing = false
+	if err := notify(event); err != nil {
+		t.Fatalf("answered: %v", err)
+	}
+	if first, second := <-signatures, <-signatures; len(first) != 64 || first != second {
+		t.Fatalf("signatures: %q %q", first, second)
 	}
 }
 
-func TestWebhookDoesNotRetryAnswerThatWillNotChange(t *testing.T) {
+func TestWebhookDoesNotRetryAnAnswerThatWillNotChange(t *testing.T) {
 	t.Parallel()
-	calls := make(chan struct{}, 5)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls <- struct{}{}
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(server.Close)
-	mockprovider.NewWebhook(server.URL, "secret", time.Millisecond)(mockprovider.Event{Event: "opened", OccurredAt: time.Now()})
-	<-calls
-	select {
-	case <-calls:
-		t.Fatal("a 404 must not be retried")
-	case <-time.After(100 * time.Millisecond):
+	if err := mockprovider.NewWebhook(server.URL, "secret")(mockprovider.Event{Event: "opened", OccurredAt: time.Now()}); err != nil {
+		t.Fatalf("a 404 must not be retried: %v", err)
 	}
 }
 
@@ -335,7 +332,10 @@ func getJSON(t *testing.T, url string, into any) {
 // reports collects arrival reports, which come from their own goroutines.
 func reports(behavior *mockprovider.Behavior) <-chan mockprovider.Event {
 	events := make(chan mockprovider.Event, 8)
-	behavior.OnEvent = func(event mockprovider.Event) { events <- event }
+	behavior.OnEvent = func(event mockprovider.Event) error {
+		events <- event
+		return nil
+	}
 	return events
 }
 

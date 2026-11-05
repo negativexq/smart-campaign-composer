@@ -45,8 +45,8 @@ type InboxPage struct {
 	Dropped  int            `json:"dropped"`
 }
 
-// inbox keeps recent messages in memory so a person can read what was sent. It is
-// a test tool: restarting the provider empties it. The Server's mutex guards it.
+// inbox keeps recent messages so a person can read what was sent. The journal brings it
+// back after a restart. The Server's mutex guards it.
 type inbox struct {
 	size     int
 	messages []*InboxMessage
@@ -54,12 +54,15 @@ type inbox struct {
 	dropped  int
 }
 
-func (b *inbox) add(key, id string, message request) {
-	entry := &InboxMessage{
+func newInboxMessage(id string, message request) *InboxMessage {
+	return &InboxMessage{
 		ID: id, Channel: message.Channel, To: message.To, Subject: message.Subject, Body: message.Body,
-		HTML: message.HTML, UnsubscribeURL: message.UnsubscribeURL,
-		ReceivedAt: time.Now().UTC(), key: key,
+		HTML: message.HTML, UnsubscribeURL: message.UnsubscribeURL, ReceivedAt: time.Now().UTC(),
 	}
+}
+
+func (b *inbox) add(key string, entry *InboxMessage) {
+	entry.key = key
 	b.messages = append(b.messages, entry)
 	b.byKey[key] = entry
 	if len(b.messages) > b.size {
@@ -67,6 +70,12 @@ func (b *inbox) add(key, id string, message request) {
 		b.messages = slices.Delete(b.messages, 0, 1)
 		b.dropped++
 	}
+}
+
+func (b *inbox) clear() {
+	b.messages = nil
+	b.byKey = map[string]*InboxMessage{}
+	b.dropped = 0
 }
 
 func (b *inbox) repeat(key string) {
@@ -109,34 +118,32 @@ func (s *Server) Inbox(channel, search string, limit int) InboxPage {
 func (s *Server) ClearInbox() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.inbox.messages = nil
-	s.inbox.byKey = map[string]*InboxMessage{}
-	s.inbox.dropped = 0
+	s.inbox.clear()
+	s.save(record{Kind: recordCleared}, true)
 }
 
 // Open marks a message as opened and reports it the first time. It says whether
 // the message exists.
 func (s *Server) Open(id string) bool {
 	s.mu.Lock()
-	var event *Event
-	found := false
+	defer s.mu.Unlock()
 	for _, entry := range s.inbox.messages {
 		if entry.ID != id {
 			continue
 		}
-		found = true
 		if entry.OpenedAt == nil {
 			now := time.Now().UTC()
 			entry.OpenedAt = &now
-			event = &Event{Event: eventOpened, Channel: entry.Channel, MessageID: entry.ID, IdempotencyKey: entry.key, OccurredAt: now}
+			var reports []Event
+			if s.behavior.OnEvent != nil {
+				reports = []Event{{Event: eventOpened, Channel: entry.Channel, MessageID: entry.ID, IdempotencyKey: entry.key, OccurredAt: now}}
+			}
+			s.save(record{Kind: recordOpened, Key: entry.key, At: &now, Reports: reports}, true)
+			s.owe(reports)
 		}
-		break
+		return true
 	}
-	s.mu.Unlock()
-	if event != nil && s.behavior.OnEvent != nil {
-		s.behavior.OnEvent(*event)
-	}
-	return found
+	return false
 }
 
 func (s *Server) registerInbox(mux *http.ServeMux) {
