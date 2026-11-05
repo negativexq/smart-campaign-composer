@@ -242,6 +242,7 @@ Each step is measured with the same scenario as the baseline and compared with i
 | 0 | Baseline: instrumentation and this profile | — | 26 campaigns, 200 RPS target: 44.9 successful RPS, 3.5% errors |
 | 1 | Shared memory for PostgreSQL; approved audience read from the snapshot; channel use counted in one pass and reused for 5 s; delivery filters join only what they read; progress counted from an index | 1, 2, 3, 8, 9 | 200 RPS target: 200 RPS with a 7–10 ms median and no errors, against 77–82 RPS with a 7 s median for the baseline code on the same data |
 | 2 | The report reads a campaign's events and calls once instead of once per delivery; index on `delivery_events (campaign_id)` | — (found in step 1) | Report with one client: 109 ms median instead of 287 ms, 9.0 instead of 3.4 requests/s |
+| 3 | The mock provider stamps a call when it comes in, under a lock of its own | 4 | No call passed 100/s at the provider in 24 channel runs; the old measurement showed 102, 104 and 117 in the same runs |
 
 ### Step 1: the read path
 
@@ -289,3 +290,19 @@ Same data and method as step 1, with the step 1 image against the step 2 image. 
 | Mix at 200 RPS and 1 report/s | 199.5–199.6 RPS, median 10.0–10.2 ms, p95 19–20 ms | 200.3–200.4 RPS, median 11.8–13.7 ms, p95 24–27 ms |
 
 The mix was already served in full after step 1, so the report change does not show there. Its median and p95 came out a few milliseconds higher in step 2; two runs of 40 s cannot tell whether that is noise. The remaining report time is spread over several queries that each read the whole campaign: lifecycle about 79 ms, provider problems and engagement about 36 ms each.
+
+### Step 3: calls above 100/s
+
+The code left two candidates for the overruns: the limiter, or the mock provider's measurement. The mock recorded a call only after reading its body, and under the lock that `accept` holds while it writes to disk and calls `fsync`. Calls that waited for that lock were counted as arriving together.
+
+The mock now takes the time when the handler starts and records it under a lock of its own, placing each call by that time, because calls can be recorded slightly out of order.
+
+To tell the candidates apart, a temporary build of the mock recorded both peaks in the same runs: the new one, by arrival time, and the old one, taken under the shared lock. 12 runs on the step 1 data, each sending 15,411 messages over two channels: 6 with default faults and 1 worker, 3 with default faults and 3 workers, and 3 with 5xx only.
+
+| Measurement | Channel runs above 100/s | Highest |
+|---|---|---|
+| By arrival time, under its own lock | 0 of 24 | 100 |
+| After the body, under the shared lock | 3 of 24 | 102, 104, 117 |
+
+The overruns came from the measurement, not from the limiter: in the same runs the calls reached the provider at no more than 100 a second. All three were in runs with 5xx answers or 3 workers, as in the baseline. The limit noted in [`DECISIONS.md`](../DECISIONS.md) still holds: if one group of calls is held up on the way by 150 ms or more and the next is not, the provider can see more than 100 in a second. These runs did not produce such a delay.
+
