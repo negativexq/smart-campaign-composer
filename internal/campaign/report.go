@@ -162,18 +162,34 @@ const arrivalLateral = `LEFT JOIN LATERAL (
 		FROM delivery_events WHERE delivery_id = d.id
 	) arrival ON true`
 
+// campaignArrivals reads the arrival of every delivery in campaign $1 at once. A
+// report counts every delivery, so reading the events once and joining them is far
+// cheaper than arrivalLateral's lookup per delivery.
+const campaignArrivals = `arrival AS (
+		SELECT delivery_id,
+		       max(occurred_at) FILTER (WHERE event_type = 'bounced') AS bounced_at,
+		       CASE WHEN count(*) FILTER (WHERE event_type = 'bounced') = 0
+		            THEN min(occurred_at) FILTER (WHERE event_type IN ('delivered', 'opened')) END AS delivered_at,
+		       bool_or(event_type = 'opened') AS opened
+		FROM delivery_events WHERE campaign_id = $1
+		GROUP BY delivery_id
+	)`
+
 func (s *Service) reportLifecycle(ctx context.Context, id string) ([]ReportLifecycle, error) {
 	rows, err := s.db.Query(ctx, `
+		WITH `+campaignArrivals+`,
+		called AS (SELECT DISTINCT delivery_id FROM delivery_attempts WHERE campaign_id = $1)
 		SELECT d.channel, count(*),
 		       count(*) FILTER (WHERE d.status <> 'SKIPPED'),
-		       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM delivery_attempts a WHERE a.delivery_id = d.id)),
+		       count(called.delivery_id),
 		       count(*) FILTER (WHERE d.status = 'SENT'),
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NOT NULL),
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.bounced_at IS NOT NULL),
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL),
 		       count(*) FILTER (WHERE d.status = 'UNKNOWN' AND arrival.delivered_at IS NOT NULL)
 		FROM campaign_deliveries d
-		`+arrivalLateral+`
+		LEFT JOIN arrival ON arrival.delivery_id = d.id
+		LEFT JOIN called ON called.delivery_id = d.id
 		WHERE d.campaign_id = $1
 		GROUP BY d.channel
 		ORDER BY d.channel DESC`, id)
@@ -189,15 +205,15 @@ func (s *Service) reportLifecycle(ctx context.Context, id string) ([]ReportLifec
 
 func (s *Service) reportVariants(ctx context.Context, id string) ([]ReportVariant, error) {
 	rows, err := s.db.Query(ctx, `
+		WITH `+campaignArrivals+`
 		SELECT d.variant, d.channel, count(*),
 		       count(*) FILTER (WHERE d.status = 'SENT'),
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NOT NULL),
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.bounced_at IS NOT NULL),
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL),
-		       count(*) FILTER (WHERE d.status = 'SENT' AND EXISTS (
-		           SELECT 1 FROM delivery_events e WHERE e.delivery_id = d.id AND e.event_type = 'opened'))
+		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.opened)
 		FROM campaign_deliveries d
-		`+arrivalLateral+`
+		LEFT JOIN arrival ON arrival.delivery_id = d.id
 		WHERE d.campaign_id = $1 AND d.variant IS NOT NULL
 		GROUP BY d.variant, d.channel
 		ORDER BY d.channel DESC, d.variant`, id)

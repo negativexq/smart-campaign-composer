@@ -1201,18 +1201,24 @@ func TestEachPersonStaysOnOneSideOfATest(t *testing.T) {
 	if _, err := h.pool.Exec(ctx, `UPDATE campaign_deliveries SET status = 'SENT' WHERE id = $1`, only[0].ID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := h.pool.Exec(ctx, `INSERT INTO delivery_events (delivery_id, campaign_id, event_type, occurred_at) VALUES ($1, $2, 'opened', now())`, only[0].ID, id); err != nil {
+		t.Fatal(err)
+	}
 	report, err := h.service.Report(ctx, id)
 	if err != nil {
 		t.Fatalf("report: %v", err)
 	}
-	accepted, planned := 0, 0
+	accepted, delivered, opened, planned := 0, 0, 0, 0
 	for _, row := range report.Variants {
 		planned += row.Planned
+		opened += row.Opened
 		if row.Variant == picked && row.Channel == only[0].Channel {
 			accepted += row.Accepted
+			delivered += row.Delivered
 		}
 	}
-	if accepted != 1 || planned == 0 {
+	// An open proves the message arrived.
+	if accepted != 1 || delivered != 1 || opened != 1 || planned == 0 {
 		t.Fatalf("report: %+v", report.Variants)
 	}
 }
