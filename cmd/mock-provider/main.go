@@ -68,6 +68,7 @@ func behaviorFromEnv() mockprovider.Behavior {
 		"MOCK_SERVER_ERROR_RATE":  &behavior.ServerErrorRate,
 		"MOCK_LOST_RESPONSE_RATE": &behavior.LostResponseRate,
 		"MOCK_BOUNCE_RATE":        &behavior.BounceRate,
+		"MOCK_SLOW_RATE":          &behavior.SlowRate,
 	} {
 		value := os.Getenv(name)
 		if value == "" {
@@ -83,6 +84,8 @@ func behaviorFromEnv() mockprovider.Behavior {
 	for name, target := range map[string]*time.Duration{
 		"MOCK_MIN_DELAY_MS": &behavior.MinDelay,
 		"MOCK_MAX_DELAY_MS": &behavior.MaxDelay,
+		"MOCK_SLOW_MIN_MS":  &behavior.SlowMinDelay,
+		"MOCK_SLOW_MAX_MS":  &behavior.SlowMaxDelay,
 	} {
 		value := os.Getenv(name)
 		if value == "" {

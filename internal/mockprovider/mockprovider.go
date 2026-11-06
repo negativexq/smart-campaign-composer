@@ -42,6 +42,12 @@ type Behavior struct {
 	RetryAfterSecs int
 	MinDelay       time.Duration
 	MaxDelay       time.Duration
+	// SlowRate is the share of calls that take between SlowMinDelay and SlowMaxDelay
+	// instead. A slow call goes on after its caller gives up, and the message is
+	// still accepted, as a real provider would do with a request it already has.
+	SlowRate     float64
+	SlowMinDelay time.Duration
+	SlowMaxDelay time.Duration
 	// ReportMinDelay and ReportMaxDelay are how long an arrival report takes.
 	ReportMinDelay time.Duration
 	ReportMaxDelay time.Duration
@@ -74,12 +80,14 @@ func DefaultBehavior() Behavior {
 
 // ChannelStats is what one channel received.
 type ChannelStats struct {
-	Accepted      int `json:"accepted"`
-	Duplicates    int `json:"duplicates"`
-	Rejected      int `json:"rejected"`
-	RateLimited   int `json:"rate_limited"`
-	ServerErrors  int `json:"server_errors"`
-	Unauthorized  int `json:"unauthorized"`
+	Accepted     int `json:"accepted"`
+	Duplicates   int `json:"duplicates"`
+	Rejected     int `json:"rejected"`
+	RateLimited  int `json:"rate_limited"`
+	ServerErrors int `json:"server_errors"`
+	Unauthorized int `json:"unauthorized"`
+	// Late counts slow calls that were still going when their caller gave up.
+	Late          int `json:"late"`
 	PeakPerSecond int `json:"peak_per_second"`
 	// PeakAt is when the busiest one-second window ended.
 	PeakAt *time.Time `json:"peak_at,omitempty"`
@@ -239,10 +247,14 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, delaying := otel.Tracer("mock-provider").Start(ctx, "provider.delay")
-	delivered := s.pause(r.Context())
+	slow := s.behavior.SlowRate > 0 && rand.Float64() < s.behavior.SlowRate
+	delivered := s.pause(r.Context(), slow)
 	delaying.End()
 	if !delivered {
 		return
+	}
+	if slow && r.Context().Err() != nil {
+		s.count(message.Channel, func(stats *ChannelStats) { stats.Late++ })
 	}
 
 	roll := s.behavior.Roll()
@@ -280,9 +292,15 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, map[string]any{"id": id, "duplicate": duplicate})
 }
 
-func (s *Server) pause(ctx context.Context) bool {
-	delay := s.behavior.MinDelay
-	if spread := s.behavior.MaxDelay - s.behavior.MinDelay; spread > 0 {
+// pause waits as long as the call takes. A normal call stops waiting when its caller
+// gives up; a slow one does not.
+func (s *Server) pause(ctx context.Context, slow bool) bool {
+	low, high := s.behavior.MinDelay, s.behavior.MaxDelay
+	if slow {
+		low, high, ctx = s.behavior.SlowMinDelay, s.behavior.SlowMaxDelay, context.WithoutCancel(ctx)
+	}
+	delay := low
+	if spread := high - low; spread > 0 {
 		delay += rand.N(spread)
 	}
 	if delay <= 0 {

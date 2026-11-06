@@ -219,17 +219,50 @@ func Status(t testing.TB, campaign string) string {
 	return Decode[struct{ Status string }](t, API(t, http.MethodGet, "/api/campaigns/"+campaign, nil, http.StatusOK)).Status
 }
 
-// WaitFinished waits until the campaign completes and returns its final status.
+// StatusErr reads the campaign's status, returning an error instead of failing the
+// test, for the moments the API cannot answer.
+func StatusErr(campaign string) (string, error) {
+	request, err := http.NewRequest(http.MethodGet, APIURL()+"/api/campaigns/"+campaign, nil)
+	if err != nil {
+		return "", err
+	}
+	request.AddCookie(Session)
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(response.Body)
+	if err != nil {
+		return "", err
+	}
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("status %d: %.200s", response.StatusCode, data)
+	}
+	var campaignStatus struct{ Status string }
+	if err := json.Unmarshal(data, &campaignStatus); err != nil {
+		return "", err
+	}
+	return campaignStatus.Status, nil
+}
+
+// WaitFinished waits until the campaign completes and returns its final status. An
+// API that cannot answer for a while, as when the database is down, is waited out.
 func WaitFinished(t testing.TB, campaign string, timeout time.Duration) string {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
+	status, last := "", error(nil)
 	for {
-		status := Status(t, campaign)
+		got, err := StatusErr(campaign)
+		if err == nil {
+			status = got
+		}
+		last = err
 		if strings.HasPrefix(status, "COMPLETED") {
 			return status
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("campaign still %s after %s", status, timeout)
+			t.Fatalf("campaign still %s after %s (last error: %v)", status, timeout, last)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -242,6 +275,7 @@ type ProviderStats struct {
 	RateLimited   int `json:"rate_limited"`
 	ServerErrors  int `json:"server_errors"`
 	Unauthorized  int `json:"unauthorized"`
+	Late          int `json:"late"`
 	PeakPerSecond int `json:"peak_per_second"`
 	// PeakAt is when the busiest one-second window ended.
 	PeakAt *time.Time `json:"peak_at,omitempty"`

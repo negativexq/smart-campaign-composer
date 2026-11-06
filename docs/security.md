@@ -65,7 +65,6 @@ These were found or already known, and are left as they are for now:
 - **There is no request rate limit on the API.**
 - **Development secrets have defaults in `compose.yaml`**: `UNSUBSCRIBE_SECRET`, `PROVIDER_WEBHOOK_SECRET` and the PostgreSQL password. Any shared or public deployment has to set its own.
 - **Published ports listen on every interface.** On a shared network, the API, worker and mock provider ports are reachable from other machines.
-- **The mock provider keeps idempotency records in memory.** A provider restart between a lost response and its retry could accept a message twice. A real provider is expected to keep them.
 - **Dockerfiles have no `HEALTHCHECK`** (trivy `DS-0026`). Compose defines the health checks instead.
 
 ## Running the checks

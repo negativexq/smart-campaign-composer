@@ -35,7 +35,7 @@ const (
 type faults map[string]string
 
 func healthy() faults {
-	return faults{"VERIFY_429": "0", "VERIFY_5XX": "0", "VERIFY_LOST": "0", "VERIFY_401": ""}
+	return faults{"VERIFY_429": "0", "VERIFY_5XX": "0", "VERIFY_LOST": "0", "VERIFY_401": "", "VERIFY_SLOW": "0", "VERIFY_SLOW_MIN_MS": "0", "VERIFY_SLOW_MAX_MS": "0"}
 }
 
 func with(name, value string) faults {
@@ -109,6 +109,9 @@ type scenario struct {
 	// wantEvents are audit events that must appear, as "type channel alert";
 	// channel and alert may be empty.
 	wantEvents []string
+	// wantLate needs slow calls that outlasted the worker's wait, or the scenario
+	// tested nothing.
+	wantLate bool
 }
 
 func scenarios() []scenario {
@@ -134,6 +137,16 @@ func scenarios() []scenario {
 		{
 			name: "sms401-redis-lost", faults: with("VERIFY_401", "sms"), event: loseRedisAt(60*time.Second, fixProviderAt(150*time.Second)), restartsProvider: true,
 			wantEvents: []string{"campaign.alert_opened sms credentials_refused", "campaign.alert_closed sms credentials_refused"},
+		},
+		{name: "postgres-down-20s", faults: healthy(), event: postgresDown(25*time.Second, 20*time.Second)},
+		{name: "graceful-restart", faults: healthy(), event: restartGracefully(20 * time.Second)},
+		{
+			name: "slow-3pct", wantLate: true,
+			faults: func() faults {
+				f := healthy()
+				f["VERIFY_SLOW"], f["VERIFY_SLOW_MIN_MS"], f["VERIFY_SLOW_MAX_MS"] = "0.03", "3000", "8000"
+				return f
+			}(),
 		},
 		{
 			name: "both401-paused", faults: with("VERIFY_401", "sms,email"), event: resumeWhenPaused, restartsProvider: true,
@@ -242,7 +255,7 @@ func check(s scenario, res result) []string {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 	if res.EventError != "" {
-		add("the event did not happen as planned: %s", res.EventError)
+		add("the event failed or did not happen as planned: %s", res.EventError)
 	}
 	if !strings.HasPrefix(res.Status, "COMPLETED") {
 		add("the campaign ended %s", res.Status)
@@ -273,6 +286,9 @@ func check(s scenario, res result) []string {
 		add("the provider was meant to restart but its counters from before were not kept")
 	}
 	peak, accepted := providerTotals(res)
+	if s.wantLate && late(res) == 0 {
+		add("no slow call outlasted the worker's wait")
+	}
 	for channel, statuses := range res.Final {
 		if peak[channel].calls > rateLimit {
 			add("%s reached %d calls in one second at the provider, over %d, %s into the run", channel, peak[channel].calls, rateLimit, peak[channel].into(res.Started))
@@ -320,6 +336,17 @@ func providerTotals(res result) (peak map[string]busiest, accepted map[string]in
 		}
 	}
 	return peak, accepted
+}
+
+// late counts the slow calls that outlasted the worker's wait, across restarts.
+func late(res result) int {
+	n := 0
+	for _, part := range append(slices.Clone(res.ProviderEarlier), res.Provider) {
+		for _, stats := range part {
+			n += stats.Late
+		}
+	}
+	return n
 }
 
 // matches compares an event with a wanted one, where an empty channel or alert in
@@ -418,6 +445,77 @@ func crashWorker(offset time.Duration) event {
 			time.Sleep(4 * time.Second)
 		}
 		return fmt.Errorf("no kill left a message mid-send")
+	}
+}
+
+// postgresDown kills PostgreSQL, keeps it down for a while and starts it again: it
+// recovers from its log as after a crash. Messages mid-send while it is gone must
+// still end once, and only once.
+func postgresDown(offset, length time.Duration) event {
+	return func(ctx context.Context, r *run) error {
+		if err := r.sleepUntil(ctx, offset); err != nil {
+			return err
+		}
+		postgres := stack.Container("postgres")
+		if _, err := stack.DockerErr("kill", postgres); err != nil {
+			return err
+		}
+		r.note("postgres_killed_at", r.at())
+		time.Sleep(length)
+		if _, err := stack.DockerErr("start", postgres); err != nil {
+			return err
+		}
+		for range 150 {
+			if _, err := stack.DockerErr("exec", postgres, "pg_isready", "-U", "scc"); err == nil {
+				r.note("postgres_back_at", r.at())
+				return nil
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		return fmt.Errorf("postgres did not come back")
+	}
+}
+
+// restartGracefully stops the worker the way a deploy does, with SIGTERM and the
+// grace period compose gives it, then restarts the API too. The worker must finish
+// what it started and exit by itself: no message may be left mid-send, and it must
+// not need killing.
+func restartGracefully(offset time.Duration) event {
+	return func(ctx context.Context, r *run) error {
+		if err := r.sleepUntil(ctx, offset); err != nil {
+			return err
+		}
+		worker := stack.Container("worker")
+		stopping := time.Now()
+		if _, err := stack.DockerErr("stop", "-t", "30", worker); err != nil {
+			return err
+		}
+		r.note("worker_stop_seconds", seconds(time.Since(stopping)))
+		code, err := stack.DockerErr("inspect", "-f", "{{.State.ExitCode}}", worker)
+		if err != nil {
+			return err
+		}
+		r.note("worker_exit_code", code)
+		midSend, err := stack.DockerErr("exec", stack.Container("postgres"), "psql", "-U", "scc", "-d", "scc", "-At", "-c",
+			fmt.Sprintf(`SELECT count(*) FROM campaign_deliveries WHERE campaign_id = '%s' AND status = 'SENDING'`, r.campaign))
+		if err != nil {
+			return err
+		}
+		r.note("left_mid_send", midSend)
+		if _, err := stack.DockerErr("start", worker); err != nil {
+			return err
+		}
+		if _, err := stack.DockerErr("restart", "-t", "30", stack.Container("api")); err != nil {
+			return err
+		}
+		r.note("api_restarted_at", r.at())
+		switch {
+		case code != "0":
+			return fmt.Errorf("the worker exited with %s instead of stopping by itself", code)
+		case midSend != "0":
+			return fmt.Errorf("the worker stopped with %s messages mid-send", midSend)
+		}
+		return nil
 	}
 }
 

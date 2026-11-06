@@ -58,6 +58,7 @@ func TestTheChecks(t *testing.T) {
 		{"no messages", plain, func(r *result) { r.Final = map[string]map[string]int{} }, "no messages"},
 		{"a missing event", scenario{name: "paused", wantEvents: []string{"campaign.paused  "}}, func(r *result) {}, `no "campaign.paused  " event`},
 		{"an event that did not happen", plain, func(r *result) { r.EventError = "finished first" }, "did not happen as planned"},
+		{"no late calls where they were wanted", scenario{name: "slow", wantLate: true}, func(r *result) {}, "no slow call outlasted"},
 	}
 	for _, c := range cases {
 		r := good()

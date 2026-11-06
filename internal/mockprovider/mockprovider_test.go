@@ -145,3 +145,26 @@ func TestRefusesTheCredentialsOfAChannelSetToRefuse(t *testing.T) {
 		t.Fatalf("stats: %+v", stats)
 	}
 }
+
+func TestASlowCallIsAcceptedAfterItsCallerGivesUp(t *testing.T) {
+	t.Parallel()
+	behavior := rolling(0.9)
+	behavior.SlowRate, behavior.SlowMinDelay, behavior.SlowMaxDelay = 1, 300*time.Millisecond, 300*time.Millisecond
+	provider, sender := start(t, behavior)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := sender.Send(ctx, sms); err == nil {
+		t.Fatal("the caller got an answer before giving up")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for provider.Stats()["sms"].Accepted == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("the slow call was never accepted: %+v", provider.Stats()["sms"])
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if stats := provider.Stats()["sms"]; stats.Late != 1 {
+		t.Fatalf("stats: %+v", stats)
+	}
+}

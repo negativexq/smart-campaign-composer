@@ -2,6 +2,20 @@
 
 Problems and wrong behaviour that the verification runs found, newest first. Each entry says how it showed up, what caused it and where it stands. Security items still open are listed in [docs/security.md](../../docs/security.md#open-items).
 
+## 2026-11-07
+
+### Checked, nothing wrong found
+
+Three load scenarios were added and run once each ([2026-11-06-2212-load](results/2026-11-06-2212-load.md)). In all three every message ended SENT, none was accepted twice, the provider accepted exactly as many as were sent, and neither channel went over 100 calls a second.
+
+- **PostgreSQL killed for 20 s in the middle of a send** (`postgres-down-20s`). It was killed at 25.4 s and answered again at 48.6 s. The send took 112 s against 87 s without faults, about the time the database was gone. No call ended without an answer and no message was retried.
+- **The worker stopped as a deploy does, then the API restarted** (`graceful-restart`). On SIGTERM the worker exited by itself with code 0 in 0.4 s, well inside its 30 s grace period, and left no message mid-send. The send took 89 s.
+- **3% of calls answered after 3 to 8 s** (`slow-3pct`). The worker stops waiting at 5 s, so 287 calls timed out while the provider still accepted them. Each was retried with its key, and the provider answered all 287 retries as duplicates, so every message was accepted once. The send took 112 s.
+
+### Fixed
+
+- **The docs said the mock provider kept its idempotency keys and inbox in memory.** It has written them to a journal on its own volume since the journal was added, and replays it on start. README.md and docs/security.md now say so, and the open item about a restart accepting a message twice is gone.
+
 ## 2026-11-06
 
 ### Fixed

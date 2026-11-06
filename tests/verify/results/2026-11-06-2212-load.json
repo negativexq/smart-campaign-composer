@@ -1,0 +1,194 @@
+[
+  {
+    "name": "postgres-down-20s",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0",
+      "VERIFY_SLOW": "0",
+      "VERIFY_SLOW_MAX_MS": "0",
+      "VERIFY_SLOW_MIN_MS": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 112.2,
+    "started": "2026-11-07T01:12:22.915466+03:00",
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198
+      },
+      "sms": {
+        "accepted": 7213
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 8198,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "late": 0,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-06T22:12:24.217133714Z"
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "late": 0,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-06T22:12:24.237592256Z"
+      }
+    },
+    "events": null,
+    "notes": {
+      "postgres_back_at": 48.6,
+      "postgres_killed_at": 25.4
+    }
+  },
+  {
+    "name": "graceful-restart",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0",
+      "VERIFY_SLOW": "0",
+      "VERIFY_SLOW_MAX_MS": "0",
+      "VERIFY_SLOW_MIN_MS": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 89.1,
+    "started": "2026-11-07T01:14:26.303724+03:00",
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198
+      },
+      "sms": {
+        "accepted": 7213
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 8198,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "late": 0,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-06T22:14:27.530176258Z"
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "late": 0,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-06T22:14:27.530046716Z"
+      }
+    },
+    "events": null,
+    "notes": {
+      "api_restarted_at": 21,
+      "left_mid_send": "0",
+      "worker_exit_code": "0",
+      "worker_stop_seconds": 0.4
+    }
+  },
+  {
+    "name": "slow-3pct",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0",
+      "VERIFY_SLOW": "0.03",
+      "VERIFY_SLOW_MAX_MS": "8000",
+      "VERIFY_SLOW_MIN_MS": "3000"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 111.9,
+    "started": "2026-11-07T01:16:07.016566+03:00",
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198,
+        "timeout": 173
+      },
+      "sms": {
+        "accepted": 7213,
+        "timeout": 114
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 93,
+      "sms": 96
+    },
+    "provider": {
+      "email": {
+        "accepted": 8198,
+        "duplicates": 173,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "late": 173,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-06T22:16:08.244715096Z"
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 114,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "late": 114,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-06T22:16:08.240786804Z"
+      }
+    },
+    "events": null
+  }
+]
