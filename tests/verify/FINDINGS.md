@@ -28,6 +28,15 @@ Problems and wrong behaviour that the verification runs found, newest first. Eac
 
 ### Behaviour worth knowing, not a bug
 
+- **A forward step of Redis's clock lets a channel go over 100 calls a second. A known limit, not fixed.** The full load run failed one scenario: email reached 102 calls in one second at the provider. Rerunning the Redis scenarios three times gave 109 and 107 in a plain run, 15 s before Redis was touched, on both channels at the same moment. The worker's own record showed 100 each time.
+
+  The limiter counts the last second by Redis's wall clock (`TIME`). Docker Desktop corrects the VM's clock against the Mac's from time to time. A watcher in the VM compared the wall clock with the monotonic clock every 10 ms during eight healthy runs. It saw one step, 70.7 ms forward at 21:04:39.75 UTC. The one run that went over, to 119 on both channels, had its busiest second end at 21:04:40.47, the window containing that step. The other seven runs stayed at 100. A step forward makes the calls of the last moments look older than they are, so the window lets new calls in early. Permits go out in batches, so more calls can fall in those 70 ms than an even rate would put there. A real server stepping its clock would do the same.
+
+  Results: [2026-11-06-1942-load](results/2026-11-06-1942-load.md) (the full run) and [2026-11-06-2103-load](results/2026-11-06-2103-load.md) (the run during the step).
+
+  Why it stays: it is rare and small. Three of about 26 measured sends went over (102, 109, 119), each for one second; every other second stayed at or below 100. Steps come from something setting the clock at once. Docker Desktop does that to its VM; chrony on a Linux server slews small corrections and steps only after boot or when forced. The extra calls are those granted within the step's span, and the provider answers them with 429, which the worker retries without losing or repeating a message. Other Redis limiters leave this to how the clock is run as well: they take the time from Redis to avoid skew between hosts and do not handle steps of Redis's own clock. The two fixes weighed were a 1.1 s window, about 9% of the rate on every send for steps up to 100 ms, and the workers' monotonic clock, which ties all workers to one host. Neither was worth it for this. The full account is in [errors-and-retries.md](../../docs/errors-and-retries.md#when-rediss-clock-steps-forward).
+
+  If a load run goes over 100 by a few calls in one second while the worker's own record shows 100, check the clock before treating it as a limiter fault.
 - **When the provider refuses both channels' credentials, the campaign takes about 10 minutes to pause.** Until then each channel sends one test call every 30 s. In the run, it paused at 616 s. Once resumed with working credentials, it sent every message, at 100 calls a second or below.
 - **After a worker crash, the worker's own record can show more than 100 calls in one second** (109 in one run). The provider counted 100. Messages left mid-send are recorded when they are recovered, so their times bunch up in the record, not at the provider.
 

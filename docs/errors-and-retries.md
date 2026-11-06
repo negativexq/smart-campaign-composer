@@ -109,6 +109,20 @@ The provider received the call before it answered, so however long a call was he
 
 A call that got no answer may still reach the provider later, so it counts for the send timeout plus 2 s, then a second more. If a worker stops in the middle of sending, its calls count that long too: the channel slows for a few seconds and does not go over. A call that never left, because the provider could not be reached, the message could not be rendered or consent was withdrawn, stops counting at once.
 
+### When Redis's clock steps forward
+
+The window is timed by Redis's wall clock (`TIME`), the one clock all workers share. If that clock steps forward, the calls of the last moments look older than they are and leave the window early, so new calls are let in early. Permits go out in batches, so the calls granted within the step's span can land in the same second as the next batch.
+
+**How rare it is.** A step needs something to set the clock at once instead of slewing it. chrony, the usual time service on Linux, slews small corrections gradually and steps the clock only in its first updates after boot or when an operator forces it, so a server run that way should not see this during a send. Docker Desktop does step its VM's clock against the Mac's. In the measurements:
+
+- A watcher compared the VM's wall clock with its monotonic clock every 10 ms. It saw no step in 6 idle minutes, and one step of 70.7 ms during eight healthy sends, about 12 minutes.
+- Of about 26 measured sends, three went over 100: 102, 109 and 119 calls in one second. The 119 fell in the second that held the 70.7 ms step. The other two were not watched, but looked the same: both channels went over at the same moment while the worker's own record showed 100.
+- Every other second of those sends stayed at or below 100.
+
+**How small it is.** The extra calls are the ones granted within the step's span, and they spread over one second only. The window then counts them like any other call, so the second after is back within the limit. The largest measured was 19 extra calls, once. When the provider counts more than its limit, it answers 429 to the extra calls. The worker retries those, and a retry counts against the limit like any other call. No message is lost and none is sent twice, because each call carries its idempotency key.
+
+**What was left out.** Counting each call over 1.1 s would cover steps up to 100 ms, but would cost about 9% of the rate on every send. Taking the time from the workers' monotonic clock would cover any step, but would tie all workers to one host and add its own small error from the delay between reading the clock and reaching Redis. For a rare step that costs a few retried calls, neither was worth it. Run Redis on a host whose clock slews rather than steps, and the provider's 429 remains the last check.
+
 ## Measured behavior
 
 Each scenario below sent the same campaign, 15,411 messages over email and SMS (8,198 and 7,213), on the profiling setup of [performance.md](performance.md#sending-with-the-new-limiter): one worker, the mock provider with the fault named, 100 calls a second per channel. Without faults the same send takes 88 s. Each scenario ran once.

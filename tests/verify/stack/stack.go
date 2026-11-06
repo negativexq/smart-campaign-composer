@@ -243,6 +243,8 @@ type ProviderStats struct {
 	ServerErrors  int `json:"server_errors"`
 	Unauthorized  int `json:"unauthorized"`
 	PeakPerSecond int `json:"peak_per_second"`
+	// PeakAt is when the busiest one-second window ended.
+	PeakAt *time.Time `json:"peak_at,omitempty"`
 }
 
 // Provider reads the mock provider's counters by channel.

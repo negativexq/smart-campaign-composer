@@ -1,0 +1,931 @@
+[
+  {
+    "name": "healthy",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 87.4,
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198
+      },
+      "sms": {
+        "accepted": 7213
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 8198,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "events": null
+  },
+  {
+    "name": "default-faults",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0.02",
+      "VERIFY_5XX": "0.03",
+      "VERIFY_LOST": "0.002"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 156.4,
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198,
+        "rate_limited": 150,
+        "server_error": 257,
+        "timeout": 22
+      },
+      "sms": {
+        "accepted": 7213,
+        "rate_limited": 161,
+        "server_error": 211,
+        "timeout": 16
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 8198,
+        "duplicates": 22,
+        "rate_limited": 150,
+        "server_errors": 257,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 16,
+        "rate_limited": 161,
+        "server_errors": 211,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "events": null
+  },
+  {
+    "name": "429-10pct",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0.10",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 283,
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198,
+        "rate_limited": 947
+      },
+      "sms": {
+        "accepted": 7213,
+        "rate_limited": 790
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 79,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 8198,
+        "duplicates": 0,
+        "rate_limited": 947,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 79
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 0,
+        "rate_limited": 790,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "events": null
+  },
+  {
+    "name": "5xx-30pct",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0.30",
+      "VERIFY_LOST": "0"
+    },
+    "status": "COMPLETED_WITH_FAILURES",
+    "send_seconds": 138.1,
+    "final": {
+      "email": {
+        "FAILED": 18,
+        "SENT": 8180
+      },
+      "sms": {
+        "FAILED": 15,
+        "SENT": 7198
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8180,
+        "server_error": 3470
+      },
+      "sms": {
+        "accepted": 7198,
+        "server_error": 3060
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 8180,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 3470,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      },
+      "sms": {
+        "accepted": 7198,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 3060,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "events": null
+  },
+  {
+    "name": "lost-5pct",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0.05"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 133,
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198,
+        "timeout": 489
+      },
+      "sms": {
+        "accepted": 7213,
+        "timeout": 394
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 98,
+      "sms": 96
+    },
+    "provider": {
+      "email": {
+        "accepted": 8198,
+        "duplicates": 489,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 394,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "events": null
+  },
+  {
+    "name": "outage-40s",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 131.9,
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198
+      },
+      "sms": {
+        "accepted": 7213
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 6321,
+        "duplicates": 1,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      },
+      "sms": {
+        "accepted": 5331,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "provider_before_restarts": [
+      {
+        "email": {
+          "accepted": 1869,
+          "duplicates": 0,
+          "rate_limited": 0,
+          "server_errors": 0,
+          "unauthorized": 0,
+          "peak_per_second": 100
+        },
+        "sms": {
+          "accepted": 1866,
+          "duplicates": 0,
+          "rate_limited": 0,
+          "server_errors": 0,
+          "unauthorized": 0,
+          "peak_per_second": 100
+        }
+      }
+    ],
+    "events": null,
+    "notes": {
+      "down_at": 20.2,
+      "up_at": 60.3
+    }
+  },
+  {
+    "name": "worker-crash",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 88.3,
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198,
+        "timeout": 13
+      },
+      "sms": {
+        "accepted": 7213,
+        "timeout": 14
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 113,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 8198,
+        "duplicates": 3,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 1,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "events": [
+      "campaign.alert_opened sms error_rate",
+      "campaign.alert_opened email error_rate"
+    ],
+    "notes": {
+      "kills": 1,
+      "left_mid_send": "27"
+    }
+  },
+  {
+    "name": "5xx70-then-ok",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0.70",
+      "VERIFY_LOST": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 243,
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198,
+        "server_error": 33
+      },
+      "sms": {
+        "accepted": 7213,
+        "server_error": 70
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 8181,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      },
+      "sms": {
+        "accepted": 7182,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "provider_before_restarts": [
+      {
+        "email": {
+          "accepted": 17,
+          "duplicates": 0,
+          "rate_limited": 0,
+          "server_errors": 33,
+          "unauthorized": 0,
+          "peak_per_second": 32
+        },
+        "sms": {
+          "accepted": 31,
+          "duplicates": 0,
+          "rate_limited": 0,
+          "server_errors": 70,
+          "unauthorized": 0,
+          "peak_per_second": 51
+        }
+      }
+    ],
+    "events": [
+      "campaign.alert_opened sms error_rate",
+      "campaign.alert_opened email error_rate",
+      "campaign.alert_closed sms error_rate",
+      "campaign.alert_closed email error_rate"
+    ],
+    "notes": {
+      "fixed_at": 150
+    }
+  },
+  {
+    "name": "sms401-2workers",
+    "workers": 2,
+    "faults": {
+      "VERIFY_401": "sms",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 317.1,
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198
+      },
+      "sms": {
+        "accepted": 7213,
+        "unauthorized": 69
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 0,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 0
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "provider_before_restarts": [
+      {
+        "email": {
+          "accepted": 8198,
+          "duplicates": 0,
+          "rate_limited": 0,
+          "server_errors": 0,
+          "unauthorized": 0,
+          "peak_per_second": 100
+        },
+        "sms": {
+          "accepted": 0,
+          "duplicates": 0,
+          "rate_limited": 0,
+          "server_errors": 0,
+          "unauthorized": 69,
+          "peak_per_second": 64
+        }
+      }
+    ],
+    "events": [
+      "campaign.alert_opened sms credentials_refused",
+      "campaign.alert_closed sms credentials_refused"
+    ],
+    "notes": {
+      "fixed_at": 180
+    }
+  },
+  {
+    "name": "redis-lost",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 99.1,
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198
+      },
+      "sms": {
+        "accepted": 7213
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 8198,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "events": null,
+    "notes": {
+      "redis_back_at": 33.5,
+      "redis_killed_at": 30
+    }
+  },
+  {
+    "name": "redis-flushed-10x",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 119.2,
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198
+      },
+      "sms": {
+        "accepted": 7213
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 8198,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "events": null,
+    "notes": {
+      "flushed_at": [
+        20,
+        22.1,
+        24,
+        26,
+        28,
+        30,
+        32,
+        34,
+        36,
+        38
+      ]
+    }
+  },
+  {
+    "name": "redis-flushed-10x-2workers",
+    "workers": 2,
+    "faults": {
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 119.2,
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198
+      },
+      "sms": {
+        "accepted": 7213
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 8198,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "events": null,
+    "notes": {
+      "flushed_at": [
+        20,
+        22,
+        24,
+        26,
+        28,
+        30,
+        32,
+        34.1,
+        36.2,
+        38.1
+      ]
+    }
+  },
+  {
+    "name": "sms401-redis-lost",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "sms",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 239.2,
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198
+      },
+      "sms": {
+        "accepted": 7213,
+        "unauthorized": 67
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 0,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 0
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "provider_before_restarts": [
+      {
+        "email": {
+          "accepted": 8198,
+          "duplicates": 0,
+          "rate_limited": 0,
+          "server_errors": 0,
+          "unauthorized": 0,
+          "peak_per_second": 102
+        },
+        "sms": {
+          "accepted": 0,
+          "duplicates": 0,
+          "rate_limited": 0,
+          "server_errors": 0,
+          "unauthorized": 67,
+          "peak_per_second": 32
+        }
+      }
+    ],
+    "events": [
+      "campaign.alert_opened sms credentials_refused",
+      "campaign.alert_closed sms credentials_refused"
+    ],
+    "notes": {
+      "fixed_at": 150,
+      "redis_back_at": 63.3,
+      "redis_killed_at": 60
+    },
+    "problems": [
+      "email reached 102 calls in one second at the provider, over 100"
+    ]
+  },
+  {
+    "name": "both401-paused",
+    "workers": 1,
+    "faults": {
+      "VERIFY_401": "sms,email",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 748,
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198,
+        "unauthorized": 52
+      },
+      "sms": {
+        "accepted": 7213,
+        "unauthorized": 52
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 8198,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "peak_per_second": 100
+      }
+    },
+    "provider_before_restarts": [
+      {
+        "email": {
+          "accepted": 0,
+          "duplicates": 0,
+          "rate_limited": 0,
+          "server_errors": 0,
+          "unauthorized": 52,
+          "peak_per_second": 32
+        },
+        "sms": {
+          "accepted": 0,
+          "duplicates": 0,
+          "rate_limited": 0,
+          "server_errors": 0,
+          "unauthorized": 52,
+          "peak_per_second": 32
+        }
+      }
+    ],
+    "events": [
+      "campaign.alert_opened sms credentials_refused",
+      "campaign.alert_opened email credentials_refused",
+      "campaign.paused  ",
+      "campaign.resumed  ",
+      "campaign.alert_closed sms credentials_refused",
+      "campaign.alert_closed email credentials_refused"
+    ],
+    "notes": {
+      "paused_at": 624.4,
+      "resumed_at": 628.6
+    }
+  }
+]

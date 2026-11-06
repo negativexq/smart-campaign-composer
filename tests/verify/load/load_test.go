@@ -149,6 +149,7 @@ type result struct {
 	Faults        faults                         `json:"faults"`
 	Status        string                         `json:"status"`
 	SendSeconds   float64                        `json:"send_seconds"`
+	Started       time.Time                      `json:"started"`
 	Final         map[string]map[string]int      `json:"final"`
 	Outcomes      map[string]map[string]int      `json:"outcomes"`
 	AcceptedTwice int                            `json:"accepted_twice"`
@@ -177,7 +178,8 @@ func TestScenarios(t *testing.T) {
 				t.Error(problem)
 			}
 			peak, _ := providerTotals(res)
-			t.Logf("%s: %s in %.1f s, peak at the provider %v, accepted twice %d", s.name, res.Status, res.SendSeconds, peak, res.AcceptedTwice)
+			t.Logf("%s: %s in %.1f s, peak at the provider email %d at %s, sms %d at %s, accepted twice %d", s.name, res.Status, res.SendSeconds,
+				peak["email"].calls, peak["email"].into(res.Started), peak["sms"].calls, peak["sms"].into(res.Started), res.AcceptedTwice)
 			results = append(results, res)
 		})
 	}
@@ -207,7 +209,7 @@ func runScenario(t *testing.T, s scenario) result {
 	eventErr := <-eventDone
 
 	res := result{
-		Name: s.name, Workers: workers, Faults: s.faults, Status: status, SendSeconds: seconds(sent),
+		Name: s.name, Workers: workers, Faults: s.faults, Status: status, SendSeconds: seconds(sent), Started: r.started,
 		Final:           counts(t, `SELECT channel, status, count(*) FROM campaign_deliveries WHERE campaign_id = '%s' AND status <> 'SKIPPED' GROUP BY 1, 2`, campaign),
 		Outcomes:        counts(t, `SELECT channel, outcome, count(*) FROM delivery_attempts WHERE campaign_id = '%s' GROUP BY 1, 2`, campaign),
 		Provider:        stack.Provider(t),
@@ -272,8 +274,8 @@ func check(s scenario, res result) []string {
 	}
 	peak, accepted := providerTotals(res)
 	for channel, statuses := range res.Final {
-		if peak[channel] > rateLimit {
-			add("%s reached %d calls in one second at the provider, over %d", channel, peak[channel], rateLimit)
+		if peak[channel].calls > rateLimit {
+			add("%s reached %d calls in one second at the provider, over %d, %s into the run", channel, peak[channel].calls, rateLimit, peak[channel].into(res.Started))
 		}
 		// Each message the campaign counts as sent was accepted by the provider once.
 		// Across a restart, calls between the last read and the stop go uncounted, so
@@ -291,13 +293,29 @@ func check(s scenario, res result) []string {
 	return problems
 }
 
+// busiest is a channel's highest one-second count at the provider and when it was.
+type busiest struct {
+	calls int
+	at    *time.Time
+}
+
+// into says how far into the run the busiest second ended.
+func (b busiest) into(started time.Time) string {
+	if b.at == nil || started.IsZero() {
+		return "at an unknown time"
+	}
+	return fmt.Sprintf("%.1f s", b.at.Sub(started).Seconds())
+}
+
 // providerTotals adds up the provider's counters across its restarts: the highest
 // one-second peak and every message it accepted.
-func providerTotals(res result) (peak, accepted map[string]int) {
-	peak, accepted = map[string]int{}, map[string]int{}
+func providerTotals(res result) (peak map[string]busiest, accepted map[string]int) {
+	peak, accepted = map[string]busiest{}, map[string]int{}
 	for _, part := range append(slices.Clone(res.ProviderEarlier), res.Provider) {
 		for channel, stats := range part {
-			peak[channel] = max(peak[channel], stats.PeakPerSecond)
+			if stats.PeakPerSecond > peak[channel].calls {
+				peak[channel] = busiest{stats.PeakPerSecond, stats.PeakAt}
+			}
 			accepted[channel] += stats.Accepted
 		}
 	}
@@ -527,7 +545,7 @@ func report(started time.Time, results []result) string {
 			problems = strings.Join(r.Problems, "; ")
 		}
 		fmt.Fprintf(&b, "| %s | %d | %s | %.1f s | %d | %d | %d | %d / %d | %s | %s |\n", r.Name, r.Workers, r.Status, r.SendSeconds, sent, failed, r.AcceptedTwice,
-			peak["email"], peak["sms"], strings.Join(r.Events, ", "), problems)
+			peak["email"].calls, peak["sms"].calls, strings.Join(r.Events, ", "), problems)
 	}
 	return b.String()
 }

@@ -81,6 +81,8 @@ type ChannelStats struct {
 	ServerErrors  int `json:"server_errors"`
 	Unauthorized  int `json:"unauthorized"`
 	PeakPerSecond int `json:"peak_per_second"`
+	// PeakAt is when the busiest one-second window ended.
+	PeakAt *time.Time `json:"peak_at,omitempty"`
 }
 
 // Server is the provider.
@@ -102,6 +104,7 @@ type Server struct {
 	rate   sync.Mutex
 	recent map[string][]time.Time
 	peaks  map[string]int
+	peakAt map[string]time.Time
 }
 
 // New builds a provider.
@@ -124,6 +127,7 @@ func New(behavior Behavior) *Server {
 		stats:    map[string]*ChannelStats{"sms": {}, "email": {}},
 		recent:   map[string][]time.Time{},
 		peaks:    map[string]int{},
+		peakAt:   map[string]time.Time{},
 		inbox:    inbox{size: behavior.InboxSize, byKey: map[string]*InboxMessage{}},
 	}
 }
@@ -350,7 +354,9 @@ func (s *Server) arrived(channel string, at time.Time) {
 		for recent[end].Sub(recent[first]) >= window {
 			first++
 		}
-		s.peaks[channel] = max(s.peaks[channel], end-first+1)
+		if count := end - first + 1; count > s.peaks[channel] {
+			s.peaks[channel], s.peakAt[channel] = count, recent[end]
+		}
 	}
 	// Keep a second more than a window, for calls recorded late.
 	latest := recent[len(recent)-1]
@@ -395,6 +401,8 @@ func (s *Server) Stats() map[string]ChannelStats {
 	for channel, peak := range s.peaks {
 		stats := copied[channel]
 		stats.PeakPerSecond = peak
+		at := s.peakAt[channel].UTC()
+		stats.PeakAt = &at
 		copied[channel] = stats
 	}
 	return copied
