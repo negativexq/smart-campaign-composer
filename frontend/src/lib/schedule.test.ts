@@ -64,4 +64,13 @@ describe("schedule form", () => {
     expect(suggestedRestDays({ ...form, mode: "interval", every: 6, unit: "hours" })).toBe(1);
     expect(suggestedRestDays({ ...form, mode: "weekly" })).toBe(7);
   });
+
+  it("has a one-time send of a campaign that sent before say whom it reaches", () => {
+    const form = { ...emptyScheduleForm(), mode: "once" as const, at: "2026-12-01T10:00" };
+    expect(buildSchedule(form)).not.toHaveProperty("reach");
+    expect(buildSchedule(form, true)).toMatchObject({ kind: "once", reach: "new" });
+    expect(buildSchedule({ ...form, reach: "after", reachAfterDays: 5 }, true)).toMatchObject({ reach: "after", reach_after_days: 5 });
+    expect(scheduleProblem({ ...form, reach: "after", reachAfterDays: 0 }, true)).not.toBe("");
+    expect(scheduleProblem({ ...form, reach: "after", reachAfterDays: 0 })).toBe("");
+  });
 });

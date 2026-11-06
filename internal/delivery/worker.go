@@ -36,6 +36,9 @@ const (
 	outcomeRateLimited = "rate_limited"
 	outcomeServerError = "server_error"
 	outcomeRejected    = "rejected"
+	// outcomeUnauthorized is a 401: the provider refused the channel's credentials,
+	// which says nothing about the message and holds the whole channel.
+	outcomeUnauthorized = "unauthorized"
 	// outcomeTimeout covers every call that ended without a response: the
 	// provider may have the message, so it can never be called a plain failure.
 	outcomeTimeout = "timeout"
@@ -47,10 +50,13 @@ const (
 	notSentPause       = 5 * time.Second
 	recordTimeout      = 5 * time.Second
 	defaultSendTimeout = 5 * time.Second
-	finishInterval     = time.Second
-	stallInterval      = 30 * time.Second
-	defaultStallAfter  = 10 * time.Minute
-	idlePause          = 200 * time.Millisecond
+	// answerMargin is how much longer than the send timeout a call counts as in flight
+	// before it has an answer: the time between settling its permit and sending it.
+	answerMargin      = 2 * time.Second
+	finishInterval    = time.Second
+	stallInterval     = 30 * time.Second
+	defaultStallAfter = 10 * time.Minute
+	idlePause         = 200 * time.Millisecond
 	// claimGap lets a few slots free up before the next claim, so a busy worker
 	// takes several deliveries per query instead of running one per finished call.
 	claimGap   = 20 * time.Millisecond
@@ -68,9 +74,10 @@ const (
 	stateIdle       = "idle"
 	stateError      = "error"
 
-	pauseSourceRateLimit = "rate_limited"
-	pauseSourceBreaker   = "breaker"
-	pauseSourceNotSent   = "not_sent"
+	pauseSourceRateLimit   = "rate_limited"
+	pauseSourceBreaker     = "breaker"
+	pauseSourceNotSent     = "not_sent"
+	pauseSourceCredentials = "credentials"
 )
 
 // channels is every channel the worker sends on.
@@ -123,6 +130,9 @@ type Permits struct {
 	Granted int
 	Retry   time.Duration
 	Paused  bool
+	// Probe is set on the one permit that tests a channel whose credentials were
+	// refused: the generation of the lock it tests, which only it can open.
+	Probe int64
 	// id names this reservation, so settling it touches only its own permits.
 	id string
 }
@@ -132,9 +142,24 @@ type Limiter interface {
 	// Reserve grants up to want sends. An error means there is no permission to send.
 	Reserve(ctx context.Context, channel string, want int) (Permits, error)
 	// Settle says how many of the permits are about to be used. The rest are given
-	// back, and it answers how many of those used may really go out.
-	Settle(ctx context.Context, channel string, permits Permits, used int) (int, error)
+	// back, and it answers how many of those used may really go out. Those count as
+	// in flight for up to hold, until Answered says each one came back.
+	Settle(ctx context.Context, channel string, permits Permits, used int, hold time.Duration) (int, error)
+	// Answered says one call sent with permits came back at, or never left. A call
+	// that got no answer is not reported: it may still reach the provider, so it
+	// keeps counting for the whole hold.
+	Answered(channel string, permits Permits, at time.Time)
 	Pause(ctx context.Context, channel string, length time.Duration) error
+	// LockCredentials holds the channel for every worker after a 401, apart from one
+	// probe every interval. It says whether this call is what locked it.
+	LockCredentials(ctx context.Context, channel string) (bool, error)
+	// UnlockCredentials opens the channel after its probe got through, only if the
+	// lock that probe tested is still in place. It says whether it opened it.
+	UnlockCredentials(ctx context.Context, channel string, generation int64) (bool, error)
+	// ReleaseProbe hands back a probe that sent nothing.
+	ReleaseProbe(ctx context.Context, channel string, generation int64) error
+	// CredentialsLocked says whether the channel is held after a 401.
+	CredentialsLocked(ctx context.Context, channel string) (bool, error)
 }
 
 // ErrNotSent means the call never reached the provider.
@@ -154,6 +179,8 @@ type Config struct {
 	// StallAfter is how long a campaign may wait on retries with nothing finishing
 	// before it stops and someone is told. Zero leaves it waiting.
 	StallAfter time.Duration
+	// AlertAfter is the span channel alerts look back over. Zero turns them off.
+	AlertAfter time.Duration
 	// AssetBase is the public address the images in emails load from.
 	AssetBase string
 	// Unsubscribe gives the signed link for a person's emails.
@@ -170,6 +197,7 @@ func DefaultConfig() Config {
 		SendTimeout: defaultSendTimeout,
 		Backoff:     ExponentialBackoff,
 		StallAfter:  defaultStallAfter,
+		AlertAfter:  defaultAlertAfter,
 		// Failures as usual stay far below half the calls, and twenty calls keep a
 		// short bad patch from stopping a channel.
 		Breaker: BreakerConfig{Window: 10 * time.Second, MinCalls: 20, FailureRatio: 0.5, FirstWait: 5 * time.Second, MaxWait: maxPause, Probes: 3},
@@ -304,6 +332,9 @@ func (w *Worker) takeDue(ctx context.Context, channel string, want int) ([]claim
 	w.spent(channel, stateSettle, claimed)
 	w.metrics.LimiterSettleDuration.WithLabelValues(channel).Observe(settled.Sub(claimed).Seconds())
 	breaker.giveBack(allowed - len(claims))
+	if permits.Probe != 0 && len(claims) == 0 {
+		w.releaseProbe(ctx, channel, permits.Probe)
+	}
 	var link trace.SpanContext
 	if len(claims) > 0 {
 		link = w.traceTake(ctx, channel, len(claims), reserving, granted, settled, claimed, timing)
@@ -312,6 +343,7 @@ func (w *Worker) takeDue(ctx context.Context, channel string, want int) ([]claim
 		claims[i].probe = probing
 		claims[i].granted = granted
 		claims[i].take = link
+		claims[i].permits = permits
 	}
 	switch {
 	case err != nil:
@@ -353,7 +385,7 @@ func (w *Worker) traceTake(ctx context.Context, channel string, claimed int, res
 func (w *Worker) settle(ctx context.Context, channel string, permits Permits, claims []claim) []claim {
 	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
 	defer cancel()
-	confirmed, err := w.limiter.Settle(settleCtx, channel, permits, len(claims))
+	confirmed, err := w.limiter.Settle(settleCtx, channel, permits, len(claims), w.config.SendTimeout+answerMargin)
 	if err != nil {
 		slog.WarnContext(ctx, "settle permits", "channel", channel, "error", err)
 		confirmed = 0
@@ -428,6 +460,9 @@ func (w *Worker) runHousekeeping(ctx context.Context) {
 			if err := w.PauseStalled(ctx); err != nil && ctx.Err() == nil {
 				slog.ErrorContext(ctx, "pause stalled campaigns", "error", err)
 			}
+			if err := w.CheckAlerts(ctx); err != nil && ctx.Err() == nil {
+				slog.ErrorContext(ctx, "check channel alerts", "error", err)
+			}
 		case <-ticker.C:
 			if _, err := w.RecoverExpired(ctx); err != nil && ctx.Err() == nil {
 				slog.ErrorContext(ctx, "recover deliveries", "error", err)
@@ -456,6 +491,8 @@ type claim struct {
 	// claimed it, which is in another trace.
 	granted time.Time
 	take    trace.SpanContext
+	// permits is the reservation this message's permit came from.
+	permits Permits
 }
 
 // claimTiming is when a claim passed each stage, and the part of it spent decoding.
@@ -602,6 +639,7 @@ func (w *Worker) handle(ctx context.Context, item claim) (err error) {
 	}()
 
 	if !item.consented {
+		w.limiter.Answered(item.channel, item.permits, time.Now())
 		w.breakers[item.channel].giveBack(1)
 		span.SetAttributes(attribute.String("delivery.outcome", "consent_withdrawn"))
 		return w.record(ctx, item, update{status: statusSkipped, attempts: item.attempts, reason: "consent_withdrawn"}, nil)
@@ -609,6 +647,7 @@ func (w *Worker) handle(ctx context.Context, item claim) (err error) {
 
 	message, err := item.message(w.unsubscribeURL(item), w.config.AssetBase)
 	if err != nil {
+		w.limiter.Answered(item.channel, item.permits, time.Now())
 		w.breakers[item.channel].giveBack(1)
 		slog.ErrorContext(ctx, "render message", "delivery_id", item.id, "error", err)
 		return w.recordNotSent(ctx, span, item)
@@ -623,8 +662,9 @@ func (w *Worker) handle(ctx context.Context, item claim) (err error) {
 	span.SetAttributes(attribute.String("delivery.outcome", outcome))
 	w.metrics.DeliveryAttempts.WithLabelValues(item.channel, outcome).Inc()
 	switch outcome {
-	case outcomeRateLimited:
-		// "Not now" says nothing about whether the provider is healthy.
+	case outcomeRateLimited, outcomeUnauthorized:
+		// "Not now" and "not you" say nothing about whether the provider is healthy.
+		// A probe given back here is not left waiting for a result that never comes.
 		w.breakers[item.channel].giveBack(1)
 	default:
 		w.noteBreaker(ctx, item.channel, outcome == outcomeServerError || outcome == outcomeTimeout)
@@ -634,6 +674,13 @@ func (w *Worker) handle(ctx context.Context, item claim) (err error) {
 	}
 	if outcome != outcomeAccepted {
 		span.SetStatus(codes.Error, outcome)
+	}
+
+	switch {
+	case outcome == outcomeUnauthorized:
+		w.lockCredentials(ctx, item)
+	case outcome == outcomeAccepted && item.permits.Probe != 0:
+		w.unlockCredentials(ctx, item)
 	}
 
 	next, err := w.nextStep(ctx, item, outcome, result)
@@ -667,6 +714,58 @@ func (w *Worker) noteBreaker(ctx context.Context, channel string, failed bool) {
 	case closed:
 		w.metrics.DeliveryCircuitOpen.WithLabelValues(channel).Set(0)
 		slog.InfoContext(ctx, "provider is back, channel resumes", "channel", channel)
+	}
+}
+
+// lockCredentials holds the channel for every worker after a 401: an expired or
+// revoked key will not fix itself in a few seconds, and every call in the meantime
+// would be refused. The worker that locks it raises the alert at once rather than at
+// the next check, because a healthy channel in the same campaign keeps it moving.
+func (w *Worker) lockCredentials(ctx context.Context, item claim) {
+	lockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+	defer cancel()
+	locked, err := w.limiter.LockCredentials(lockCtx, item.channel)
+	if err != nil {
+		// Without Redis nothing is granted anyway; a pause is the best left to do.
+		slog.ErrorContext(ctx, "lock channel after refused credentials", "channel", item.channel, "error", err)
+		w.pause(ctx, item.channel, maxPause, pauseSourceCredentials)
+		return
+	}
+	if !locked {
+		return
+	}
+	w.metrics.DeliveryCredentialLocks.WithLabelValues(item.channel).Inc()
+	slog.ErrorContext(ctx, "provider refused the channel's credentials, holding the channel", "channel", item.channel)
+	if err := w.checkAlerts(lockCtx, []string{item.channel}); err != nil {
+		slog.ErrorContext(ctx, "raise alert for refused credentials", "channel", item.channel, "error", err)
+	}
+}
+
+// unlockCredentials opens the channel after its probe got through. The message the
+// probe carried is recorded as sent like any other.
+func (w *Worker) unlockCredentials(ctx context.Context, item claim) {
+	unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+	defer cancel()
+	opened, err := w.limiter.UnlockCredentials(unlockCtx, item.channel, item.permits.Probe)
+	if err != nil {
+		// The next probe tries again.
+		slog.ErrorContext(ctx, "open channel after accepted probe", "channel", item.channel, "error", err)
+		return
+	}
+	if !opened {
+		return
+	}
+	slog.InfoContext(ctx, "provider accepted the channel's credentials again, channel resumes", "channel", item.channel)
+	if err := w.checkAlerts(unlockCtx, []string{item.channel}); err != nil {
+		slog.ErrorContext(ctx, "close alert for refused credentials", "channel", item.channel, "error", err)
+	}
+}
+
+func (w *Worker) releaseProbe(ctx context.Context, channel string, generation int64) {
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+	defer cancel()
+	if err := w.limiter.ReleaseProbe(releaseCtx, channel, generation); err != nil {
+		slog.WarnContext(ctx, "release unused probe", "channel", channel, "error", err)
 	}
 }
 
@@ -723,6 +822,10 @@ func (w *Worker) send(ctx context.Context, item claim, message Message) (Result,
 	defer inflight.Dec()
 	start := time.Now()
 	result, err := w.sender.Send(callCtx, message)
+	if err == nil || errors.Is(err, ErrNotSent) {
+		// An answer means the provider has the call; no call left means none to count.
+		w.limiter.Answered(item.channel, item.permits, time.Now())
+	}
 	w.metrics.DeliveryDuration.WithLabelValues(item.channel).Observe(time.Since(start).Seconds())
 	span.SetAttributes(attribute.Int("http.response.status_code", result.StatusCode))
 	return result, err
@@ -745,6 +848,8 @@ func classify(result Result, sendErr error) (string, *int) {
 		return outcomeAccepted, &code
 	case code == http.StatusTooManyRequests:
 		return outcomeRateLimited, &code
+	case code == http.StatusUnauthorized:
+		return outcomeUnauthorized, &code
 	case code >= 500 || code == http.StatusRequestTimeout:
 		return outcomeServerError, &code
 	default:
@@ -777,6 +882,9 @@ func (w *Worker) nextStep(ctx context.Context, item claim, outcome string, resul
 		return update{status: statusRetrying, attempts: item.attempts, retryIn: result.RetryAfter, reason: outcome}, nil
 	case outcomeRejected:
 		return update{status: statusFailed, attempts: used, reason: outcome}, nil
+	case outcomeUnauthorized:
+		// The credentials were refused, not the message: it waits for the channel.
+		return update{status: statusRetrying, attempts: item.attempts, retryIn: notSentPause, reason: outcome}, nil
 	}
 	if item.probe {
 		// A failed probe says the provider is still down, nothing about this message.

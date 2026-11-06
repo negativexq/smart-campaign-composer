@@ -1,3 +1,4 @@
+import type { ChannelAlert } from "../lib/channelAlerts";
 import { EventStreamParser } from "../lib/sse";
 import type { DeliveryQuery } from "../lib/report";
 import { currentUser } from "../lib/session";
@@ -26,7 +27,7 @@ export type ScheduleSpec = {
   time?: string;
   timezone?: string;
   ends_at?: string;
-  /** Whom later runs of a repeating send may message again. */
+  /** Whom later runs may message again: a repeating send's own, or a one-time send after earlier ones. */
   reach?: ScheduleReach;
   reach_after_days?: number;
 };
@@ -46,6 +47,8 @@ export type CampaignSchedule = {
   next_run_at: string | null;
   last_run_at: string | null;
   runs: number;
+  /** Cancelled while it still had sends to come. */
+  stopped?: boolean;
 };
 
 export type Progress = {
@@ -135,7 +138,7 @@ export type CampaignSummary = {
   created_at: string;
   updated_at: string;
   /** The sending rule, when the campaign has one. */
-  schedule?: { description: string; repeats: boolean; next_run_at: string | null } | null;
+  schedule?: { description: string; repeats: boolean; next_run_at: string | null; stopped?: boolean } | null;
   /** The latest send, so a repeating campaign shows its last result. */
   last_run?: RunSummary | null;
   tags?: string[];
@@ -580,6 +583,8 @@ export type TimelineBucket = {
   server_error: number;
   rejected: number;
   timeout: number;
+  /** Calls refused with a 401; absent from servers that predate it. */
+  unauthorized?: number;
 };
 
 export type ReportLifecycle = {
@@ -626,6 +631,8 @@ export async function getDeliveryAttempts(id: string, delivery: string): Promise
 export type LiveState = {
   status: string;
   progress: Progress;
+  /** Channel alerts open on the campaign; absent from servers that predate them. */
+  alerts?: ChannelAlert[];
 };
 
 export type LiveHandlers = {

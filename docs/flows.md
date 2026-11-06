@@ -47,6 +47,8 @@ stateDiagram-v2
     PAUSED --> DISPATCHING: resume
     DISPATCHING --> COMPLETED: all accepted or skipped
     DISPATCHING --> COMPLETED_WITH_FAILURES: some failed or unknown
+    COMPLETED --> SCHEDULED: schedule again
+    COMPLETED_WITH_FAILURES --> SCHEDULED: schedule again
     COMPLETED --> [*]
     COMPLETED_WITH_FAILURES --> [*]
 ```
@@ -55,7 +57,8 @@ stateDiagram-v2
 - A claim on `GENERATING` older than five minutes counts as left behind by a dead process, so a new generation can take it over.
 - Leaving out every language that has messages also returns the campaign to `DRAFT`.
 - A repeating run with nobody new to queue stays in `SCHEDULED`.
-- Cancelling a schedule that has already run lets the campaign finish with what it has sent.
+- Cancelling a schedule after the campaign has sent, by that schedule or before it, lets the campaign finish with what it has sent. The campaign page then shows the rule as stopped.
+- A finished campaign can be scheduled again with its approved messages. Each send is a new run, and the schedule says whom earlier sends leave out, a one-time send included.
 
 ## Proposing an audience
 
@@ -179,7 +182,7 @@ sequenceDiagram
     R-->>W: Granted, or wait
     W->>D: Claim with FOR UPDATE SKIP LOCKED
     Note over W,D: Status SENDING, with a new claim_token<br/>and a one-minute lease
-    W->>R: Settle: return unused permits, count the rest from now
+    W->>R: Settle: return unused permits, count the rest as in flight
     par For each claimed message
         W->>W: Consent is still given? Otherwise SKIPPED
         W->>W: Render the message for this person's language and version
@@ -195,13 +198,14 @@ What the provider's answer leads to:
 |---|---|---|
 | 2xx | `SENT` | Yes |
 | 429 | `RETRYING` after `Retry-After`, and the whole channel pauses | No |
+| 401 | `RETRYING`, and the channel is held for every worker, with one probe every 30 seconds | No |
 | Other 4xx | `FAILED` | Yes |
 | 5xx or 408 | `RETRYING` with backoff, up to 5 attempts | Yes |
 | No answer in time | `RETRYING` with backoff, up to 5 attempts | Yes |
 | Provider cannot be reached | `RETRYING`, and the channel rests for 5 seconds | No |
 | Failed probe while the breaker tests the provider | `RETRYING` with backoff | No |
 
-When attempts run out, a delivery with any timeout behind it ends as `UNKNOWN`, because the provider may have accepted the message. Otherwise it ends as `FAILED`.
+When attempts run out, a delivery with any timeout behind it ends as `UNKNOWN`, because the provider may have accepted the message. Otherwise it ends as `FAILED`. [errors-and-retries.md](errors-and-retries.md) describes each case, the backoff, the circuit breaker and how calls count against the limit.
 
 ## Delivery status
 
@@ -243,6 +247,7 @@ flowchart LR
 - **Redis down:** nothing is sent until it returns, and no attempt is used.
 - **Postgres down:** workers wait and carry on when it returns.
 - **Long outage:** a campaign with messages waiting on retries and none finishing for 10 minutes becomes `PAUSED`. Its messages keep their place, and only a person's Resume starts it again.
+- **A channel in trouble while the campaign moves:** most calls failing, nothing accepted while retries wait, or credentials refused raise an alert on the campaign's page and in the bell, without stopping it. See [errors-and-retries.md](errors-and-retries.md#channel-alerts).
 
 `make test-chaos` runs these failures against a running stack.
 

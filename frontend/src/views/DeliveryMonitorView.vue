@@ -21,12 +21,12 @@ const STUCK_MS = 15000;
 // Checked with the data-viz validator for color vision differences; labels carry the rest.
 const STATUS_COLORS: Record<string, string> = { QUEUED: "#2a78d6", SENDING: "#1baf7a", RETRYING: "#eda100", UNKNOWN: "#6250d6", FAILED: "#e34948" };
 const CHANNEL_COLORS: Record<string, string> = { sms: "#2a78d6", email: "#eb6834" };
-const REASON_COLORS: Record<string, string> = { rate_limited: "#eda100", server_error: "#e34948", rejected: "#2a78d6", timeout: "#6250d6", lease_expired: "#1baf7a" };
+const REASON_COLORS: Record<string, string> = { rate_limited: "#eda100", server_error: "#e34948", rejected: "#2a78d6", timeout: "#6250d6", lease_expired: "#1baf7a", unauthorized: "#a3509c" };
 const OTHER_REASON_COLOR = "#4a5568";
 const NO_REASON_COLOR = "#858FA1";
 const STATUSES: DeliveryStatus[] = ["QUEUED", "SENDING", "RETRYING", "UNKNOWN", "FAILED"];
-const PROBLEMS = ["rate_limited", "server_error", "rejected", "timeout"];
-const REASON_FILTERS = ["server_error", "rejected", "timeout", "rate_limited", "lease_expired"];
+const PROBLEMS = ["rate_limited", "server_error", "rejected", "timeout", "unauthorized"];
+const REASON_FILTERS = ["server_error", "rejected", "timeout", "rate_limited", "lease_expired", "unauthorized"];
 const WINDOWS = [
   { value: "1", label: "Last hour" },
   { value: "24", label: "Last 24 hours" },
@@ -131,7 +131,7 @@ const channelSlices = computed<DonutSlice[]>(() =>
 );
 // Always drawn in this order, not by size: only neighbours on the ring have to be told
 // apart, and a fixed order keeps the same colours next to each other as the numbers move.
-const REASON_ORDER = ["rejected", "lease_expired", "rate_limited", "timeout", "server_error"];
+const REASON_ORDER = ["rejected", "lease_expired", "rate_limited", "timeout", "server_error", "unauthorized"];
 const reasonRank = (reason: string) => {
   if (!reason) return REASON_ORDER.length + 1;
   const rank = REASON_ORDER.indexOf(reason);

@@ -32,6 +32,7 @@ import ConfirmDialog from "../components/ConfirmDialog.vue";
 import TagEditor from "../components/TagEditor.vue";
 import DeliveriesPanel from "../components/DeliveriesPanel.vue";
 import DuplicateDialog from "../components/DuplicateDialog.vue";
+import ScheduleDialog from "../components/ScheduleDialog.vue";
 import EmailPreview from "../components/EmailPreview.vue";
 import DeliveryProgress from "../components/DeliveryProgress.vue";
 import MetricCard from "../components/MetricCard.vue";
@@ -46,6 +47,7 @@ import VersionTabs from "../components/VersionTabs.vue";
 import RunsPanel from "../components/RunsPanel.vue";
 import { navigate } from "../lib/navigation";
 import { sendingBlockers } from "../lib/systemHealth";
+import { describeAlert, type ChannelAlert } from "../lib/channelAlerts";
 import { campaignDiscount, reachHint, uniqueWarnings, warningTitle } from "../lib/message";
 
 const props = defineProps<{ campaignId: string }>();
@@ -64,6 +66,8 @@ const run = ref<number | null>(Number(address.get("run")) > 0 ? Number(address.g
 const runs = ref<RunSummary[]>([]);
 const recipients = ref<SampleRecipient[]>([]);
 const progress = ref<Progress | null>(null);
+// Channel alerts arrive with the live updates, so they open and clear without a reload.
+const alerts = ref<ChannelAlert[]>([]);
 const refreshKey = ref(0);
 const acting = ref(false);
 const duplicating = ref(false);
@@ -87,6 +91,9 @@ const deletable = computed(
   () => ["DRAFT", "READY_FOR_REVIEW", "GENERATION_FAILED", "APPROVED", "CANCELLED"].includes(campaign.value?.status ?? "") && !campaign.value?.schedule && runs.value.length === 0,
 );
 const scheduled = computed(() => Boolean(campaign.value?.schedule?.next_run_at));
+// A campaign that finished sending can go out again on a new schedule.
+const schedulableAgain = computed(() => !archived.value && ["COMPLETED", "COMPLETED_WITH_FAILURES"].includes(campaign.value?.status ?? ""));
+const schedulingAgain = ref(false);
 
 function closeMenu(event: MouseEvent) {
   if (!(event.target as HTMLElement).closest(".more")) menuOpen.value = false;
@@ -220,6 +227,7 @@ async function refresh() {
 
 async function onLiveUpdate(state: LiveState) {
   const changed = state.status !== campaign.value?.status;
+  alerts.value = state.alerts ?? [];
   // The live counts add up every send, so an open send is counted again on its own.
   if (run.value) getProgress(props.campaignId, run.value).then((counts) => (progress.value = counts), () => {});
   else progress.value = state.progress;
@@ -242,6 +250,7 @@ function watchIfChanging() {
     onEnd: () => {
       stopWatching = null;
       disconnected.value = false;
+      alerts.value = [];
     },
   });
 }
@@ -258,6 +267,11 @@ async function act(action: () => Promise<unknown>) {
   } finally {
     acting.value = false;
   }
+}
+
+function onScheduledAgain() {
+  schedulingAgain.value = false;
+  void act(async () => {});
 }
 
 // The copy opens where its next step is: its messages are checked, or its audience found.
@@ -327,6 +341,7 @@ onBeforeUnmount(() => {
       <div class="head-actions">
       <button class="button button--secondary" type="button" data-testid="duplicate" @click="duplicating = true">Duplicate</button>
       <DuplicateDialog v-if="duplicating" :campaign-id="campaignId" :campaign-name="campaign.name" @close="duplicating = false" @created="onDuplicated" />
+      <ScheduleDialog v-if="schedulingAgain" :campaign-id="campaignId" :campaign-name="campaign.name" @close="schedulingAgain = false" @scheduled="onScheduledAgain" />
       <button v-if="archived" class="button button--primary" type="button" data-testid="restore" :disabled="acting" @click="act(() => unarchiveCampaign(campaignId))">Restore</button>
       <a
         v-else-if="isDraft"
@@ -337,6 +352,7 @@ onBeforeUnmount(() => {
         Continue editing
       </a>
       <button v-else-if="campaign.status === 'PAUSED'" class="button button--primary" type="button" data-testid="resume" :disabled="acting" @click="act(() => resumeCampaign(campaignId))">Resume sending</button>
+      <button v-else-if="schedulableAgain" class="button button--primary" type="button" data-testid="schedule-again" :disabled="acting" @click="schedulingAgain = true">Schedule again</button>
       <div v-else-if="campaign.status === 'APPROVED'" class="actions">
         <a class="button button--secondary link-button" :href="`/campaigns/${campaignId}/review`" data-testid="choose-time">Choose a time</a>
         <button class="button button--primary" type="button" data-testid="send-now" :disabled="acting" @click="act(() => dispatchCampaign(campaignId))">Send now</button>
@@ -432,6 +448,15 @@ onBeforeUnmount(() => {
     <ValidationNotice v-if="campaign.status === 'PAUSED'" tone="warning" title="Sending stopped" data-testid="paused">
       The provider gave no way forward for a long time, so this campaign stopped trying. Nothing is lost and nobody gets a message twice. Resume when the provider is back.
     </ValidationNotice>
+    <ValidationNotice
+      v-for="alert in alerts"
+      :key="`${alert.channel}-${alert.kind}`"
+      tone="warning"
+      :title="describeAlert(alert).title"
+      data-testid="channel-alert"
+    >
+      {{ describeAlert(alert).detail }}
+    </ValidationNotice>
     <ValidationNotice v-if="isLive && sendingBlockers.length" tone="warning" title="Sending is held up" data-testid="sending-blocked">
       <span v-for="blocker in sendingBlockers" :key="blocker.id" class="blocker"><strong>{{ blocker.label }} is down.</strong> {{ blocker.effect }}</span>
       Nothing is lost, and sending continues when it is back.
@@ -440,9 +465,15 @@ onBeforeUnmount(() => {
     <section v-if="tab === 'overview'" id="panel-overview" class="panel" role="tabpanel" aria-labelledby="tab-overview">
       <section v-if="campaign.schedule" class="schedule card" data-testid="schedule-card">
         <div class="schedule-body">
-          <span class="muted small">Schedule</span>
-          <p data-testid="schedule-description">{{ campaign.schedule.description }}</p>
+          <span class="muted small schedule-label">
+            Schedule
+            <span v-if="campaign.schedule.stopped" class="stopped-badge" data-testid="schedule-stopped">Stopped</span>
+          </span>
+          <p data-testid="schedule-description" :class="{ 'muted': campaign.schedule.stopped }">
+            <template v-if="campaign.schedule.stopped">Was: </template>{{ campaign.schedule.description }}
+          </p>
           <p v-if="campaign.schedule.next_run_at" class="muted small" data-testid="next-run">Next send {{ formatDateTime(campaign.schedule.next_run_at) }}</p>
+          <p v-else-if="campaign.schedule.stopped" class="muted small">The schedule was cancelled, so nothing more goes out on it.</p>
           <p v-else class="muted small">No more sends are planned.</p>
           <p v-if="campaign.schedule.created_by" class="muted small" data-testid="schedule-by">Set up by {{ campaign.schedule.created_by }}</p>
           <p v-if="campaign.schedule.runs" class="muted small">Sent {{ campaign.schedule.runs }} {{ campaign.schedule.runs === 1 ? "time" : "times" }} so far.</p>
@@ -570,6 +601,20 @@ onBeforeUnmount(() => {
 .schedule-body {
   display: grid;
   gap: var(--space-1);
+}
+
+.schedule-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.stopped-badge {
+  padding: 0 var(--space-2);
+  color: var(--color-text-muted);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
 }
 
 .meta {

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,7 +28,11 @@ const (
 	statusApproved    = "APPROVED"
 	statusDispatching = "DISPATCHING"
 	statusPaused      = "PAUSED"
-	eventApproved     = "campaign.approved"
+
+	statusCompleted             = "COMPLETED"
+	statusCompletedWithFailures = "COMPLETED_WITH_FAILURES"
+
+	eventApproved = "campaign.approved"
 
 	eventDispatched      = "campaign.dispatched"
 	eventResumed         = "campaign.resumed"
@@ -51,7 +56,7 @@ var (
 var (
 	deliveryStatuses = []string{"QUEUED", "SENDING", "SENT", "RETRYING", "FAILED", "SKIPPED", "UNKNOWN"}
 	channels         = []string{"sms", "email"}
-	attemptOutcomes  = []string{"accepted", "rate_limited", "server_error", "rejected", "timeout"}
+	attemptOutcomes  = []string{"accepted", "rate_limited", "server_error", "rejected", "timeout", "unauthorized"}
 )
 
 // lockStatus takes the campaign's row lock, which edits and generation also need,
@@ -94,7 +99,7 @@ func (s *Service) Approve(ctx context.Context, id string) (View, error) {
 	}
 	switch status {
 	case statusReady:
-	case statusApproved, statusScheduled, statusDispatching, statusPaused, "COMPLETED", "COMPLETED_WITH_FAILURES":
+	case statusApproved, statusScheduled, statusDispatching, statusPaused, statusCompleted, statusCompletedWithFailures:
 		return s.get(ctx, tx, id)
 	default:
 		return View{}, ErrNotReviewable
@@ -190,7 +195,7 @@ func (s *Service) Dispatch(ctx context.Context, id string) (view View, err error
 	}
 	switch status {
 	case statusApproved:
-	case statusDispatching, statusPaused, "COMPLETED", "COMPLETED_WITH_FAILURES":
+	case statusDispatching, statusPaused, statusCompleted, statusCompletedWithFailures:
 		return s.get(ctx, tx, id)
 	case statusScheduled:
 		return View{}, ErrAlreadyScheduled
@@ -389,6 +394,40 @@ type Progress struct {
 type LiveState struct {
 	Status   string   `json:"status"`
 	Progress Progress `json:"progress"`
+	// Alerts are the channel alerts open on the campaign, oldest first.
+	Alerts []ChannelAlert `json:"alerts"`
+}
+
+// ChannelAlert says one channel of a sending campaign is in trouble while the
+// campaign keeps going: most calls failing, nothing accepted while retries wait, or
+// credentials refused. The worker opens and closes it.
+type ChannelAlert struct {
+	Channel string         `json:"channel"`
+	Kind    string         `json:"kind"`
+	Since   time.Time      `json:"since"`
+	Details map[string]any `json:"details"`
+}
+
+// openAlerts reads the alerts whose latest event on the campaign is an opening.
+func (s *Service) openAlerts(ctx context.Context, id string) ([]ChannelAlert, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT channel, kind, occurred_at, details FROM (
+			SELECT DISTINCT ON (details->>'channel', details->>'alert')
+			       details->>'channel' AS channel, details->>'alert' AS kind, event_type, occurred_at, details
+			FROM audit_events
+			WHERE campaign_id = $1 AND event_type IN ('campaign.alert_opened', 'campaign.alert_closed')
+			ORDER BY details->>'channel', details->>'alert', id DESC
+		) latest
+		WHERE event_type = 'campaign.alert_opened'
+		ORDER BY occurred_at`, id)
+	if err != nil {
+		return nil, fmt.Errorf("read channel alerts: %w", err)
+	}
+	alerts, err := pgx.CollectRows(rows, pgx.RowToStructByPos[ChannelAlert])
+	if err != nil {
+		return nil, fmt.Errorf("read channel alerts: %w", err)
+	}
+	return alerts, nil
 }
 
 // Live reads the current state. It says whether the state can still change on its
@@ -403,7 +442,73 @@ func (s *Service) Live(ctx context.Context, id string) (LiveState, bool, error) 
 		return LiveState{}, false, err
 	}
 	changing := view.Status == statusApproved || view.Status == statusScheduled || view.Status == statusDispatching || view.Status == statusPaused
-	return LiveState{view.Status, progress}, changing, nil
+	alerts := []ChannelAlert{}
+	if view.Status == statusDispatching || view.Status == statusPaused {
+		if alerts, err = s.openAlerts(ctx, id); err != nil {
+			return LiveState{}, false, err
+		}
+	}
+	return LiveState{view.Status, progress, alerts}, changing, nil
+}
+
+// liveFresh is how long a reading of a campaign's live state is shared. Every open
+// page of a campaign asks once a second, so without sharing the reads grow with the
+// pages; with it, a campaign is read at most twice a second however many watch it.
+const liveFresh = 500 * time.Millisecond
+
+// liveCache keeps the last live reading of each campaign. Callers that arrive while a
+// campaign is being read wait for that reading instead of starting their own.
+type liveCache struct {
+	mu       sync.Mutex
+	readings map[string]*liveReading
+	sweptAt  time.Time
+}
+
+type liveReading struct {
+	mu       sync.Mutex
+	state    LiveState
+	changing bool
+	readAt   time.Time
+}
+
+// SharedLive is Live for a page that asks again and again: a reading from the last
+// liveFresh is reused. A page's first reading should use Live, so it starts from now.
+func (s *Service) SharedLive(ctx context.Context, id string) (LiveState, bool, error) {
+	cache := &s.live
+	cache.mu.Lock()
+	if cache.readings == nil {
+		cache.readings = map[string]*liveReading{}
+	}
+	// Readings of campaigns nobody watches any more are dropped now and then.
+	if time.Since(cache.sweptAt) > time.Minute {
+		for key, old := range cache.readings {
+			if old.mu.TryLock() {
+				if time.Since(old.readAt) > time.Minute {
+					delete(cache.readings, key)
+				}
+				old.mu.Unlock()
+			}
+		}
+		cache.sweptAt = time.Now()
+	}
+	reading, ok := cache.readings[id]
+	if !ok {
+		reading = &liveReading{}
+		cache.readings[id] = reading
+	}
+	cache.mu.Unlock()
+
+	reading.mu.Lock()
+	defer reading.mu.Unlock()
+	if !reading.readAt.IsZero() && time.Since(reading.readAt) < liveFresh {
+		return reading.state, reading.changing, nil
+	}
+	state, changing, err := s.Live(ctx, id)
+	if err != nil {
+		return LiveState{}, false, err
+	}
+	reading.state, reading.changing, reading.readAt = state, changing, time.Now()
+	return state, changing, nil
 }
 
 func (s *Service) Progress(ctx context.Context, id string) (Progress, error) {
@@ -699,7 +804,9 @@ func (f DeliveryFilter) matching(id string) (string, []any, error) {
 	from := " FROM campaign_deliveries d"
 	where := []string{"d.campaign_id = $1"}
 	if f.Run > 0 {
-		where = append(where, "d.run_id = (SELECT r.id FROM campaign_runs r WHERE r.campaign_id = $1 AND r.number = "+param(f.Run)+")")
+		// The run belongs to the campaign, so its id alone picks the rows. With the
+		// campaign as well, PostgreSQL combines two indexes and reads the table.
+		where = []string{"d.run_id = (SELECT r.id FROM campaign_runs r WHERE r.campaign_id = $1 AND r.number = " + param(f.Run) + ")"}
 	}
 	if f.Status != "" {
 		where = append(where, "d.status = "+param(f.Status))
@@ -764,10 +871,31 @@ func (s *Service) CountDeliveries(ctx context.Context, id string, filter Deliver
 		return 0, err
 	}
 	var total int
-	if err := s.db.QueryRow(ctx, "SELECT count(*)"+matching, args...).Scan(&total); err != nil {
+	if filter.keepsEverything() {
+		// A finished run kept its total, and no delivery joins or leaves a run after it
+		// opens, so only runs still sending are counted.
+		runs, runArgs := "r.campaign_id = $1", []any{id}
+		if filter.Run > 0 {
+			runs, runArgs = runs+" AND r.number = $2", append(runArgs, filter.Run)
+		}
+		err = s.db.QueryRow(ctx, `
+			SELECT COALESCE(sum(CASE WHEN r.finished_at IS NOT NULL THEN r.total
+			                         ELSE (SELECT count(*) FROM campaign_deliveries d WHERE d.run_id = r.id) END), 0)::int
+			FROM campaign_runs r WHERE `+runs, runArgs...).Scan(&total)
+	} else {
+		err = s.db.QueryRow(ctx, "SELECT count(*)"+matching, args...).Scan(&total)
+	}
+	if err != nil {
 		return 0, fmt.Errorf("count deliveries: %w", err)
 	}
 	return total, nil
+}
+
+// keepsEverything says the filter picks every delivery of the campaign or of one run.
+// Any condition, including one added later, makes it false.
+func (f DeliveryFilter) keepsEverything() bool {
+	f.Run, f.Limit, f.Offset = 0, 0, 0
+	return f == DeliveryFilter{}
 }
 
 func (s *Service) Deliveries(ctx context.Context, id string, filter DeliveryFilter) ([]Delivery, error) {

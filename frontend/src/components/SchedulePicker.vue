@@ -4,22 +4,28 @@ import { computed, useId } from "vue";
 import type { ScheduleReach } from "../api/campaigns";
 import { WEEKDAYS, suggestedRestDays, type ScheduleForm, type ScheduleMode } from "../lib/schedule";
 
-const props = defineProps<{ modelValue: ScheduleForm }>();
+// sentBefore: the campaign already sent, so even a one-time send chooses whom it
+// reaches again. scheduleOnly leaves out sending now.
+const props = defineProps<{ modelValue: ScheduleForm; sentBefore?: boolean; scheduleOnly?: boolean }>();
 const emit = defineEmits<{ "update:modelValue": [value: ScheduleForm] }>();
 
 const id = useId();
-const options: { mode: ScheduleMode; label: string; hint: string }[] = [
+const repeats = computed(() => props.modelValue.mode === "interval" || props.modelValue.mode === "weekly");
+const choosesReach = computed(() => repeats.value || (props.sentBefore && props.modelValue.mode === "once"));
+const allOptions: { mode: ScheduleMode; label: string; hint: string }[] = [
   { mode: "now", label: "Send now", hint: "Starts as soon as you approve." },
   { mode: "once", label: "At a set time", hint: "Sends once, on the date you choose." },
   { mode: "interval", label: "At regular intervals", hint: "Sends again every few hours or days." },
   { mode: "weekly", label: "On chosen days", hint: "Sends on the same days each week." },
 ];
 
-const reaches: { reach: ScheduleReach; label: string }[] = [
+const options = computed(() => allOptions.filter((option) => !props.scheduleOnly || option.mode !== "now"));
+
+const reaches = computed<{ reach: ScheduleReach; label: string }[]>(() => [
   { reach: "new", label: "Only people who haven't received it yet" },
   { reach: "after", label: "People who haven't received it in the last" },
-  { reach: "everyone", label: "Everyone who matches, every time" },
-];
+  { reach: "everyone", label: repeats.value ? "Everyone who matches, every time" : "Everyone, including people who received it before" },
+]);
 
 // Choosing a wait starts from one interval, which the person can then change.
 function chooseReach(reach: ScheduleReach) {
@@ -29,6 +35,16 @@ function chooseReach(reach: ScheduleReach) {
 }
 
 const reachNote = computed(() => {
+  if (!repeats.value) {
+    switch (props.modelValue.reach) {
+      case "after":
+        return `Someone who received this campaign gets it again only if ${props.modelValue.reachAfterDays === 1 ? "a day has" : `${props.modelValue.reachAfterDays} days have`} passed since their last one.`;
+      case "everyone":
+        return "Everyone this send finds gets it, including people earlier sends reached. Only someone whose message is still being sent is left out.";
+      default:
+        return "Nobody who already received this campaign gets it again, so this send may reach few people or none.";
+    }
+  }
   switch (props.modelValue.reach) {
     case "after":
       return `Each send finds who matches at that time. Someone reached before gets it again once ${props.modelValue.reachAfterDays === 1 ? "a day has" : `${props.modelValue.reachAfterDays} days have`} passed since their last one.`;
@@ -43,7 +59,6 @@ const timezones = computed(() => {
   const supported = Intl.supportedValuesOf?.("timeZone") ?? [];
   return supported.includes(props.modelValue.timezone) ? supported : [props.modelValue.timezone, ...supported];
 });
-const repeats = computed(() => props.modelValue.mode === "interval" || props.modelValue.mode === "weekly");
 
 function change<K extends keyof ScheduleForm>(key: K, value: ScheduleForm[K]) {
   emit("update:modelValue", { ...props.modelValue, [key]: value });
@@ -74,8 +89,8 @@ function inputValue(event: Event) {
     </div>
 
     <!-- Above the details, so it stays put when switching between the repeating modes. -->
-    <fieldset v-if="repeats" class="reach" data-testid="schedule-reach">
-      <legend class="small muted">Later sends reach</legend>
+    <fieldset v-if="choosesReach" class="reach" data-testid="schedule-reach">
+      <legend class="small muted">{{ repeats ? "Later sends reach" : "This send reaches" }}</legend>
       <label v-for="option in reaches" :key="option.reach" class="reach-option">
         <input
           type="radio"
@@ -103,11 +118,11 @@ function inputValue(event: Event) {
         </template>
       </label>
       <p v-if="modelValue.reach === 'everyone'" class="small warning" data-testid="reach-everyone-warning">
-        People who match again get this message on every send. Make sure that is what they would want.
+        {{ repeats ? "People who match again get this message on every send." : "People who already received this message get it again." }} Make sure that is what they would want.
       </p>
     </fieldset>
 
-    <p v-if="repeats" class="muted small" data-testid="once-per-person">{{ reachNote }}</p>
+    <p v-if="choosesReach" class="muted small" data-testid="once-per-person">{{ reachNote }}</p>
 
     <div v-if="modelValue.mode === 'once'" class="details">
       <label class="control">
@@ -179,7 +194,7 @@ function inputValue(event: Event) {
       <span class="small muted">Stop after (optional)</span>
       <input class="field" type="datetime-local" :value="modelValue.endsAt" @input="change('endsAt', inputValue($event))" />
     </label>
-    <p v-if="!repeats" class="muted small" data-testid="approved-people">Goes to the people you approve now. Anyone who withdraws consent before the send is left out.</p>
+    <p v-if="!repeats && !sentBefore" class="muted small" data-testid="approved-people">Goes to the people you approve now. Anyone who withdraws consent before the send is left out.</p>
   </fieldset>
 </template>
 

@@ -102,6 +102,7 @@ func TestValidate(t *testing.T) {
 	t.Parallel()
 	valid := []schedule.Spec{
 		{Kind: schedule.KindOnce, At: at("2026-11-04T00:00:00Z")},
+		{Kind: schedule.KindOnce, At: at("2026-11-04T00:00:00Z"), Reach: schedule.ReachEveryone},
 		{Kind: schedule.KindInterval, EveryHours: 1},
 		{Kind: schedule.KindInterval, EveryHours: 24, StartsAt: at("2026-11-04T00:00:00Z"), EndsAt: at("2026-12-01T00:00:00Z")},
 		{Kind: schedule.KindWeekly, Days: []string{"sat"}, Time: "00:00", Timezone: "UTC"},
@@ -112,23 +113,23 @@ func TestValidate(t *testing.T) {
 		}
 	}
 	invalid := map[string]schedule.Spec{
-		"unknown kind":       {Kind: "cron"},
-		"once without time":  {Kind: schedule.KindOnce},
-		"once in the past":   {Kind: schedule.KindOnce, At: at("2026-11-03T11:00:00Z")},
-		"too far ahead":      {Kind: schedule.KindOnce, At: at("2028-01-01T00:00:00Z")},
-		"no interval":        {Kind: schedule.KindInterval},
-		"interval too long":  {Kind: schedule.KindInterval, EveryHours: 10000},
-		"no days":            {Kind: schedule.KindWeekly, Time: "09:00", Timezone: "UTC"},
-		"unknown day":        {Kind: schedule.KindWeekly, Days: []string{"funday"}, Time: "09:00", Timezone: "UTC"},
-		"bad time":           {Kind: schedule.KindWeekly, Days: []string{"mon"}, Time: "25:00", Timezone: "UTC"},
-		"bad zone":           {Kind: schedule.KindWeekly, Days: []string{"mon"}, Time: "09:00", Timezone: "Mars/Olympus"},
-		"ends before start":  {Kind: schedule.KindInterval, EveryHours: 1, StartsAt: at("2026-11-05T00:00:00Z"), EndsAt: at("2026-11-04T00:00:00Z")},
-		"ends in the past":   {Kind: schedule.KindInterval, EveryHours: 1, EndsAt: at("2026-11-01T00:00:00Z")},
-		"unknown reach":      {Kind: schedule.KindInterval, EveryHours: 1, Reach: "sometimes"},
-		"no waiting time":    {Kind: schedule.KindInterval, EveryHours: 1, Reach: schedule.ReachAfter},
-		"waits too long":     {Kind: schedule.KindInterval, EveryHours: 1, Reach: schedule.ReachAfter, ReachAfterDays: 400},
-		"stray wait":         {Kind: schedule.KindInterval, EveryHours: 1, Reach: schedule.ReachEveryone, ReachAfterDays: 3},
-		"once reaches again": {Kind: schedule.KindOnce, At: at("2026-11-06T00:00:00Z"), Reach: schedule.ReachEveryone},
+		"unknown kind":        {Kind: "cron"},
+		"once without time":   {Kind: schedule.KindOnce},
+		"once in the past":    {Kind: schedule.KindOnce, At: at("2026-11-03T11:00:00Z")},
+		"too far ahead":       {Kind: schedule.KindOnce, At: at("2028-01-01T00:00:00Z")},
+		"no interval":         {Kind: schedule.KindInterval},
+		"interval too long":   {Kind: schedule.KindInterval, EveryHours: 10000},
+		"no days":             {Kind: schedule.KindWeekly, Time: "09:00", Timezone: "UTC"},
+		"unknown day":         {Kind: schedule.KindWeekly, Days: []string{"funday"}, Time: "09:00", Timezone: "UTC"},
+		"bad time":            {Kind: schedule.KindWeekly, Days: []string{"mon"}, Time: "25:00", Timezone: "UTC"},
+		"bad zone":            {Kind: schedule.KindWeekly, Days: []string{"mon"}, Time: "09:00", Timezone: "Mars/Olympus"},
+		"ends before start":   {Kind: schedule.KindInterval, EveryHours: 1, StartsAt: at("2026-11-05T00:00:00Z"), EndsAt: at("2026-11-04T00:00:00Z")},
+		"ends in the past":    {Kind: schedule.KindInterval, EveryHours: 1, EndsAt: at("2026-11-01T00:00:00Z")},
+		"unknown reach":       {Kind: schedule.KindInterval, EveryHours: 1, Reach: "sometimes"},
+		"no waiting time":     {Kind: schedule.KindInterval, EveryHours: 1, Reach: schedule.ReachAfter},
+		"waits too long":      {Kind: schedule.KindInterval, EveryHours: 1, Reach: schedule.ReachAfter, ReachAfterDays: 400},
+		"stray wait":          {Kind: schedule.KindInterval, EveryHours: 1, Reach: schedule.ReachEveryone, ReachAfterDays: 3},
+		"once waits too long": {Kind: schedule.KindOnce, At: at("2026-11-06T00:00:00Z"), Reach: schedule.ReachAfter, ReachAfterDays: 400},
 	}
 	for name, spec := range invalid {
 		var problem *schedule.InvalidError
@@ -158,7 +159,22 @@ func TestDescribeReadsLikeASentence(t *testing.T) {
 		}
 	}
 	once := schedule.Spec{Kind: schedule.KindOnce, At: at("2026-11-05T09:00:00+03:00")}
-	if got := once.Describe(); !strings.HasPrefix(got, "Once") {
+	if got := once.Describe(); !strings.HasPrefix(got, "Once") || strings.Contains(got, "reach") {
 		t.Errorf("got %q", got)
+	}
+	// A one-time send after earlier ones says whom it reaches.
+	for reach, want := range map[string]string{
+		schedule.ReachNew:      ", reaching only people not reached before",
+		schedule.ReachEveryone: ", reaching everyone it finds, including people reached before",
+		schedule.ReachAfter:    ", reaching people again after 3 days",
+	} {
+		again := once
+		again.Reach = reach
+		if reach == schedule.ReachAfter {
+			again.ReachAfterDays = 3
+		}
+		if got := again.Describe(); !strings.HasPrefix(got, "Once") || !strings.HasSuffix(got, want) {
+			t.Errorf("%s: got %q", reach, got)
+		}
 	}
 }

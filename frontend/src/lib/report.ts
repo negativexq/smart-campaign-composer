@@ -12,6 +12,7 @@ export const REASONS: Record<string, string> = {
   rate_limiter_unavailable: "Waiting for the rate limiter",
   provider_unreachable: "Provider cannot be reached",
   lease_expired: "A worker stopped while sending",
+  unauthorized: "Provider refused our credentials",
 };
 
 export const OUTCOMES: Record<string, string> = {
@@ -20,6 +21,7 @@ export const OUTCOMES: Record<string, string> = {
   server_error: "Provider error",
   rejected: "Rejected",
   timeout: "No response",
+  unauthorized: "Credentials refused",
 };
 
 /** What the deliveries table is narrowed to. An empty value means no filter. */
@@ -123,7 +125,7 @@ export function channelBars(progress: Progress): ChannelBar[] {
 /** SMS has reads and email has opens, so the word follows the channel. */
 export const openedWord = (channel: string) => (channel === "sms" ? "read" : "opened");
 
-export const notAccepted = (bucket: TimelineBucket) => bucket.rate_limited + bucket.server_error + bucket.rejected + bucket.timeout;
+export const notAccepted = (bucket: TimelineBucket) => bucket.rate_limited + bucket.server_error + bucket.rejected + bucket.timeout + (bucket.unauthorized ?? 0);
 export const callsIn = (bucket: TimelineBucket) => bucket.accepted + notAccepted(bucket);
 
 /** Rounds up to a tick people read easily, so the top of the axis is a clean number. */

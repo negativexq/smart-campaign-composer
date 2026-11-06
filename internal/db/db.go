@@ -21,6 +21,12 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("parse database URL: %w", err)
 	}
 	config.ConnConfig.Tracer = spanTracer{otel.Tracer("db")}
+	// The app runs short queries over a few rows. When PostgreSQL's estimate for one
+	// passes jit_above_cost, compiling it takes longer than running it, so JIT is off
+	// unless the URL asks for it.
+	if _, set := config.ConnConfig.RuntimeParams["jit"]; !set {
+		config.ConnConfig.RuntimeParams["jit"] = "off"
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("open pool: %w", err)

@@ -83,10 +83,10 @@ The overview shows campaign counts, recent activity and system health. Analytics
 ## How sending behaves
 
 - **Audience:** a one-time send goes to the people who were approved, and a repeating one finds who matches at each run. Consent is checked again either way.
-- **Rate:** each channel stays at or below 100 messages per second across all workers. A Redis sliding window gives permission before a message is claimed from the PostgreSQL queue, and each send counts from when it goes out. One channel's backlog or outage does not hold up the other.
+- **Rate:** each channel stays at or below 100 messages per second across all workers. A Redis sliding window gives permission before a message is claimed from the PostgreSQL queue, and each call counts until a second after its answer, so a call held up on the way cannot land with the next batch. If Redis loses that window, the channel waits 8 s before sending again. One channel's backlog or outage does not hold up the other.
 - **No duplicates:** there is one delivery per run, recipient and channel, and every retry reuses its idempotency key. A one-time campaign has one run. Later runs of a repeating one leave out people reached before unless its schedule says to reach them again. Rejecting a repeat is then up to the provider remembering that key. The mock keeps its keys in memory, so a provider restart between a lost response and its retry could accept a message twice. The chaos tests do not cover that case.
 - **Retries:** failed calls back off with jitter. A 429 pauses the channel without using up an attempt. A call with no answer may have gone through, so a message that runs out of attempts after one ends as `UNKNOWN` instead of failed.
-- **Outages:** a circuit breaker holds a failing channel and tests it with a few probes, which cost messages no attempts. After 10 minutes with nothing finishing, the campaign stops as `PAUSED` with its messages intact, and a person resumes it. Messages left in flight by a crashed worker are taken back through their leases.
+- **Outages:** a circuit breaker holds a failing channel and tests it with a few probes, which cost messages no attempts. After 10 minutes with nothing finishing, the campaign stops as `PAUSED` with its messages intact, and a person resumes it. A channel in trouble while the campaign still moves raises an alert instead, and a 401 holds the channel without using attempts. Messages left in flight by a crashed worker are taken back through their leases.
 - **Notifications:** the bell at the top right lists scheduled starts, finished sends and problems.
 
 Details and the trade-offs behind each are in [DECISIONS.md](DECISIONS.md).
@@ -225,7 +225,13 @@ make benchmark   # measures the system's limits in a single pass
 
 Integration tests use real PostgreSQL and fail, rather than skip, when it is missing.
 
-CI runs on every push to `main` and every pull request: formatting, vet and the Go tests with the race detector, the frontend tests, type check and build, then the acceptance and chaos tests against the full stack on the mock AI. It needs no API key. `make benchmark` stays manual.
+Deeper checks live in [tests/verify](tests/verify/README.md): load runs under provider faults, Redis loss and crashed workers, security probes against a running stack, and a mutation check that the tests catch broken code. They run on their own stack next to the demo, save their results for comparison, and log what they found in [FINDINGS.md](tests/verify/FINDINGS.md).
+
+```bash
+make verify-up && make verify-security && make verify-load && make verify-down
+```
+
+CI runs on every push to `main` and every pull request: formatting, vet and the Go tests with the race detector, the frontend tests, type check and build, then the acceptance and chaos tests against the full stack on the mock AI. It needs no API key. `make benchmark` and the verification suites stay manual.
 
 ## Layout
 
@@ -235,8 +241,8 @@ CI runs on every push to `main` and every pull request: formatting, vet and the 
 | `internal/` | Application packages |
 | `migrations/` | SQL schema |
 | `frontend/` | Vue 3 and TypeScript UI |
-| `tests/` | Acceptance, chaos and benchmark tests |
-| `docs/` | [Architecture](docs/architecture.md), [flows](docs/flows.md), the [performance profile](docs/performance.md) and the images in this file |
+| `tests/` | Acceptance, chaos, benchmark and verification tests |
+| `docs/` | [Architecture](docs/architecture.md), [flows](docs/flows.md), [errors and retries](docs/errors-and-retries.md), the [performance profile](docs/performance.md) and the images in this file |
 | `ai-sessions/` | Exported AI working sessions |
 
-See [docs/architecture.md](docs/architecture.md) for how the system is put together, [docs/flows.md](docs/flows.md) for how a campaign moves through it, [DECISIONS.md](DECISIONS.md) for the reasoning behind it and [DESIGN.md](DESIGN.md) for the Signal design language.
+See [docs/architecture.md](docs/architecture.md) for how the system is put together, [docs/flows.md](docs/flows.md) for how a campaign moves through it, [DECISIONS.md](DECISIONS.md) for the reasoning behind it, [docs/security.md](docs/security.md) for what protects it and how it was checked, and [DESIGN.md](DESIGN.md) for the Signal design language.

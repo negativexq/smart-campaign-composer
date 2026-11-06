@@ -325,17 +325,15 @@ func TestListPagesThroughEveryCampaignAndCountsThem(t *testing.T) {
 	if len(seen) != 130 {
 		t.Fatalf("reached %d campaigns, want 130", len(seen))
 	}
-	total, err := h.service.CountCampaigns(ctx, filter)
+	groups, err := h.service.CountGroups(ctx, filter)
 	if err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if total != 130 {
-		t.Fatalf("total %d", total)
+	// The list's total is its group's count: every group for no group.
+	if groups["all"] != 130 || groups["failed"] != 0 {
+		t.Fatalf("counts %v", groups)
 	}
-	if none, err := h.service.CountCampaigns(ctx, campaign.ListFilter{Query: "paged", Group: "failed"}); err != nil || none != 0 {
-		t.Fatalf("other group: %d %v", none, err)
-	}
-	if _, err := h.service.CountCampaigns(ctx, campaign.ListFilter{Group: "nope"}); !errors.Is(err, campaign.ErrUnknownGroup) {
+	if _, err := h.service.List(ctx, campaign.ListFilter{Group: "nope"}); !errors.Is(err, campaign.ErrUnknownGroup) {
 		t.Fatalf("unknown group: %v", err)
 	}
 }

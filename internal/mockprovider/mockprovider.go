@@ -33,6 +33,9 @@ type Behavior struct {
 	RateLimitRate    float64
 	ServerErrorRate  float64
 	LostResponseRate float64
+	// Unauthorized lists channels whose calls are refused with a 401, as if their
+	// credentials had expired. It stands in for a real provider's key check.
+	Unauthorized []string
 	// BounceRate is the share of accepted messages that later fail to arrive. It only
 	// applies with OnEvent set, since a bounce nobody hears about means nothing.
 	BounceRate     float64
@@ -76,6 +79,7 @@ type ChannelStats struct {
 	Rejected      int `json:"rejected"`
 	RateLimited   int `json:"rate_limited"`
 	ServerErrors  int `json:"server_errors"`
+	Unauthorized  int `json:"unauthorized"`
 	PeakPerSecond int `json:"peak_per_second"`
 }
 
@@ -221,6 +225,12 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	if problem != "" {
 		s.count(message.Channel, func(stats *ChannelStats) { stats.Rejected++ })
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": problem})
+		return
+	}
+
+	if slices.Contains(s.behavior.Unauthorized, message.Channel) {
+		s.count(message.Channel, func(stats *ChannelStats) { stats.Unauthorized++ })
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "credentials refused"})
 		return
 	}
 

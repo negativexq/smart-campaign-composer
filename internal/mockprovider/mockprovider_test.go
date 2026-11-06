@@ -127,3 +127,21 @@ func TestThePeakRateCountsCallsThatWereNotAccepted(t *testing.T) {
 		t.Fatalf("stats: %+v", stats)
 	}
 }
+
+func TestRefusesTheCredentialsOfAChannelSetToRefuse(t *testing.T) {
+	t.Parallel()
+	behavior := rolling(0.9)
+	behavior.Unauthorized = []string{"sms"}
+	provider, sender := start(t, behavior)
+	result, err := sender.Send(context.Background(), sms)
+	if err != nil || result.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("sms: %+v %v", result, err)
+	}
+	email := delivery.Message{Channel: "email", To: "a@example.com", Subject: "Hi", Body: "Hi", IdempotencyKey: "k2", UnsubscribeURL: "https://example.com/u"}
+	if result, err := sender.Send(context.Background(), email); err != nil || result.StatusCode != http.StatusAccepted {
+		t.Fatalf("email: %+v %v", result, err)
+	}
+	if stats := provider.Stats()["sms"]; stats.Unauthorized != 1 || stats.Accepted != 0 {
+		t.Fatalf("stats: %+v", stats)
+	}
+}

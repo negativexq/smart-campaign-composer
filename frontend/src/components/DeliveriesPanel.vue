@@ -13,7 +13,7 @@ const PAGE = 100;
 // The most the backend returns for one request.
 const LARGEST_REQUEST = 500;
 const REASON_OPTIONS = ["no_consent", "consent_withdrawn", "server_error", "rejected", "timeout", "lease_expired"];
-const PROBLEM_OPTIONS = ["rate_limited", "server_error", "rejected", "timeout"];
+const PROBLEM_OPTIONS = ["rate_limited", "server_error", "rejected", "timeout", "unauthorized"];
 
 // run keeps one send of a repeating campaign; none shows every send.
 const props = defineProps<{ campaignId: string; channels: string[]; abTest?: boolean; refreshKey?: number; progress?: Progress | null; run?: number | null }>();

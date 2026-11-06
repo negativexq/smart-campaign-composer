@@ -62,6 +62,65 @@ type fakeLimiter struct {
 	confirm int
 	// settleErr, when set, is what settling fails with.
 	settleErr error
+	// locks stands in for the credential lock: its generation per locked channel,
+	// and whether the channel's probe may go now.
+	locks      map[string]int64
+	probeDue   map[string]bool
+	generation int64
+}
+
+func (f *fakeLimiter) LockCredentials(_ context.Context, channel string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, locked := f.locks[channel]; locked {
+		return false, nil
+	}
+	if f.locks == nil {
+		f.locks, f.probeDue = map[string]int64{}, map[string]bool{}
+	}
+	f.generation++
+	f.locks[channel] = f.generation
+	return true, nil
+}
+
+func (f *fakeLimiter) UnlockCredentials(_ context.Context, channel string, generation int64) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if current, locked := f.locks[channel]; !locked || current != generation {
+		return false, nil
+	}
+	delete(f.locks, channel)
+	return true, nil
+}
+
+func (f *fakeLimiter) ReleaseProbe(_ context.Context, channel string, generation int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.locks[channel] == generation {
+		f.probeDue[channel] = true
+	}
+	return nil
+}
+
+func (f *fakeLimiter) CredentialsLocked(_ context.Context, channel string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, locked := f.locks[channel]
+	return locked, nil
+}
+
+// letProbe lets one probe through on a locked channel, as the probe interval ending would.
+func (f *fakeLimiter) letProbe(channel string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.probeDue[channel] = true
+}
+
+func (f *fakeLimiter) locked(channel string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, locked := f.locks[channel]
+	return locked
 }
 
 func (f *fakeLimiter) Pause(_ context.Context, channel string, length time.Duration) error {
@@ -84,6 +143,13 @@ func (f *fakeLimiter) Reserve(_ context.Context, channel string, want int) (deli
 	if f.answer != nil {
 		answer = f.answer(channel, want)
 	}
+	if generation, locked := f.locks[channel]; locked {
+		if !f.probeDue[channel] {
+			return delivery.Permits{Retry: 30 * time.Second, Paused: true}, nil
+		}
+		f.probeDue[channel] = false
+		answer = delivery.Permits{Granted: 1, Probe: generation}
+	}
 	if f.permits == nil {
 		f.permits = map[string]int{}
 	}
@@ -91,7 +157,9 @@ func (f *fakeLimiter) Reserve(_ context.Context, channel string, want int) (deli
 	return answer, nil
 }
 
-func (f *fakeLimiter) Settle(_ context.Context, channel string, permits delivery.Permits, used int) (int, error) {
+func (f *fakeLimiter) Answered(string, delivery.Permits, time.Time) {}
+
+func (f *fakeLimiter) Settle(_ context.Context, channel string, permits delivery.Permits, used int, _ time.Duration) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.settleErr != nil {
@@ -168,6 +236,7 @@ func (r *rig) newWorker() *delivery.Worker {
 		MaxAttempts: r.maxTries,
 		SendTimeout: time.Second,
 		Backoff:     func(int) time.Duration { return 0 },
+		AlertAfter:  10 * time.Minute,
 	})
 }
 

@@ -11,6 +11,7 @@ import { campaignStatusMeta } from "./lib/campaignStatus";
 import { currentPath } from "./lib/navigation";
 import { currentUser } from "./lib/session";
 import { refreshSystemHealth, systemHealth } from "./lib/systemHealth";
+import { everyWhileVisible } from "./lib/visibility";
 import AnalyticsView from "./views/AnalyticsView.vue";
 import AudiencesView from "./views/AudiencesView.vue";
 import AudienceView from "./views/AudienceView.vue";
@@ -60,7 +61,7 @@ const route = computed(() => {
 });
 const HEALTH_INTERVAL = 15000;
 const status = computed(() => systemHealth.value?.status ?? "checking");
-let healthTimer: ReturnType<typeof setInterval> | undefined;
+let stopHealth = () => {};
 const aiConfig = ref<AiConfig | null>(null);
 
 const wizardStatus = ref("DRAFT");
@@ -75,7 +76,7 @@ watch(() => route.value.id, () => {
 const steps = computed(() => wizardSteps(wizardChannels.value));
 
 onMounted(async () => {
-  healthTimer = setInterval(refreshSystemHealth, HEALTH_INTERVAL);
+  stopHealth = everyWhileVisible(refreshSystemHealth, HEALTH_INTERVAL);
   try {
     currentUser.value = await fetchSession();
   } catch {
@@ -85,7 +86,7 @@ onMounted(async () => {
   [, aiConfig.value] = await Promise.all([refreshSystemHealth(), fetchAiConfig()]);
 });
 
-onBeforeUnmount(() => clearInterval(healthTimer));
+onBeforeUnmount(() => stopHealth());
 </script>
 
 <template>

@@ -3,6 +3,7 @@ package httpapi
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -223,16 +224,13 @@ func (a *api) list(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	total, err := a.campaigns.CountCampaigns(r.Context(), filter)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	groups, err := a.campaigns.CountGroups(r.Context(), filter)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
+	// The chosen group's count is the list's total, so it is not counted twice.
+	total := groups[cmp.Or(filter.Group, "all")]
 	upcoming, err := a.campaigns.UpcomingSends(r.Context(), upcomingSends)
 	if err != nil {
 		writeError(w, r, err)
@@ -735,7 +733,7 @@ func (a *api) events(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-ticker.C:
 		}
-		state, stillChanging, err := a.campaigns.Live(r.Context(), id)
+		state, stillChanging, err := a.campaigns.SharedLive(r.Context(), id)
 		if err != nil {
 			// The client keeps showing the last state until the database is back.
 			if r.Context().Err() == nil {

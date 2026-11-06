@@ -1,0 +1,31 @@
+# Runs the verification stack next to any other stack: its own project name, its own
+# image and ports, a larger seed, and provider faults set per scenario by the load
+# tests. Use it through `make verify-up`, never on its own.
+x-image: &image
+  image: scc-verify-backend
+
+services:
+  setup:
+    <<: *image
+    environment:
+      SEED_USER_COUNT: ${VERIFY_USERS:-116000}
+  api:
+    <<: *image
+    ports: !override
+      - "${VERIFY_API_PORT:-18081}:8080"
+  worker:
+    <<: *image
+    # No published port, so the load tests can run two workers.
+    ports: !reset []
+  mock-provider:
+    <<: *image
+    environment:
+      MOCK_RATE_LIMIT_RATE: ${VERIFY_429:-0}
+      MOCK_SERVER_ERROR_RATE: ${VERIFY_5XX:-0}
+      MOCK_LOST_RESPONSE_RATE: ${VERIFY_LOST:-0}
+      MOCK_UNAUTHORIZED_CHANNELS: ${VERIFY_401:-}
+    ports: !override
+      - "${VERIFY_PROVIDER_PORT:-18083}:8080"
+  frontend:
+    ports: !override
+      - "${VERIFY_WEB_PORT:-18080}:80"

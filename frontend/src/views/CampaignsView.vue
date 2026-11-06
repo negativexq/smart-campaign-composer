@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { CalendarClock, Repeat } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { errorMessage, getTags, listCampaigns, type CampaignGroup, type CampaignSummary, type TagUse, type UpcomingSend } from "../api/campaigns";
@@ -158,10 +159,14 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
       </select>
     </div>
 
-    <div v-if="upcoming.length" class="upcoming small" data-testid="upcoming">
-      <span class="muted">Coming up</span>
-      <a v-for="send in upcoming" :key="send.campaign_id" :href="`/campaigns/${send.campaign_id}`">{{ formatDateTime(send.at) }} · {{ send.name }}</a>
-    </div>
+    <section v-if="upcoming.length" class="upcoming small" aria-labelledby="upcoming-label" data-testid="upcoming">
+      <span id="upcoming-label" class="upcoming-label"><CalendarClock :size="16" aria-hidden="true" />Next sends</span>
+      <a v-for="send in upcoming" :key="send.campaign_id" class="upcoming-send" :href="`/campaigns/${send.campaign_id}`">
+        <time class="upcoming-at" :datetime="send.at">{{ formatDateTime(send.at) }}</time>
+        <span class="upcoming-name">{{ send.name }}</span>
+        <Repeat v-if="send.repeats" :size="13" class="upcoming-repeat" aria-label="Repeats" />
+      </a>
+    </section>
 
     <ValidationNotice v-if="error" tone="error" title="We could not load your campaigns">{{ error }}</ValidationNotice>
     <p v-else-if="!campaigns" class="muted" role="status">Loading campaigns...</p>
@@ -265,18 +270,50 @@ onBeforeUnmount(() => clearTimeout(searchTimer));
 .upcoming {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-2) var(--space-4);
   padding: var(--space-2) var(--space-3);
-  background: var(--color-surface-subtle);
+  background: var(--color-primary-soft);
+  border-left: 3px solid var(--color-primary);
   border-radius: var(--radius-sm);
 }
 
-.upcoming a {
+.upcoming-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.upcoming-send {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
   color: var(--color-text);
   text-decoration: none;
 }
 
-.upcoming a:hover {
+.upcoming-at {
+  color: var(--color-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.upcoming-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upcoming-repeat {
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.upcoming-send:hover .upcoming-name {
   color: var(--color-primary);
   text-decoration: underline;
 }

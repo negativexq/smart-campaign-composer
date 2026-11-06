@@ -167,6 +167,8 @@ In every case someone whose message from an earlier run is still being sent is l
 
 Missed runs are not replayed one by one. After downtime one run covers them, because each run already reaches everyone who is still owed the message.
 
+A campaign that finished sending can be scheduled again, with the messages already approved. That send is another run, so the same choice applies, and it is shown for a one-time send too, because there are earlier sends to leave out. The default still reaches only people who have not received the campaign, which can be nobody. A cancelled schedule stays on the campaign page marked as stopped, so its rule does not read as if it were still running, and a new schedule replaces it.
+
 A one-time send, now or at a set time, goes to the people who were approved: approval stores the list, because someone signed off on that audience. New purchases or moves afterwards change nothing. Consent is the exception, checked again when queuing and before each message, and so is a "not messaged recently" rule, because a message sent since would break what the campaign promised. A repeating send finds who matches at each run, because its point is to reach the people who match then, and the UI says the number can change. Approvals from before the list existed read the rule when they send.
 
 Known limit: a person who starts matching later can have a longer first name than anyone checked at approval. If their SMS then exceeds the limit, it ends as FAILED after a provider 400 rather than being cut.
@@ -175,7 +177,11 @@ Known limit: a person who starts matching later can have a longer first name tha
 
 A fixed one-second bucket allows up to 200 messages across a bucket boundary. A Lua script keeps a sliding window for each channel, so no one-second span goes over 100, however many workers run. If Redis is unavailable, messages wait and no attempt is used: sending without the limiter would risk breaking a hard limit.
 
-Known limit: the limit holds for what workers send. Permits are granted close together, so if one group of calls is delayed by 150 ms or more on the way and the next is not, the provider can see up to 200 in a second, as measured in a test that forces this. Spreading permits evenly fixes that at the cost of about 9% of the rate and twice the Postgres CPU. It is on the branch `experiment/single-permit-limiter`.
+A call counts from when it goes out until its answer comes back, and for one second after the answer. The provider received the call before it answered, so a call held up on the way, when a machine stalls for a moment, cannot land in the same second as a later batch. Before this, a call counted for 1.1 s from when it went out, and a batch delayed by 150 ms or more could reach the provider together with the next one: once in eight measured sends, the provider saw 125 calls in a second. Answers ride on the worker's next request to Redis, which it makes anyway, so this adds no round trips and nothing in PostgreSQL. Spreading permits evenly was the other fix tried, on the branch `experiment/single-permit-limiter`; it cost about 9% of the rate and twice the PostgreSQL CPU.
+
+The window lives only in Redis, which this setup runs without persistence. When Redis loses it, by a restart, a flush or an eviction, the calls of the last seconds are forgotten. Measured with 10 flushes during a send, the provider then saw up to 193 calls in a second. Writing answers back from the workers did not help: most calls of that second had already been answered and reported, so no worker still knew them. A key with no expiry now marks each channel's window as whole, and when it is missing the channel waits 8 s, as long as an unanswered call can count, before granting anything. The same 10 flushes then stayed at 100, at the cost of those 8 s per loss and once at first start. Turning on Redis persistence would avoid most of the waits but not a flush or an eviction, so the check is in the limiter.
+
+A call that gets no answer may still reach the provider later, so it counts until the send timeout plus 2 s have passed, and a second after that. If a worker stops in the middle of a send, its calls count that long too: the channel slows for a few seconds and never goes over.
 
 ## An earlier timeout makes the result UNKNOWN
 
@@ -242,6 +248,10 @@ The claim query mattered most: at 724 ms per batch of 32, the planner alone woul
 We left some out on purpose, because every index on the delivery table slows sending. An index for filtering deliveries by status took 206 MB and saved about 20 ms. Including `attempts` in the progress index took 177 MB rather than 26 MB without a clear gain, since rows change constantly during a send. An index on `user_id` or `sent_at` would speed up reports that no screen has yet (126 ms and 440 ms today).
 
 When dashboards need history across campaigns, a summary table updated when a campaign finishes will serve them better than more indexes on the queue. A filter that matches few rows late in a very large campaign can still take about 100 ms.
+
+The app's connections turn PostgreSQL's JIT off. Its queries are short, and twice a query's estimate passed `jit_above_cost` and compiling it took longer than running it: 114 ms of the report's 334, and most of a list request's 22–28 ms. Optional list filters go into the query only when they are in use, because a reused plan cannot see past `$1 = '' OR ...` and guessed 5 campaigns out of 10,000. See step 5 of [the performance log](docs/performance.md#step-5-the-list-redesign-runs-tags-and-archive).
+
+Work is skipped only where its answer cannot have changed. A finished run's total stands in for counting its deliveries, because a run gets all its deliveries when it opens. Pages watching one campaign share a reading for half a second, and hidden browser tabs do not poll. Keeping the list's sort keys and tab counts on the campaign row, and keeping finished reports, would save more, but each write that changes them would have to update them too, so they wait until the list or the report is slow for real users. See step 6 of [the performance log](docs/performance.md#step-6-work-done-only-when-it-changes-something).
 
 ## Messages left in flight are taken back, and may stay unknown
 
@@ -385,9 +395,9 @@ A stopped worker finishes what it holds, and the slowest case is a provider call
 
 The worker asks the rate limiter how many sends it may make, then claims exactly that many, one loop and one set of slots per channel. It used to claim first and wait for the limiter with the claim in hand. A channel paused by a 429 then filled the shared slots and blocked the other channel, and a long wait could outlast the lease, so another worker could take the same message. Now a channel with no permission holds nothing. A slot also refills as soon as its call ends, because waiting for a whole batch let one call with no answer stop every other message for 5 seconds.
 
-## The limit is enforced a little early
+## The limit is counted as the provider sees it
 
-A limit of 100 a second means 100 as the provider counts them. Calls granted exactly a second apart can land within one second, since each reaches the provider a varying few milliseconds later, and measured on arrival this let through up to 117. The limiter therefore counts over 1.1 seconds, which costs about 9% of the rate: at most 91 a second per channel. This holds while that delay stays under 100 ms, and needs measuring again against a real provider.
+A limit of 100 a second means 100 as the provider counts them. Calls granted exactly a second apart can land within one second, since each reaches the provider a varying few milliseconds later, and measured on arrival this let through up to 117. The limiter used to count each call over 1.1 seconds from its grant, which cost about 9% of the rate and still let a call held up by 150 ms or more land with the next batch. Now a call counts until a second after its answer, as described under the rate limiter above, so the window is a plain second: without faults a channel sends about 95 a second, and in the measured sends the provider never saw more than 100 in a second ([performance.md](docs/performance.md#sending-with-the-new-limiter)).
 
 ## A permit counts from when it is used and belongs to its reservation
 
@@ -396,6 +406,14 @@ A permit is granted before the claim, so a slow claim sends it late, where it ca
 ## A failing provider costs messages nothing
 
 Five attempts last under 20 seconds, so a provider answering 5xx for a minute would use up the attempts of every message tried in that time, for a problem that is not theirs. Per channel, when at least 20 calls in 10 seconds include 50% failures, the breaker stops calling, and messages stay queued without being claimed. After 5 seconds, doubling up to 30, three probes go out. They cost no attempt, and if all three pass the channel resumes. Usual failures of a few percent stay far below the threshold, and each worker counts its own calls.
+
+## A refused key holds the channel, not the message
+
+A 401 used to count as a rejected message. With an expired key every message would fail within minutes, and the no-duplicate rule would keep the run from reaching those people again. A 401 now uses no attempt and locks the channel in Redis for every worker. One call every 30 seconds tests the key, and the limiter grants it in the same step that moves the next test's time forward, so there is one across all workers without a lock service of its own. The test carries the lock's generation and only opens that lock, so a late answer cannot open one set since. Refusals while locked change neither the generation nor the next test's time, so they cannot keep the test from going. The key is an environment variable of the worker, so there is no event that says it was renewed: the test is how the channel finds out, whether the key changed with a restart or at the provider. A 403 stays a rejection, as some providers use it for a refused recipient.
+
+## A channel in trouble raises an alert, not a pause
+
+A provider failing 70% of calls kept the breaker cycling: three probes all passing is a 3% chance at that rate, so a campaign sent about 3 messages a minute and would have taken days. The rule that pauses a campaign after 10 minutes did not fire, because a few messages still finished. Pausing on a failure rate was considered and left out: it would stop the healthy channel too, and a provider that recovers would wait for someone to resume. Instead each sending campaign gets an alert per channel and kind, read from the calls the worker already records: most of the channel's last 20 calls failing, nothing accepted while retries wait, or credentials refused. The rate is read over calls rather than minutes, because a healthy stretch just before the provider broke would otherwise outweigh the failures that follow. It opens and closes on its own, closes only after 20 calls in a minute or when nothing is left to send, and is written once under a PostgreSQL advisory lock however many workers check at once. Nothing new is kept in Redis, and failed connections are not written as calls, so reports keep counting only calls that reached the provider. The breaker's own state stays in each worker: sharing it would need Redis to keep state that a worker's crash could leave stale.
 
 ## Retrying depends on the provider's idempotency
 

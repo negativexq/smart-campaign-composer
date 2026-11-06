@@ -44,15 +44,19 @@ var listGroups = func() map[string]string {
 		"sending": `c.status = 'DISPATCHING'`,
 		"paused":  `c.status = 'PAUSED'`,
 		// Repeats from now on: a schedule with another time to come that is not a single send.
-		"repeating": `c.status IN ('SCHEDULED', 'DISPATCHING', 'PAUSED') AND EXISTS (
-			SELECT 1 FROM campaign_schedules s
-			WHERE s.campaign_id = c.id AND s.next_run_at IS NOT NULL AND s.spec->>'kind' <> 'once')`,
+		"repeating": repeating,
 	}
 	for group, statuses := range groupStatuses {
 		groups[group] = `c.status IN ('` + strings.Join(statuses, `', '`) + `')`
 	}
 	return groups
 }()
+
+// repeating keeps campaigns that repeat from now on: a schedule with another time to
+// come that is not a single send.
+const repeating = `c.status IN ('SCHEDULED', 'DISPATCHING', 'PAUSED') AND EXISTS (
+	SELECT 1 FROM campaign_schedules s
+	WHERE s.campaign_id = c.id AND s.next_run_at IS NOT NULL AND s.spec->>'kind' <> 'once')`
 
 // listGroupOrder is the order group counts are read in.
 var listGroupOrder = []string{"drafts", "review", "active", "repeating", "sending", "paused", "completed", "failed"}
@@ -79,9 +83,10 @@ type ListFilter struct {
 // listOrders holds the only orderings a list can ask for, so no request text
 // reaches the query.
 var listOrders = func() map[string]string {
-	lastStarted := `(SELECT r.started_at FROM campaign_runs r WHERE r.campaign_id = c.id ORDER BY r.number DESC LIMIT 1) DESC NULLS LAST`
+	// sort_next and sort_last come from sortJoins, read once for the whole list.
+	lastStarted := `sort_last DESC NULLS LAST`
 	// What sends soonest first, then what sent last, then the newest.
-	next := `(SELECT s.next_run_at FROM campaign_schedules s WHERE s.campaign_id = c.id) NULLS LAST, ` + lastStarted + `, c.created_at DESC, c.id`
+	next := `sort_next NULLS LAST, ` + lastStarted + `, c.created_at DESC, c.id`
 	return map[string]string{
 		"":          next,
 		"next":      next,
@@ -91,6 +96,13 @@ var listOrders = func() map[string]string {
 		"name":      "lower(c.name), c.id",
 	}
 }()
+
+// sortJoins brings each campaign's next send and latest run start for ordering by
+// them. Joined once, they cost one pass over schedules and runs; looked up per
+// campaign, they cost two lookups for every campaign that matches, not only the page.
+const sortJoins = `
+	LEFT JOIN campaign_schedules sort_sch ON sort_sch.campaign_id = c.id
+	LEFT JOIN (SELECT campaign_id, max(started_at) AS started_at FROM campaign_runs GROUP BY campaign_id) sort_run ON sort_run.campaign_id = c.id`
 
 // Summary is a campaign row. Progress comes from its deliveries, so it stays empty
 // until the campaign is dispatched.
@@ -119,6 +131,7 @@ type ListSchedule struct {
 	Description string     `json:"description"`
 	Repeats     bool       `json:"repeats"`
 	NextRunAt   *time.Time `json:"next_run_at"`
+	Stopped     bool       `json:"stopped"`
 }
 
 // RunSummary is one send of a campaign and how its messages ended.
@@ -169,28 +182,32 @@ func (f ListFilter) matching(withGroup bool) (string, []any, error) {
 	if _, known := listOrders[f.Sort]; !known || f.CreatedWithinDays < 0 || (f.Channel != "" && f.Channel != "sms" && f.Channel != "email") {
 		return "", nil, ErrUnknownFilter
 	}
+	// Only the filters in use become conditions. A condition such as "$1 = '' OR ..."
+	// hides how many rows match from a reused plan, which then picks joins for a
+	// handful of campaigns and runs them for thousands.
+	conditions := []string{"c.deleted_at IS NULL", "(" + group + ")"}
+	args := []any{}
+	param := func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	if query := strings.TrimSpace(f.Query); query != "" {
+		like := param("%" + escapeLike(query) + "%")
+		conditions = append(conditions, `(c.name ILIKE `+like+` ESCAPE '\' OR c.brief ILIKE `+like+` ESCAPE '\'
+		       OR EXISTS (SELECT 1 FROM unnest(c.tags) t WHERE t ILIKE `+like+` ESCAPE '\'))`)
+	}
+	if f.Channel != "" {
+		conditions = append(conditions, param(f.Channel)+" = ANY(c.channels)")
+	}
+	if f.CreatedWithinDays > 0 {
+		conditions = append(conditions, "c.created_at >= now() - make_interval(days => "+param(f.CreatedWithinDays)+")")
+	}
+	if f.Tag != "" {
+		conditions = append(conditions, param(f.Tag)+" = ANY(c.tags)")
+	}
 	return `
 	FROM campaigns c
-	WHERE c.deleted_at IS NULL AND (` + group + `)
-	  AND ($1 = '' OR c.name ILIKE '%' || $1 || '%' ESCAPE '\' OR c.brief ILIKE '%' || $1 || '%' ESCAPE '\'
-	       OR EXISTS (SELECT 1 FROM unnest(c.tags) t WHERE t ILIKE '%' || $1 || '%' ESCAPE '\'))
-	  AND ($2 = '' OR $2 = ANY(c.channels))
-	  AND ($3 = 0 OR c.created_at >= now() - make_interval(days => $3))
-	  AND ($4 = '' OR $4 = ANY(c.tags))`,
-		[]any{escapeLike(strings.TrimSpace(f.Query)), f.Channel, f.CreatedWithinDays, f.Tag}, nil
-}
-
-// CountCampaigns says how many campaigns a filter keeps across every page.
-func (s *Service) CountCampaigns(ctx context.Context, filter ListFilter) (int, error) {
-	matching, args, err := filter.matching(true)
-	if err != nil {
-		return 0, err
-	}
-	var total int
-	if err := s.db.QueryRow(ctx, `SELECT count(*)`+matching, args...).Scan(&total); err != nil {
-		return 0, fmt.Errorf("count campaigns: %w", err)
-	}
-	return total, nil
+	WHERE ` + strings.Join(conditions, "\n\t  AND "), args, nil
 }
 
 // CountGroups says how many campaigns each list group holds with the filter's search
@@ -200,17 +217,25 @@ func (s *Service) CountGroups(ctx context.Context, filter ListFilter) (map[strin
 	if err != nil {
 		return nil, err
 	}
-	columns := "count(*) FILTER (WHERE c.archived_at IS NULL)"
+	// Campaigns are first counted by status, archive and whether they repeat, so each
+	// group's condition is checked on a few counted rows rather than on every campaign.
+	columns := "COALESCE(sum(n) FILTER (WHERE NOT c.archived), 0)::int"
 	for _, group := range listGroupOrder {
-		columns += ", count(*) FILTER (WHERE c.archived_at IS NULL AND " + listGroups[group] + ")"
+		condition := listGroups[group]
+		if group == "repeating" {
+			condition = "c.repeats"
+		}
+		columns += ", COALESCE(sum(n) FILTER (WHERE NOT c.archived AND " + condition + "), 0)::int"
 	}
-	columns += ", count(*) FILTER (WHERE c.archived_at IS NOT NULL)"
+	columns += ", COALESCE(sum(n) FILTER (WHERE c.archived), 0)::int"
 	counts := make([]int, len(listGroupOrder)+2)
 	targets := make([]any, len(counts))
 	for i := range counts {
 		targets[i] = &counts[i]
 	}
-	if err := s.db.QueryRow(ctx, `SELECT `+columns+matching, args...).Scan(targets...); err != nil {
+	counted := `(SELECT c.status, c.archived_at IS NOT NULL AS archived, ` + repeating + ` AS repeats, count(*) AS n` +
+		matching + ` GROUP BY 1, 2, 3) c`
+	if err := s.db.QueryRow(ctx, `SELECT `+columns+` FROM `+counted, args...).Scan(targets...); err != nil {
 		return nil, fmt.Errorf("count campaign groups: %w", err)
 	}
 	groups := map[string]int{"all": counts[0], archivedGroup: counts[len(counts)-1]}
@@ -257,17 +282,22 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 	if limit <= 0 || limit > DefaultListLimit {
 		limit = DefaultListLimit
 	}
+	// Sort keys from other tables are joined only when the order uses them.
+	page := `SELECT c.*, NULL::timestamptz AS sort_next, NULL::timestamptz AS sort_last` + matching
+	if strings.Contains(order, "sort_") {
+		page = `SELECT c.*, sort_sch.next_run_at AS sort_next, sort_run.started_at AS sort_last` +
+			strings.Replace(matching, "FROM campaigns c", "FROM campaigns c"+sortJoins, 1)
+	}
 
 	rows, err := s.db.Query(ctx, `
 		SELECT c.id::text, c.name, c.brief, c.status,
 		       c.channels, COALESCE(d.total, 0), COALESCE(d.processed, 0),
-		       c.created_at, c.updated_at, c.tags, c.archived_at, sch.spec, sch.next_run_at,
+		       c.created_at, c.updated_at, c.tags, c.archived_at, sch.spec, sch.next_run_at, sch.last_run_at,
 		       last.number, last.started_at, last.finished_at, last.total, last.processed, last.sent, last.failed, last.skipped, last.unknown
 		-- Choosing the page first means only its campaigns get counted.
-		FROM (
-			SELECT c.*`+matching+`
+		FROM (`+page+`
 			ORDER BY `+order+`
-			LIMIT $5 OFFSET $6
+			LIMIT `+fmt.Sprintf("$%d OFFSET $%d", len(args)+1, len(args)+2)+`
 		) c
 		LEFT JOIN campaign_schedules sch ON sch.campaign_id = c.id
 		LEFT JOIN LATERAL (
@@ -297,13 +327,14 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 			summary  Summary
 			spec     []byte
 			next     *time.Time
+			lastRun  *time.Time
 			number   *int
 			started  *time.Time
 			finished *time.Time
 			counts   [6]*int
 		)
 		err := row.Scan(&summary.ID, &summary.Name, &summary.Brief, &summary.Status, &summary.Channels,
-			&summary.Total, &summary.Processed, &summary.CreatedAt, &summary.UpdatedAt, &summary.Tags, &summary.ArchivedAt, &spec, &next,
+			&summary.Total, &summary.Processed, &summary.CreatedAt, &summary.UpdatedAt, &summary.Tags, &summary.ArchivedAt, &spec, &next, &lastRun,
 			&number, &started, &finished, &counts[0], &counts[1], &counts[2], &counts[3], &counts[4], &counts[5])
 		if err != nil {
 			return summary, err
@@ -313,7 +344,7 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 			if err := json.Unmarshal(spec, &rule); err != nil {
 				return summary, fmt.Errorf("decode schedule: %w", err)
 			}
-			summary.Schedule = &ListSchedule{Description: rule.Describe(), Repeats: rule.Kind != schedule.KindOnce, NextRunAt: next}
+			summary.Schedule = &ListSchedule{Description: rule.Describe(), Repeats: rule.Kind != schedule.KindOnce, NextRunAt: next, Stopped: stopped(rule, next, lastRun)}
 		}
 		if number != nil {
 			summary.LastRun = &RunSummary{Number: *number, StartedAt: *started, FinishedAt: finished,
@@ -488,7 +519,8 @@ func (s *Service) templateCounts(ctx context.Context) (map[string]int, error) {
 }
 
 // Notifications are the events someone would want to hear about without watching:
-// a send that started on its own, one that ended, and anything that went wrong.
+// a send that started on its own, one that ended, and anything that went wrong,
+// including a channel alert while it is open and the news that it cleared.
 // A scheduled run with nobody new to reach said nothing happened, so it is left out,
 // and a problem since put right, by resuming or by writing again, is no longer news.
 func (s *Service) Notifications(ctx context.Context) ([]ActivityEntry, error) {
@@ -499,7 +531,13 @@ func (s *Service) Notifications(ctx context.Context) ([]ActivityEntry, error) {
 		  AND (a.event_type IN ('campaign.completed', 'campaign.run_finished')
 		   OR (a.event_type = 'campaign.paused' AND c.status = 'PAUSED')
 		   OR (a.event_type = 'content.generation_failed' AND c.status = 'GENERATION_FAILED')
-		   OR (a.event_type = 'campaign.run' AND (a.details->>'queued')::int > 0))
+		   OR (a.event_type = 'campaign.run' AND (a.details->>'queued')::int > 0)
+		   OR a.event_type = 'campaign.alert_closed'
+		   OR (a.event_type = 'campaign.alert_opened' AND NOT EXISTS (
+				SELECT 1 FROM audit_events later
+				WHERE later.campaign_id = a.campaign_id AND later.id > a.id
+				  AND later.event_type IN ('campaign.alert_opened', 'campaign.alert_closed')
+				  AND later.details->>'channel' = a.details->>'channel' AND later.details->>'alert' = a.details->>'alert')))
 		ORDER BY a.id DESC LIMIT $1`, notificationLimit)
 }
 

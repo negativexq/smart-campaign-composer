@@ -260,3 +260,21 @@ func TestApprovedVersionIsImmutable(t *testing.T) {
 		t.Run(name, func(t *testing.T) { requirePgError(t, err, pgRaiseException) })
 	}
 }
+
+func TestAppConnectionsDoNotCompileQueries(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	databaseURL := testsupport.NewDatabaseURL(t)
+	for url, want := range map[string]string{databaseURL: "off", databaseURL + "&jit=on": "on"} {
+		pool, err := db.Connect(ctx, url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var jit string
+		err = pool.QueryRow(ctx, "SHOW jit").Scan(&jit)
+		pool.Close()
+		if err != nil || jit != want {
+			t.Fatalf("%s: jit %q %v, want %q", url, jit, err, want)
+		}
+	}
+}

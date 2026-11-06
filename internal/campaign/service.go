@@ -133,6 +133,7 @@ type Service struct {
 	tracer   trace.Tracer
 	now      func() time.Time
 	channels channelUseCache
+	live     liveCache
 }
 
 // NewService builds a service.

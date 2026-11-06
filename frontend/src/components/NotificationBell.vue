@@ -5,6 +5,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getNotifications, type NotificationEntry } from "../api/campaigns";
 import { describeActivity, notificationTone } from "../lib/activity";
 import { formatDateTime } from "../lib/format";
+import { everyWhileVisible } from "../lib/visibility";
 
 const CHECK_EVERY = 15000;
 const SEEN_KEY = "notifications-seen";
@@ -37,7 +38,7 @@ const root = ref<HTMLElement | null>(null);
 const shown = computed(() => entries.value.filter((entry) => notificationTone(entry) !== "done" || entry.id > cleared.value));
 const canClear = computed(() => shown.value.some((entry) => notificationTone(entry) === "done"));
 const unread = computed(() => shown.value.filter((entry) => entry.id > seen.value).length);
-let timer: ReturnType<typeof setInterval> | undefined;
+let stopChecking = () => {};
 
 async function load() {
   try {
@@ -73,12 +74,12 @@ function closeOnEscape(event: KeyboardEvent) {
 
 onMounted(() => {
   void load();
-  timer = setInterval(load, CHECK_EVERY);
+  stopChecking = everyWhileVisible(load, CHECK_EVERY);
   document.addEventListener("click", closeOutside);
   document.addEventListener("keydown", closeOnEscape);
 });
 onBeforeUnmount(() => {
-  clearInterval(timer);
+  stopChecking();
   document.removeEventListener("click", closeOutside);
   document.removeEventListener("keydown", closeOnEscape);
 });

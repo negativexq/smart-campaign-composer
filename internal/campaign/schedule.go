@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -39,9 +40,14 @@ type ScheduleView struct {
 	CreatedBy   *string       `json:"created_by"`
 	LastRunAt   *time.Time    `json:"last_run_at"`
 	Runs        int           `json:"runs"`
+	// Stopped is a rule cancelled while it still had sends to come. A rule that
+	// ran out on its own, like a one-time send that went, is not stopped.
+	Stopped bool `json:"stopped"`
 }
 
-// Schedule sets when an approved campaign sends, replacing any earlier rule.
+// Schedule sets when an approved campaign sends, replacing any earlier rule. A
+// campaign that finished sending can be scheduled again: each send is its own run,
+// and the rule's reach says whom earlier runs leave out.
 func (s *Service) Schedule(ctx context.Context, id string, spec schedule.Spec) (View, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -53,7 +59,7 @@ func (s *Service) Schedule(ctx context.Context, id string, spec schedule.Spec) (
 	if err != nil {
 		return View{}, err
 	}
-	if status != statusApproved && status != statusScheduled {
+	if !slices.Contains([]string{statusApproved, statusScheduled, statusCompleted, statusCompletedWithFailures}, status) {
 		return View{}, ErrNotApproved
 	}
 	now := s.now()
@@ -89,7 +95,7 @@ func (s *Service) Schedule(ctx context.Context, id string, spec schedule.Spec) (
 }
 
 // CancelSchedule stops future runs. A campaign that never sent goes back to being
-// approved; one that did finishes with what it has sent.
+// approved; one that did, by its schedule or otherwise, finishes with what it has sent.
 func (s *Service) CancelSchedule(ctx context.Context, id string) (View, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -106,7 +112,8 @@ func (s *Service) CancelSchedule(ctx context.Context, id string) (View, error) {
 	}
 	var pending, sentBefore bool
 	err = tx.QueryRow(ctx, `
-		SELECT next_run_at IS NOT NULL, runs > 0 FROM campaign_schedules WHERE campaign_id = $1`, id).Scan(&pending, &sentBefore)
+		SELECT next_run_at IS NOT NULL, EXISTS (SELECT 1 FROM campaign_runs r WHERE r.campaign_id = $1)
+		FROM campaign_schedules WHERE campaign_id = $1`, id).Scan(&pending, &sentBefore)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !pending) {
 		return View{}, ErrNoSchedule
 	}
@@ -155,7 +162,22 @@ func (s *Service) loadSchedule(ctx context.Context, q segment.Querier, id string
 		return nil, fmt.Errorf("decode schedule: %w", err)
 	}
 	view.Description = view.Spec.Describe()
+	view.Stopped = stopped(view.Spec, view.NextRunAt, view.LastRunAt)
 	return &view, nil
+}
+
+// stopped says a rule was cancelled while it still had sends to come: it has no next
+// send, yet it never ran or would have run again after its last send. A rule that
+// ran out on its own, like a one-time send that went, is not stopped.
+func stopped(rule schedule.Spec, next, last *time.Time) bool {
+	if next != nil {
+		return false
+	}
+	if last == nil {
+		return true
+	}
+	_, more := rule.Next(*last)
+	return more
 }
 
 // Scheduler starts the runs that are due. Any number can run side by side: a run

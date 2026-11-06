@@ -244,6 +244,9 @@ Each step is measured with the same scenario as the baseline and compared with i
 | 2 | The report reads a campaign's events and calls once instead of once per delivery; index on `delivery_events (campaign_id)` | — (found in step 1) | Report with one client: 109 ms median instead of 287 ms, 9.0 instead of 3.4 requests/s |
 | 3 | The mock provider stamps a call when it comes in, under a lock of its own | 4 | No call passed 100/s at the provider in 24 channel runs; the old measurement showed 102, 104 and 117 in the same runs |
 | 4 | Each send of a campaign is a run that keeps its counts once finished; the campaign list and progress count only runs still sending | Ceiling after step 3 | Six-endpoint mix on 494k deliveries: 600 RPS with a sub-millisecond median and 800 RPS served, against about 300 RPS after step 3; campaign list query 0.04–0.08 ms instead of 57.7 ms |
+| 5 | Checked the list redesign, runs tab, tags and archive against step 4, then fixed what they slowed: one count instead of two, sort keys joined once, group counts over grouped rows, only filters in use in the query, a run's deliveries read by run, JIT off for the app | — (new features) | Mix on 494k deliveries: 800 RPS served as with step 4. With 10k campaigns, the list takes 6.7 ms against 3.3 ms for step 4, after 19.9 ms before the fixes, and the mix holds 600 RPS rather than 800 |
+| 6 | Work done only when it changes something: a finished run's kept total instead of counting its deliveries; pages watching a campaign share one reading; hidden browser tabs stop asking | Step 5 | Deliveries tab 1.6 ms instead of 5.2 ms; 20 open pages of a campaign cost 4 queries a second instead of 80; at 800 RPS the top queries take 4.8 s of database time instead of 26–27 s, p95 2.0 ms instead of 6 ms |
+| 7 | A call counts against the limit until a second after its answer, instead of for 1.1 s from its grant; answers ride on the worker's next Redis call | Sending at the channel limit after step 6 | Send without faults 88.1–88.8 s instead of 94.0–94.7 s, about 95 messages/s per channel instead of 89; no second above 100 at the provider in 8 runs, against 106 and 125 in one run before |
 
 ### Step 1: the read path
 
@@ -359,4 +362,166 @@ Database time at 600 and 800 RPS:
 | Campaign list | `/api/campaigns`, `/api/overview` | 0.04–0.14 | 2% |
 
 All campaigns here had finished. A campaign that is still sending is counted live for its open run, as every campaign was before; that cost now stays with the runs in flight instead of growing with history. The next bottleneck is the delivery tab's total, which still counts all of a campaign's deliveries when no filter is set.
+
+### Step 5: the list redesign, runs, tags and archive
+
+Three commits after step 4 changed what the read path does. The campaign list now shows each campaign's schedule and last run, counts every status tab, lists the next sends and searches tags. Progress, report and deliveries can be read for one run. Archived and deleted campaigns are left out everywhere. None of this was meant to be faster, so this step checks what it cost and fixes what could be fixed without dropping a feature.
+
+Same data and method as step 4: 116k users, 13 finished campaigns and 494k deliveries, the six-endpoint mix at each target for 40 s, twice, the worker stopped. Step 4's code was measured again on the same day, so both columns come from the same machine state. On this day the step 4 code also served 800 RPS in both runs, where its own measurement had queued in one. Each endpoint alone ran with one client for 15 s.
+
+The first measurement of the new code found two regressions:
+
+| Endpoint, one client | Step 4 | New code | Cause |
+|---|---|---|---|
+| `/api/campaigns` | 0.49 ms, 1,789/s | 0.90 ms, 1,033/s | Four queries instead of two; the list query itself 0.04 ms to 0.15 ms |
+| `/api/campaigns/{id}/deliveries?run=1` | 5.2 ms (no run filter) | 13.8 ms | Filtering by campaign and run made PostgreSQL combine two indexes and read the table |
+
+With 13 campaigns both are small, and the mix still served 800 RPS. The list's cost grows with the number of campaigns, though, so 10,000 draft campaigns were added and the list measured again:
+
+| List, one client, 10k campaigns | Step 4 | New code | After the fixes |
+|---|---|---|---|
+| Default order | 3.3 ms | 19.9 ms | 6.7 ms |
+| Newest first | 3.3 ms | 7.1 ms | 5.6 ms |
+| Drafts tab | 4.0 ms | 20.4 ms | 6.8 ms |
+| Search | 11.2 ms | 16.6 ms | 14.9 ms |
+
+Step 4 ordered by creation time and counted one total. The new default order puts what sends next first, and it looked up each campaign's next send and latest run in two subqueries per campaign. That means 20,000 lookups to choose a page of 100. The tab counts checked about ten conditions on every campaign.
+
+The fixes, in the order they were tried:
+
+1. The list's total is the chosen tab's count, which the tab counts already hold, so it is no longer counted twice.
+2. A run's deliveries are found by the run alone. The run belongs to the campaign, and the run's index answers the count without the table: 13.8 ms back to 5.2 ms.
+3. The next send and the latest run start are joined once for the whole list, and only when the order uses them: 19.9 ms to 11.8 ms.
+4. The tab counts first group campaigns by status, archive and whether they repeat, then check each tab's condition on those few rows: 3.3 ms to 2.0 ms.
+5. Sorting only ids and sort keys and reading the page's campaigns afterwards gained 1 ms. It then lost far more once the next fix gave PostgreSQL true row counts, because it chose to scan every campaign for the page's 100 ids. It was taken out.
+6. Filters such as `$1 = '' OR name ILIKE ...` hide from a reused plan how many rows match. The reused plan expected 5 campaigns out of 10,000 and joined runs in a loop for each: 22 ms. The query now holds only the filters in use.
+7. With true row counts, the list's estimated cost passed `jit_above_cost`, and PostgreSQL compiled it on every request: 22–28 ms. Step 2 met the same with the report. The app's queries are short, and compiling has not paid off in any of them, so the app's connections turn JIT off unless the database URL sets it: 6.7 ms.
+
+The final code, measured as above:
+
+| Data | Target RPS | Step 4: served, median, p95 | Final: served, median, p95 |
+|---|---|---|---|
+| 13 campaigns | 600 | 599.9–600.0, 0.7 ms, 5.8 ms | 599.9–600.0, 0.8 ms, 6.3–6.4 ms |
+| 13 campaigns | 800 | 799.9–800.0, 0.7 ms, 5.9 ms | 800.0, 0.8 ms, 6.3 ms |
+| 10k campaigns | 600 | 600.0, 1.9–3.4 ms, 6.0 ms | 599.9, 5.4 ms, 7.6–7.8 ms |
+| 10k campaigns | 800 | 799.9–800.0, 3.4 ms, 6.2–6.3 ms | 799.9 and 734.1, 5.5–6.5 ms, 8.7 ms and 1,361 ms |
+
+With 13 campaigns, the new features cost nothing the mix can see. The list alone takes 0.81 ms instead of 0.49 ms. The deliveries count is still where most database time goes, as after step 4.
+
+With 10k campaigns, the second run at 800 RPS queued: 1,954 requests were never started, and the list query took most of the database time. Each list request still reads every matching campaign twice: once to order them, and once for the tab counts, which take 2.0 ms on their own. Step 4 read them once and counted with an index. Holding the tab counts and sort keys up to date on the campaign row would remove that work, at the cost of updating them on every status change and every run. That was left for when lists of this size are real.
+
+### Step 6: work done only when it changes something
+
+This step looked for work the app repeats although its answer has not changed, and removed only what can be removed without changing what anyone sees. Two larger changes were left out on purpose: keeping the list's sort keys and tab counts on the campaign row, and keeping a finished run's report. Both would be faster, but every write that touches those values would then have to update them, and a missed update would show a wrong number.
+
+The three changes:
+
+1. **A finished run's total is read, not counted.** The deliveries tab without a filter counted every delivery of the campaign on each request, although a finished run keeps its total when it closes and no delivery joins or leaves a run after it opens. Runs still sending are counted as before, and any filter, including one added later, still counts rows.
+2. **Pages watching a campaign share one reading.** Each open campaign page asked the database once a second for the campaign and its progress, also while the campaign was only approved or scheduled. A reading is now shared for half a second, so the cost follows the campaigns being watched, not the pages. A page that connects still reads the current state itself.
+3. **Hidden browser tabs stop asking.** The health check and notifications every 15 s, and the report every 5 s while delivery reports come in, now wait while the tab is hidden and ask at once when it is shown again if a turn was missed. The delivery monitor already did this.
+
+Same data and method as step 5: 116k users, 13 finished campaigns and 494k deliveries. Step 5's final code was measured again on the same day, then the new code on the same database. Each endpoint alone ran with one client for 15 s. The mix ran at each target for 40 s, twice, the worker stopped.
+
+| Endpoint, one client | Step 5 | Step 6 |
+|---|---|---|
+| Deliveries, no filter (80,966) | 5.2 ms, 181/s | 1.6 ms, 570/s |
+| Deliveries of run 1 | 5.2 ms, 182/s | 1.6 ms, 573/s |
+| Deliveries, status SENT (60,842) | 4.7 ms, 203/s | 4.6 ms, 207/s |
+| Campaign | 0.61 ms | 0.59 ms |
+| Progress | 0.61 ms | 0.60 ms |
+
+The totals were the same in both. A filtered list still counts rows, so it is unchanged.
+
+| Live updates of one approved campaign | Step 5 | Step 6 |
+|---|---|---|
+| 1 open page | 4.0 queries/s | 4.0 queries/s |
+| 20 open pages | 79.7 queries/s | 4.0 queries/s |
+
+| Target RPS | Step 5: served, median, p95 | Step 6: served, median, p95 |
+|---|---|---|
+| 600 | 600.0, 0.8 ms, 5.8 ms | 600.0, 0.8 ms, 2.2–2.3 ms |
+| 800 | 798.2 (73 not started) and 800.0, 0.8 ms, 5.9–6.1 ms | 799.3 (2 not started) and 800.0, 0.7–0.8 ms, 1.9–2.0 ms |
+| 1000 | 1000.0, 0.8 ms, 5.9 ms | 998.6 (49 not started) and 999.9, 0.7–0.8 ms, 2.0 ms |
+
+Both versions served the mix up to 1000 RPS; the few requests not started were k6 running short of virtual users on the same machine, in both. What changed is the tail and the database's work. At 800 RPS, the twelve most expensive queries took 26.0–27.2 s of database time in 40 s with step 5, 81% of it the unfiltered delivery count. With step 6 they took 4.8–4.9 s, and the delivery page itself is now the largest share. The p95 fell from about 6 ms to 2 ms because requests no longer wait behind those counts.
+
+Not measured: the hidden-tab change saves requests that k6 does not make, so it does not show here. With 10 tabs left open in the background, it saves 80 requests a minute for the health check and notifications.
+
+### Ceiling after step 6
+
+1000 RPS was the highest target so far, and step 6 served it with most connections idle. To find the ceiling, the same mix ran with step 6's code at 1500, 2000, 3000 and 4000 RPS, 40 s each, twice, on the same data. k6 started with 300 virtual users instead of 50, because at 1000 RPS a few requests had been skipped while k6 added users. k6 runs on the same machine, and Docker has 8 CPUs.
+
+| Target RPS | Served RPS | Median (ms) | p95 (ms) | Not started | Waits for a connection |
+|---|---|---|---|---|---|
+| 1500 | 1,493.7–1,495.2 | 0.8–0.9 | 26–55 | 193–253 | 10k–17k |
+| 2000 | 1,943.9–1,989.0 | 0.9–1.5 | 103–667 | 429–2,238 | 23k–52k |
+| 3000 | 2,861.1–2,944.5 | 2.9–3.6 | 154–895 | 1,201–5,543 | 127k–143k |
+| 4000 | 3,107.1–3,392.7 | 564–607 | 907–1,076 | 22,986–34,486 | every request |
+
+Up to 1500 RPS the mix is served with a millisecond median and a p95 under 60 ms. From 2000 RPS the tail grows, and at 4000 RPS requests queue: about 3,100–3,400 RPS is the most this setup serves.
+
+The limit is the pool of 8 database connections, not PostgreSQL's CPU. At 4000 RPS PostgreSQL used 2.9 of 8 CPUs on average, about 3 connections were running a query at any moment, and the pool was empty for every request. A connection stays taken while the API sends a query, waits for the answer, reads the rows and sends the next one, so a held connection is busy in PostgreSQL only part of the time. A larger pool would likely raise the ceiling; it was not tried, because the API, PostgreSQL and k6 already share the same 8 CPUs here, and a measurement of that should run on separate machines.
+
+### Sending at the channel limit after step 6
+
+The channel limit is the target that matters for sending: 100 calls a second per channel at the provider. The worker's limiter grants 100 calls in any 1.1 s, so a channel without faults can send at most 90.9 messages a second, and the provider should never see more than 100 in a second. This run measured how long a send takes at that limit, and whether reads at the same time slow it down or push it past the limit.
+
+The same database as above: 116k users and 494k earlier deliveries, one worker, step 6's code. Each send is the Istanbul cart campaign over both channels: 20,514 people and channels, of which 5,103 are skipped by consent or the no-duplicate rule and 15,411 are sent (8,198 email, 7,213 SMS). Four cases, each twice:
+
+- no provider faults, nothing else running;
+- no provider faults, while the API serves the six-endpoint mix at 500 RPS and 20 open pages follow the sending campaign;
+- the default faults (2% 429, 3% 5xx, 0.2% lost responses), nothing else running;
+- the default faults with the same reads.
+
+| Case | Send time (s) | Queue prepared (s) | First message accepted (s) | Email: span (s), msg/s | SMS: span (s), msg/s | Highest calls in a second at the provider |
+|---|---|---|---|---|---|---|
+| No faults | 94.1–94.2 | 1.19–1.35 | 1.24–1.49 | 91.6–92.1, 89.0–89.5 | 81.3, 88.7 | 100, 100 |
+| No faults, reads | 94.0–94.7 | 0.99–1.70 | 1.03–1.79 | 91.9–92.9, 88.2–89.2 | 81.3–81.7, 88.3–88.7 | 100 and 106 email, 100 and 125 SMS |
+| Default faults | 154.3–156.8 | 0.86–0.96 | 0.95–1.09 | 152.5–154.9, 52.9–53.8 | 131.0–146.7, 49.2–55.1 | 100, 100 |
+| Default faults, reads | 163.2–170.0 | 0.94–1.05 | 1.09–1.27 | 161.5–167.8, 48.9–50.8 | 133.7–142.9, 50.5–53.9 | 100, 100 |
+
+Send time runs from the dispatch call to the campaign's completion. Queue prepared is how long the dispatch call took to choose the audience and queue every delivery. Span is from a channel's first accepted message to its last. Every delivery ended sent in every run, and no message was accepted twice.
+
+| Case | Queued to accepted, p50 / p95 / max (s) | Provider call, p50 / p95 (ms) | API during the send, p50 / p95 (ms) |
+|---|---|---|---|
+| No faults | 42–48 / 78–89 / 83–94 | 40–44 / 94–165 | — |
+| No faults, reads | 42–48 / 78–90 / 82–95 | 41–43 / 98–157 | 3.8–4.2 / 10–221 |
+| Default faults | 64–77 / 125–146 / 132–156 | 39–40 / 93–96 | — |
+| Default faults, reads | 66–81 / 124–155 / 135–169 | 39–43 / 94–178 | 3.7–3.8 / 10–12 |
+
+Queued to accepted is how long one message waited from being queued to its accepted call. It is mostly the queue: the whole audience is queued at once and drained at the channel's rate, so the last message waits about as long as the send takes.
+
+What this shows:
+
+- Without faults a channel sends at 88–89.5 messages a second, 97–98% of the 90.9 the limiter allows. With the default faults it sends at 49–55, as in the profile: the pause after each 429 takes the rest.
+- Reads at 500 RPS do not slow a send without faults. With faults the send took 5–8% longer with reads, within the spread between runs of the same case.
+- The API kept a median under 5 ms while sending; its p95 was 10–12 ms in three of the four runs with reads.
+- In one of the eight runs, the first with reads and no faults, the provider saw 106 email calls and 125 SMS calls in one second. The worker's own record shows the same second on both channels at once, and the API's p95 in that run was 221 ms instead of about 10 ms: the machine stalled for a moment while k6, the API, PostgreSQL and the worker shared its CPUs, a batch of calls was held up on the way, and it reached the provider together with the next. This is the limit already noted in [`DECISIONS.md`](../DECISIONS.md): the limiter counts calls when it grants them, so calls delayed on the way by 150 ms or more can arrive together. [Sending with the new limiter](#sending-with-the-new-limiter) closes it. The other seven runs, including the three other runs with reads, never passed 100.
+
+### Sending with the new limiter
+
+The overrun above came from counting a call from its grant. Now a call counts from its grant, while it is in flight, and for a second after its answer ([`DECISIONS.md`](../DECISIONS.md#the-limit-is-counted-as-the-provider-sees-it), [errors-and-retries.md](errors-and-retries.md#how-calls-count-against-the-limit)). The provider received a call before it answered, so a later call cannot reach it within that second however long the first was held up, and the window can be a plain second instead of 1.1 s. The same eight runs as above, on the same data, with this limiter:
+
+| Case | Send time (s) | Queue prepared (s) | First message accepted (s) | Email: span (s), msg/s | SMS: span (s), msg/s | Highest calls in a second at the provider |
+|---|---|---|---|---|---|---|
+| No faults | 88.2–88.8 | 1.12–1.33 | 1.31–1.56 | 86.2–86.4, 94.9–95.1 | 75.9, 95.0 | 100, 100 |
+| No faults, reads | 88.1–88.2 | 0.87–0.90 | 0.94–1.00 | 86.7, 94.6 | 75.9–76.2, 94.7–95.0 | 100, 100 |
+| Default faults | 153.9–166.2 | 0.95–1.05 | 1.23 | 152.4–163.6, 50.1–53.8 | 139.7–146.2, 49.3–51.6 | 100, 100 |
+| Default faults, reads | 158.9–162.8 | 0.93–1.14 | 0.95–1.20 | 157.2–161.3, 50.8–52.2 | 137.6–138.9, 51.9–52.4 | 100, 100 |
+
+| Case | Queued to accepted, p50 / p95 / max (s) | Provider call, p50 / p95 (ms) | API during the send, p50 / p95 (ms) |
+|---|---|---|---|
+| No faults | 39–44 / 73–84 / 77–88 | 38 / 93–94 | — |
+| No faults, reads | 39–44 / 73–84 / 77–88 | 37–40 / 91–96 | 3.9–4.0 / 20–24 |
+| Default faults | 70–77 / 129–152 / 141–165 | 37–38 / 91–92 | — |
+| Default faults, reads | 65–78 / 123–148 / 139–162 | 39–42 / 94–99 | 3.8–4.0 / 10–28 |
+
+Every delivery ended sent in every run, and no message was accepted twice. With the default faults the provider answered 10–21 calls per channel and run as duplicates: these are retries after a lost answer, and the idempotency key made the provider return the message it had already accepted instead of sending it again.
+
+What changed:
+
+- Without faults a send takes 88.1–88.8 s instead of 94.0–94.7 s, about 6% less, and a channel sends about 95 messages a second instead of 89. What is left below 100 is the second after each answer: a call takes about 40 ms, so its permit comes back a little later than one counted from the grant.
+- The provider saw at most 100 calls in a second in all eight runs, including the four with reads and the stalls they cause.
+- With the default faults the rate stays at 49–54 messages a second, as before: the pause after each 429 still takes most of the channel's time, and the new count does not change that.
+- Recording answers adds nothing measurable: they go with the Redis calls the worker makes anyway, and the worker used 0.05–0.11 CPU cores, as before.
 

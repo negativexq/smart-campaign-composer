@@ -410,6 +410,43 @@ describe("campaign page after approval", () => {
     expect(called(fetchMock, "DELETE", "/api/campaigns/c1/schedule")).toHaveLength(1);
   });
 
+  it("shows a cancelled schedule as stopped", async () => {
+    const schedule = { spec: { kind: "interval" as const }, description: "Every day, reaching only people not reached before", next_run_at: null, last_run_at: "2026-11-05T09:00:00Z", runs: 2, stopped: true };
+    const { wrapper } = await open(routes({ ...ready, status: "COMPLETED", schedule }));
+    expect(wrapper.find("[data-testid=schedule-stopped]").text()).toBe("Stopped");
+    expect(wrapper.find("[data-testid=schedule-description]").text()).toBe("Was: Every day, reaching only people not reached before");
+    expect(wrapper.find("[data-testid=cancel-schedule]").exists()).toBe(false);
+  });
+
+  it("schedules a finished campaign again, choosing whom the send reaches", async () => {
+    const schedule = { spec: { kind: "once" as const }, description: "Once on 1 Dec", next_run_at: "2026-12-01T10:00:00Z", last_run_at: null, runs: 0 };
+    const { wrapper, fetchMock } = await open({
+      ...routes({ ...ready, status: "COMPLETED" }),
+      "POST /api/campaigns/c1/schedule": { body: { ...ready, status: "SCHEDULED", schedule } },
+    });
+    await wrapper.find("[data-testid=schedule-again]").trigger("click");
+    const dialog = wrapper.find("[data-testid=schedule-dialog]");
+    expect(dialog.text()).not.toContain("Send now");
+    expect(dialog.find("[data-testid=schedule-reach]").exists()).toBe(true);
+    expect(dialog.find<HTMLButtonElement>("[data-testid=schedule-again-confirm]").element.disabled).toBe(true);
+    await dialog.find("[data-testid=schedule-at]").setValue("2026-12-01T10:00");
+    await dialog.find("[data-testid=reach-everyone]").setValue(true);
+    expect(dialog.find("[data-testid=reach-everyone-warning]").text()).toContain("already received");
+    await dialog.find("[data-testid=schedule-again-confirm]").trigger("click");
+    await flushPromises();
+    const [request] = called(fetchMock, "POST", "/api/campaigns/c1/schedule");
+    expect(JSON.parse(String(request[1]?.body))).toMatchObject({ kind: "once", reach: "everyone" });
+    expect(wrapper.find("[data-testid=schedule-dialog]").exists()).toBe(false);
+  });
+
+  it("offers scheduling again only once a campaign finished", async () => {
+    for (const status of ["DISPATCHING", "SCHEDULED", "APPROVED"]) {
+      const { wrapper } = await open(routes({ ...ready, status }));
+      expect(wrapper.find("[data-testid=schedule-again]").exists()).toBe(false);
+      wrapper.unmount();
+    }
+  });
+
   it("follows sending as it happens and closes the stream when it ends", async () => {
     const all = routes({ ...ready, status: "DISPATCHING" }, { ...progress, processed: 3 });
     const { wrapper } = await open(all);
@@ -428,6 +465,27 @@ describe("campaign page after approval", () => {
     expect(wrapper.find("[data-testid=progress-count]").exists()).toBe(false);
     expect(wrapper.text()).toContain("Completed");
     expect(stream.closed).toBe(true);
+  });
+
+  it("shows a channel alert while it is open and drops it when it clears", async () => {
+    const { wrapper } = await open(routes({ ...ready, status: "DISPATCHING" }, { ...progress, processed: 3 }));
+    const stream = FakeEventSource.last!;
+    const refusedSms = { channel: "sms", kind: "credentials_refused", since: "2026-11-03T12:00:00Z", details: {} };
+    stream.emit("update", { status: "DISPATCHING", progress, alerts: [refusedSms] });
+    await flushPromises();
+    const shown = wrapper.findAll("[data-testid=channel-alert]");
+    expect(shown).toHaveLength(1);
+    expect(shown[0].text()).toContain("SMS: the provider refused our credentials");
+    expect(shown[0].text()).toContain("without using their attempts");
+
+    const failingEmail = { channel: "email", kind: "error_rate", since: "2026-11-03T12:00:00Z", details: { calls: 20, failed: 14 } };
+    stream.emit("update", { status: "DISPATCHING", progress, alerts: [refusedSms, failingEmail] });
+    await flushPromises();
+    expect(wrapper.findAll("[data-testid=channel-alert]")[1].text()).toContain("14 of the last 20 calls failed");
+
+    stream.emit("update", { status: "DISPATCHING", progress, alerts: [] });
+    await flushPromises();
+    expect(wrapper.find("[data-testid=channel-alert]").exists()).toBe(false);
   });
 
   it("does not open a stream for a campaign that cannot change", async () => {

@@ -568,9 +568,15 @@ describe("campaign list", () => {
             schedule: { description: "Every day at 18:00, reaching only people not reached before", repeats: true, next_run_at: "2026-11-06T18:00:00Z" },
             last_run: run({ number: 14, total: 1300, processed: 1300, sent: 1240, failed: 3 }),
           }),
+          summary({
+            id: "c4",
+            status: "COMPLETED",
+            schedule: { description: "Every day at 09:00, reaching only people not reached before", repeats: true, next_run_at: null, stopped: true },
+            last_run: run({ number: 3, total: 40, processed: 40, sent: 40 }),
+          }),
         ],
-        total: 3,
-        groups: { all: 3, drafts: 1, repeating: 1, active: 2 },
+        total: 4,
+        groups: { all: 4, drafts: 1, repeating: 1, active: 2 },
         upcoming: [{ campaign_id: "c3", name: "Abandoned cart", at: "2026-11-06T18:00:00Z", repeats: true }],
       },
     });
@@ -588,8 +594,14 @@ describe("campaign list", () => {
     expect(rows[2].find("[data-testid=campaign-last]").text()).toContain("1,240 sent");
     expect(rows[2].find("[data-testid=campaign-last]").text()).toContain("Run #14");
     expect(rows[2].find("[data-testid=campaign-last]").text()).toContain("3 failed");
+    // A cancelled schedule does not read as if it still ran.
+    expect(rows[3].find("[data-testid=campaign-kind]").text()).toContain("Schedule stopped");
+    expect(rows[3].find("[data-testid=campaign-kind]").text()).not.toContain("Every day");
     expect(wrapper.find("[data-testid=group-repeating]").text()).toContain("1");
     expect(wrapper.find("[data-testid=upcoming]").text()).toContain("Abandoned cart");
+    expect(wrapper.find("[data-testid=upcoming]").text()).toContain("Next sends");
+    expect(wrapper.find("[data-testid=upcoming] time").attributes("datetime")).toBe("2026-11-06T18:00:00Z");
+    expect(wrapper.find("[data-testid=upcoming] [aria-label=Repeats]").exists()).toBe(true);
   });
 
   it("filters by tag from the menu or a row, and keeps the archive apart", async () => {

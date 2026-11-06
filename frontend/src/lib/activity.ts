@@ -1,6 +1,7 @@
 import { EMAIL_TEMPLATES } from "./emailTemplates";
 import type { ActivityEntry } from "../api/campaigns";
 import { languageName } from "./languages";
+import { describeAlert, describeCleared } from "./channelAlerts";
 
 const FAILURE_REASONS: Record<string, string> = {
   invalid_output: "the output never passed validation",
@@ -57,7 +58,8 @@ const templateName = (id: string) => (EMAIL_TEMPLATES.find((template) => templat
 
 export function notificationTone(entry: ActivityEntry): "error" | "done" | "started" {
   const { failed, unknown } = entry.details;
-  if (entry.type === "campaign.paused" || entry.type === "content.generation_failed") return "error";
+  if (entry.type === "campaign.paused" || entry.type === "content.generation_failed" || entry.type === "campaign.alert_opened") return "error";
+  if (entry.type === "campaign.alert_closed") return "done";
   if (entry.type === "campaign.run") return "started";
   return Number(failed ?? 0) + Number(unknown ?? 0) > 0 ? "error" : "done";
 }
@@ -129,6 +131,10 @@ export function describeActivity(entry: ActivityEntry): { title: string; detail:
       return { title: "Sending stopped", detail: pauseDetail(details) };
     case "campaign.resumed":
       return { title: "Sending resumed", detail: "" };
+    case "campaign.alert_opened":
+      return describeAlert({ channel: String(details.channel), kind: String(details.alert), details });
+    case "campaign.alert_closed":
+      return { title: describeCleared({ channel: String(details.channel), kind: String(details.alert) }), detail: "" };
     default:
       return { title: entry.type, detail: "" };
   }

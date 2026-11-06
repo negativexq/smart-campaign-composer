@@ -12,7 +12,13 @@ const count = (value: number) => value.toLocaleString("en-US");
 // What kind of campaign it is, in the words of its rule, and the channels it uses.
 function kindOf(campaign: CampaignSummary) {
   const channels = campaign.channels.map(formatChannel).join(", ");
-  const kind = campaign.schedule?.repeats ? campaign.schedule.description : campaign.schedule ? "One time, at a set time" : "One time";
+  const kind = campaign.schedule?.stopped
+    ? "Schedule stopped"
+    : campaign.schedule?.repeats
+      ? campaign.schedule.description
+      : campaign.schedule
+        ? "One time, at a set time"
+        : "One time";
   return channels ? `${kind} · ${channels}` : kind;
 }
 

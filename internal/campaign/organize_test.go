@@ -183,3 +183,35 @@ func TestAScheduledCampaignCannotBeDeleted(t *testing.T) {
 		t.Fatalf("delete while scheduled: %v", err)
 	}
 }
+
+func TestTheListPutsWhatSendsNextFirstThenWhatSentLast(t *testing.T) {
+	t.Parallel()
+	h, scheduled := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, scheduled, schedule.Spec{Kind: schedule.KindInterval, EveryHours: 24}); err != nil {
+		t.Fatal(err)
+	}
+	older, lately, newest := h.create(t), h.create(t), h.create(t)
+	// Two finished sends, the later one more recent: a run's start is what orders them.
+	if _, err := h.pool.Exec(ctx, `
+		INSERT INTO campaign_runs (campaign_id, number, started_at, finished_at, total, counts, responses)
+		VALUES ($1, 1, $3::timestamptz - interval '2 days', $3, 0, '[]', '{}'),
+		       ($2, 1, $3::timestamptz - interval '3 days', $3, 0, '[]', '{}'),
+		       ($2, 2, $3::timestamptz - interval '1 day', $3, 0, '[]', '{}')`, older, lately, referenceTime); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE campaigns SET created_at = now() + interval '1 hour' WHERE id = $1`, newest); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{scheduled, lately, older, newest}
+	if got := listedIDs(t, h, campaign.ListFilter{}); !slices.Equal(got, want) {
+		t.Fatalf("next send order %v, want %v", got, want)
+	}
+	if got := listedIDs(t, h, campaign.ListFilter{Sort: "last_sent"}); !slices.Equal(got[:2], []string{lately, older}) {
+		t.Fatalf("last sent order %v", got)
+	}
+	groups, err := h.service.CountGroups(ctx, campaign.ListFilter{})
+	if err != nil || groups["all"] != 4 || groups["repeating"] != 1 || groups["active"] != 1 || groups["drafts"] != 3 {
+		t.Fatalf("groups %v %v", groups, err)
+	}
+}

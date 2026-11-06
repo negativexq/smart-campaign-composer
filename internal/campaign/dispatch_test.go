@@ -418,6 +418,86 @@ func TestCancellingBeforeTheFirstSendGoesBackToApproved(t *testing.T) {
 	}
 }
 
+// A campaign that finished sending can be given a new schedule. Cancelling it keeps
+// the earlier sends' record, and the rule shows as stopped, not as still running.
+func TestAFinishedCampaignCanBeScheduledAgain(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Dispatch(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	// Sent on the test clock, so reaching people again compares against the same time.
+	if _, err := h.pool.Exec(ctx, `UPDATE campaign_deliveries SET status = 'SENT', updated_at = $2 WHERE campaign_id = $1 AND status = 'QUEUED'`, id, referenceTime); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE campaigns SET status = 'COMPLETED' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	queued := func() (n int) {
+		t.Helper()
+		if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM campaign_deliveries WHERE campaign_id = $1 AND status = 'QUEUED'`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	// Cancelled before it runs, it finishes with what was sent instead of going back to approved.
+	view, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindInterval, EveryHours: 24})
+	if err != nil || view.Status != "SCHEDULED" || view.Schedule.Stopped {
+		t.Fatalf("schedule: %v %s %+v", err, view.Status, view.Schedule)
+	}
+	view, err = h.service.CancelSchedule(ctx, id)
+	if err != nil || view.Status != "DISPATCHING" || view.Schedule == nil || !view.Schedule.Stopped || view.Schedule.NextRunAt != nil {
+		t.Fatalf("cancel: %v %s %+v", err, view.Status, view.Schedule)
+	}
+	listed, err := h.service.List(ctx, campaign.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range listed {
+		if row.ID == id && (row.Schedule == nil || !row.Schedule.Stopped) {
+			t.Fatalf("the list shows the rule as stopped: %+v", row.Schedule)
+		}
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE campaigns SET status = 'COMPLETED' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+
+	// By default nobody already reached is messaged again; reaching everyone sends to all.
+	view, err = h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: nextHour()})
+	if err != nil || view.Schedule.Stopped || view.Schedule.NextRunAt == nil {
+		t.Fatalf("schedule again: %v %+v", err, view.Schedule)
+	}
+	if ran, err := scheduler(h, nextHour().Add(time.Second)).RunDue(ctx); err != nil || ran != 1 || queued() != 0 {
+		t.Fatalf("reach new: %d %v, queued %d", ran, err, queued())
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE campaigns SET status = 'COMPLETED' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	later := nextHour().Add(2 * time.Hour)
+	view, err = h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: &later, Reach: schedule.ReachEveryone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent int
+	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM campaign_deliveries WHERE campaign_id = $1 AND status = 'SENT'`, id).Scan(&sent); err != nil || sent == 0 {
+		t.Fatalf("first send: %d %v", sent, err)
+	}
+	if ran, err := scheduler(h, later.Add(time.Second)).RunDue(ctx); err != nil || ran != 1 || queued() != sent {
+		t.Fatalf("reach everyone: %d %v, queued %d of %d", ran, err, queued(), sent)
+	}
+	// A one-time send that went ran out on its own: it is not stopped.
+	view, _ = h.service.Get(ctx, id)
+	if view.Schedule.Stopped || view.Schedule.NextRunAt != nil {
+		t.Fatalf("after the send: %+v", view.Schedule)
+	}
+	var runs int
+	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM campaign_runs WHERE campaign_id = $1`, id).Scan(&runs); err != nil || runs != 3 {
+		t.Fatalf("each send is its own run: %d %v", runs, err)
+	}
+}
+
 func TestARepeatingScheduleNeverMessagesAnyoneTwice(t *testing.T) {
 	t.Parallel()
 	h, id := approvedCampaign(t)
@@ -461,6 +541,12 @@ func TestARepeatingScheduleNeverMessagesAnyoneTwice(t *testing.T) {
 	}
 	if runs != 2 || secondQueued != 2 {
 		t.Fatalf("each firing is its own run: %d runs, the second queued %d", runs, secondQueued)
+	}
+
+	// Cancelled after it ran, the rule had more runs to come: it shows as stopped.
+	view, err := h.service.CancelSchedule(ctx, id)
+	if err != nil || view.Schedule == nil || !view.Schedule.Stopped || view.Schedule.NextRunAt != nil {
+		t.Fatalf("cancel after runs: %v %+v", err, view.Schedule)
 	}
 }
 
@@ -509,6 +595,29 @@ func TestEachRunCanBeReadOnItsOwn(t *testing.T) {
 	count, err := h.service.CountDeliveries(ctx, id, campaign.DeliveryFilter{Run: 2})
 	if err != nil || count != runs[0].Total {
 		t.Fatalf("deliveries of run 2: %d %v", count, err)
+	}
+	// Once run 1 is finished, its kept total stands in for counting, and run 2, still
+	// sending, is counted: both give what counting every row gives.
+	if _, err := h.pool.Exec(ctx, `
+		UPDATE campaign_runs r SET finished_at = now(), counts = '[]', responses = '{}',
+		       total = (SELECT count(*) FROM campaign_deliveries d WHERE d.run_id = r.id)
+		WHERE r.campaign_id = $1 AND r.number = 1`, id); err != nil {
+		t.Fatal(err)
+	}
+	for run := range 3 {
+		var rows int
+		if err := h.pool.QueryRow(ctx, `
+			SELECT count(*) FROM campaign_deliveries d JOIN campaign_runs r ON r.id = d.run_id
+			WHERE r.campaign_id = $1 AND ($2 = 0 OR r.number = $2)`, id, run).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+		count, err := h.service.CountDeliveries(ctx, id, campaign.DeliveryFilter{Run: run, Limit: 10, Offset: 5})
+		if err != nil || count != rows || rows == 0 {
+			t.Fatalf("deliveries of run %d: %d, rows %d, %v", run, count, rows, err)
+		}
+	}
+	if sent, err := h.service.CountDeliveries(ctx, id, campaign.DeliveryFilter{Status: "SENT"}); err != nil || sent != runs[1].Sent {
+		t.Fatalf("a filter still counts rows: %d, want %d, %v", sent, runs[1].Sent, err)
 	}
 	report, err := h.service.RunReport(ctx, id, 2)
 	if err != nil {
@@ -1113,5 +1222,28 @@ func TestLanguagesMustPromiseTheSameDiscount(t *testing.T) {
 	}
 	if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrLanguageDiscount) {
 		t.Fatalf("approve: %v", err)
+	}
+}
+
+func TestPagesWatchingACampaignShareOneReadingForHalfASecond(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if state, _, err := h.service.SharedLive(ctx, id); err != nil || state.Status != "APPROVED" {
+		t.Fatalf("first reading: %+v %v", state, err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE campaigns SET status = 'CANCELLED' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	// Another page asking right away gets the same reading; a page that connects reads now.
+	if state, changing, err := h.service.SharedLive(ctx, id); err != nil || state.Status != "APPROVED" || !changing {
+		t.Fatalf("shared reading: %+v %v %v", state, changing, err)
+	}
+	if state, _, err := h.service.Live(ctx, id); err != nil || state.Status != "CANCELLED" {
+		t.Fatalf("connecting page: %+v %v", state, err)
+	}
+	time.Sleep(600 * time.Millisecond)
+	if state, changing, err := h.service.SharedLive(ctx, id); err != nil || state.Status != "CANCELLED" || changing {
+		t.Fatalf("after half a second: %+v %v %v", state, changing, err)
 	}
 }

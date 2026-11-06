@@ -46,6 +46,10 @@ type Metrics struct {
 	DeliveryRateLimitWait *prometheus.HistogramVec
 	DeliveryCircuitOpen   *prometheus.GaugeVec
 	DeliveryCircuitTrips  *prometheus.CounterVec
+	// DeliveryCredentialLocks counts channels held because the provider refused
+	// their credentials; DeliveryAlerts counts channel alerts opening and closing.
+	DeliveryCredentialLocks *prometheus.CounterVec
+	DeliveryAlerts          *prometheus.CounterVec
 
 	// These split a channel's time and a message's wait into what each one went on.
 	DeliveryLoopSeconds    *prometheus.CounterVec
@@ -138,6 +142,14 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 			Name: "campaign_delivery_circuit_trips_total",
 			Help: "Times a channel stopped calling a failing provider.",
 		}, []string{"channel"}),
+		DeliveryCredentialLocks: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "campaign_delivery_credential_locks_total",
+			Help: "Times a channel was held because the provider refused its credentials.",
+		}, []string{"channel"}),
+		DeliveryAlerts: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "campaign_delivery_alerts_total",
+			Help: "Channel alerts on sending campaigns, by kind and whether they opened or closed.",
+		}, []string{"channel", "alert", "state"}),
 		DeliveryLoopSeconds: factory.NewCounterVec(prometheus.CounterOpts{
 			Name: "campaign_delivery_loop_seconds_total",
 			Help: "Time a channel's sending loop spent, by state. Together the states add up to the time it ran.",

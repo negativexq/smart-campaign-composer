@@ -65,6 +65,19 @@ describe("notifications", () => {
     wrapper.unmount();
   });
 
+  it("tells a channel alert apart from its clearing", async () => {
+    const wrapper = await open([
+      entry(2, "campaign.alert_closed", { channel: "email", alert: "error_rate" }),
+      entry(1, "campaign.alert_opened", { channel: "sms", alert: "no_progress", minutes: 10 }),
+    ]);
+    await wrapper.find("[data-testid=notifications-toggle]").trigger("click");
+    const items = wrapper.findAll("[data-testid=notification]");
+    expect(items.map((item) => item.attributes("data-tone"))).toEqual(["done", "error"]);
+    expect(items[0].text()).toContain("Email: calls going through again");
+    expect(items[1].text()).toContain("SMS: nothing accepted in the last 10 minutes");
+    wrapper.unmount();
+  });
+
   it("clears only what ended well, and problems stay and lead to their campaign", async () => {
     const list = [entry(3, "campaign.paused", { waiting: 2 }), entry(2, "campaign.completed", { accepted: 3 }), entry(1, "campaign.run", { queued: 4 })];
     const wrapper = await open(list);

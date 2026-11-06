@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -93,6 +94,9 @@ func behaviorFromEnv() mockprovider.Behavior {
 			continue
 		}
 		*target = time.Duration(milliseconds) * time.Millisecond
+	}
+	if value := os.Getenv("MOCK_UNAUTHORIZED_CHANNELS"); value != "" {
+		behavior.Unauthorized = strings.Split(value, ",")
 	}
 	return behavior
 }

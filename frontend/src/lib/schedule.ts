@@ -71,11 +71,18 @@ function toInstant(local: string): string | undefined {
   return `${local.slice(0, 16)}:00${offset < 0 ? "-" : "+"}${pad(offset / 60)}:${pad(offset % 60)}`;
 }
 
+// A one-time send of a campaign that sent before says whom it reaches, even the default.
+function explicitReach(form: ScheduleForm): Pick<ScheduleSpec, "reach" | "reach_after_days"> {
+  return form.reach === "after" ? reachOf(form) : { reach: form.reach };
+}
+
 // What is still missing before the form can be sent. The backend has the final say.
-export function scheduleProblem(form: ScheduleForm): string {
+// sentBefore means the campaign already sent, so a one-time send chooses whom it reaches.
+export function scheduleProblem(form: ScheduleForm, sentBefore = false): string {
   switch (form.mode) {
     case "once":
-      return toInstant(form.at) ? "" : "Choose a date and time.";
+      if (!toInstant(form.at)) return "Choose a date and time.";
+      return sentBefore ? restProblem(form) : "";
     case "interval":
       if (!Number.isInteger(form.every) || form.every < 1) return "Choose how often to send.";
       return restProblem(form);
@@ -95,11 +102,11 @@ function restProblem(form: ScheduleForm): string {
 }
 
 // Null means send now.
-export function buildSchedule(form: ScheduleForm): ScheduleSpec | null {
+export function buildSchedule(form: ScheduleForm, sentBefore = false): ScheduleSpec | null {
   const ends = toInstant(form.endsAt);
   switch (form.mode) {
     case "once":
-      return { kind: "once", at: toInstant(form.at) };
+      return { kind: "once", at: toInstant(form.at), ...(sentBefore ? explicitReach(form) : {}) };
     case "interval":
       return {
         kind: "interval",

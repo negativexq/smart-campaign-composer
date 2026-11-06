@@ -38,6 +38,9 @@ type TimelineBucket struct {
 	ServerError int       `json:"server_error"`
 	Rejected    int       `json:"rejected"`
 	Timeout     int       `json:"timeout"`
+	// Unauthorized counts calls the provider answered with a 401: the channel's
+	// credentials were refused, so those messages wait without using an attempt.
+	Unauthorized int `json:"unauthorized"`
 }
 
 // Timeline has a bucket for every period from the first call to the last, so a
@@ -305,7 +308,8 @@ func (s *Service) reportTimeline(ctx context.Context, id string, run *string) (T
 		       count(*) FILTER (WHERE outcome = 'rate_limited'),
 		       count(*) FILTER (WHERE outcome = 'server_error'),
 		       count(*) FILTER (WHERE outcome = 'rejected'),
-		       count(*) FILTER (WHERE outcome = 'timeout')
+		       count(*) FILTER (WHERE outcome = 'timeout'),
+		       count(*) FILTER (WHERE outcome = 'unauthorized')
 		FROM delivery_attempts
 		WHERE campaign_id = $1 AND ($3::uuid IS NULL OR run_id = $3)
 		GROUP BY 1`, id, float64(timeline.BucketSeconds), run)

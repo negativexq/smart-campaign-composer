@@ -18,6 +18,7 @@ import {
   type DeliveryQuery,
 } from "../lib/report";
 import { formatChannel } from "../lib/format";
+import { whenVisible } from "../lib/visibility";
 import ValidationNotice from "./ValidationNotice.vue";
 
 // Live updates arrive every second, and this read is heavier than the counters.
@@ -33,6 +34,7 @@ const error = ref("");
 const hovered = ref<number | null>(null);
 let lastLoad = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
+let cancelWait = () => {};
 let lastReported = -1;
 let quietChecks = 0;
 
@@ -62,12 +64,16 @@ function followReports() {
 
 function scheduleLoad() {
   clearTimeout(timer);
-  timer = setTimeout(load, Math.max(0, lastLoad + REFRESH_MS - Date.now()));
+  cancelWait();
+  timer = setTimeout(() => (cancelWait = whenVisible(load)), Math.max(0, lastLoad + REFRESH_MS - Date.now()));
 }
 
 watch(() => props.refreshKey, scheduleLoad);
 onMounted(load);
-onBeforeUnmount(() => clearTimeout(timer));
+onBeforeUnmount(() => {
+  clearTimeout(timer);
+  cancelWait();
+});
 
 const lifecycle = computed(() => report.value?.lifecycle ?? []);
 const variants = computed(() => report.value?.variants ?? []);
@@ -303,6 +309,7 @@ const isPicked = (selection: Partial<DeliveryQuery> | null) => Boolean(selection
             <span v-if="buckets[hovered].server_error"><span class="mono">{{ buckets[hovered].server_error }}</span> provider errors</span>
             <span v-if="buckets[hovered].rejected"><span class="mono">{{ buckets[hovered].rejected }}</span> rejected</span>
             <span v-if="buckets[hovered].timeout"><span class="mono">{{ buckets[hovered].timeout }}</span> no response</span>
+            <span v-if="buckets[hovered].unauthorized"><span class="mono">{{ buckets[hovered].unauthorized }}</span> credentials refused</span>
           </div>
         </div>
         <div class="x-axis small muted mono" aria-hidden="true">
@@ -322,6 +329,7 @@ const isPicked = (selection: Partial<DeliveryQuery> | null) => Boolean(selection
                 <th scope="col" class="num">Provider errors</th>
                 <th scope="col" class="num">Rejected</th>
                 <th scope="col" class="num">No response</th>
+                <th scope="col" class="num">Credentials refused</th>
               </tr>
             </thead>
             <tbody>
@@ -332,6 +340,7 @@ const isPicked = (selection: Partial<DeliveryQuery> | null) => Boolean(selection
                 <td class="num mono">{{ bucket.server_error }}</td>
                 <td class="num mono">{{ bucket.rejected }}</td>
                 <td class="num mono">{{ bucket.timeout }}</td>
+                <td class="num mono">{{ bucket.unauthorized ?? 0 }}</td>
               </tr>
             </tbody>
           </table>
