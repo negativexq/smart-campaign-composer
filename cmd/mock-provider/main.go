@@ -98,6 +98,13 @@ func behaviorFromEnv() mockprovider.Behavior {
 		}
 		*target = time.Duration(milliseconds) * time.Millisecond
 	}
+	if value := os.Getenv("MOCK_RATE_PER_SECOND"); value != "" {
+		if limit, err := strconv.Atoi(value); err == nil && limit >= 0 {
+			behavior.RatePerSecond = limit
+		} else {
+			slog.Warn("ignoring invalid setting", "name", "MOCK_RATE_PER_SECOND", "value", value)
+		}
+	}
 	if value := os.Getenv("MOCK_UNAUTHORIZED_CHANNELS"); value != "" {
 		behavior.Unauthorized = strings.Split(value, ",")
 	}

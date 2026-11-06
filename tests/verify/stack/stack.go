@@ -276,6 +276,7 @@ type ProviderStats struct {
 	ServerErrors  int `json:"server_errors"`
 	Unauthorized  int `json:"unauthorized"`
 	Late          int `json:"late"`
+	Throttled     int `json:"throttled"`
 	PeakPerSecond int `json:"peak_per_second"`
 	// PeakAt is when the busiest one-second window ended.
 	PeakAt *time.Time `json:"peak_at,omitempty"`

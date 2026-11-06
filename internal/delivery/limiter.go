@@ -19,11 +19,13 @@ const (
 	// a call with no answer counts, the send timeout and its margin, and the second
 	// after it.
 	recoverHold = defaultSendTimeout + answerMargin + grantWindow
-	// grantWindow is the second the limit is about. A call is counted from when it
-	// goes out until its answer comes back, and for this long after the answer. The
-	// provider received it before answering, so however long it took on the way, a
-	// call granted later cannot reach the provider within a second of it.
-	grantWindow = time.Second
+	// grantWindow is how long the limit of a second is counted over. A call is
+	// counted from when it goes out until its answer comes back, and for this long
+	// after the answer. The provider received it before answering, so however long it
+	// took on the way, a call granted later cannot reach the provider within a second
+	// of it. The 100 ms beyond the second cover a forward step of Redis's clock of up
+	// to that much, which would otherwise let calls leave the window early.
+	grantWindow = 1100 * time.Millisecond
 	// inFlightRetry is how soon to ask again when the window is full of calls still
 	// waiting for an answer: one of them answering is what frees it.
 	inFlightRetry = 20 * time.Millisecond

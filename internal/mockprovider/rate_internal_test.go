@@ -28,3 +28,33 @@ func TestTheRateCountsCallsByWhenTheyCameIn(t *testing.T) {
 		t.Fatalf("calls a second apart counted as %d in one second", got)
 	}
 }
+
+func TestTheProviderRefusesCallsOverItsOwnLimit(t *testing.T) {
+	t.Parallel()
+	start := time.Now()
+	at := func(ms int) time.Time { return start.Add(time.Duration(ms) * time.Millisecond) }
+	provider := New(Behavior{RatePerSecond: 3})
+
+	for i, ms := range []int{0, 100, 200} {
+		if !provider.admit("sms", at(ms)) {
+			t.Fatalf("call %d within the limit was refused", i+1)
+		}
+	}
+	if provider.admit("sms", at(999)) {
+		t.Fatal("a fourth call within the same second was let in")
+	}
+	if !provider.admit("email", at(999)) {
+		t.Fatal("a call on the other channel was refused")
+	}
+	// A refused call does not count, so the second after the first call is open.
+	if !provider.admit("sms", at(1000)) {
+		t.Fatal("a call a second after the first was refused")
+	}
+	// A call that came in earlier but is checked late still counts where it belongs.
+	if provider.admit("sms", at(150)) {
+		t.Fatal("a late-checked call made four in one second")
+	}
+	if !New(Behavior{}).admit("sms", at(0)) {
+		t.Fatal("no limit set, yet a call was refused")
+	}
+}

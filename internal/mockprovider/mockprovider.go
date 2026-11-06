@@ -48,6 +48,10 @@ type Behavior struct {
 	SlowRate     float64
 	SlowMinDelay time.Duration
 	SlowMaxDelay time.Duration
+	// RatePerSecond is the provider's own limit per channel, as a real one enforces:
+	// a call that would make more than this many in any second is refused with a 429.
+	// Refused calls do not count toward it. Zero leaves it off.
+	RatePerSecond int
 	// ReportMinDelay and ReportMaxDelay are how long an arrival report takes.
 	ReportMinDelay time.Duration
 	ReportMaxDelay time.Duration
@@ -86,6 +90,9 @@ type ChannelStats struct {
 	RateLimited  int `json:"rate_limited"`
 	ServerErrors int `json:"server_errors"`
 	Unauthorized int `json:"unauthorized"`
+	// Throttled counts calls refused for going over RatePerSecond, apart from the
+	// random 429s of RateLimitRate.
+	Throttled int `json:"throttled"`
 	// Late counts slow calls that were still going when their caller gave up.
 	Late          int `json:"late"`
 	PeakPerSecond int `json:"peak_per_second"`
@@ -111,8 +118,10 @@ type Server struct {
 	// the disk. Calls that waited for it would otherwise be counted as arriving together.
 	rate   sync.Mutex
 	recent map[string][]time.Time
-	peaks  map[string]int
-	peakAt map[string]time.Time
+	// admitted holds when the calls let through by RatePerSecond came in.
+	admitted map[string][]time.Time
+	peaks    map[string]int
+	peakAt   map[string]time.Time
 }
 
 // New builds a provider.
@@ -134,6 +143,7 @@ func New(behavior Behavior) *Server {
 		stop:     make(chan struct{}),
 		stats:    map[string]*ChannelStats{"sms": {}, "email": {}},
 		recent:   map[string][]time.Time{},
+		admitted: map[string][]time.Time{},
 		peaks:    map[string]int{},
 		peakAt:   map[string]time.Time{},
 		inbox:    inbox{size: behavior.InboxSize, byKey: map[string]*InboxMessage{}},
@@ -243,6 +253,13 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	if slices.Contains(s.behavior.Unauthorized, message.Channel) {
 		s.count(message.Channel, func(stats *ChannelStats) { stats.Unauthorized++ })
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "credentials refused"})
+		return
+	}
+
+	if !s.admit(message.Channel, at) {
+		s.count(message.Channel, func(stats *ChannelStats) { stats.Throttled++ })
+		w.Header().Set("Retry-After", strconv.Itoa(s.behavior.RetryAfterSecs))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
 		return
 	}
 
@@ -383,6 +400,36 @@ func (s *Server) arrived(channel string, at time.Time) {
 		drop++
 	}
 	s.recent[channel] = recent[drop:]
+}
+
+// admit applies RatePerSecond: it lets a call in when no one-second span holding it
+// would then have more than the limit, and remembers it.
+func (s *Server) admit(channel string, at time.Time) bool {
+	limit := s.behavior.RatePerSecond
+	if limit <= 0 {
+		return true
+	}
+	s.rate.Lock()
+	defer s.rate.Unlock()
+	position, _ := slices.BinarySearchFunc(s.admitted[channel], at, func(a, b time.Time) int { return a.Compare(b) })
+	// Clipped, so a refusal leaves the remembered calls as they were.
+	calls := slices.Insert(slices.Clip(s.admitted[channel]), position, at)
+	first := 0
+	for end := position; end < len(calls) && calls[end].Sub(at) < window; end++ {
+		for calls[end].Sub(calls[first]) >= window {
+			first++
+		}
+		if end-first+1 > limit {
+			return false
+		}
+	}
+	latest := calls[len(calls)-1]
+	drop := 0
+	for drop < len(calls) && latest.Sub(calls[drop]) >= 2*window {
+		drop++
+	}
+	s.admitted[channel] = calls[drop:]
+	return true
 }
 
 func arrivalEvent(bounced bool) string {

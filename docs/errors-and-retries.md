@@ -6,16 +6,16 @@ What the worker does when a call to the provider does not end in a plain 2xx, an
 
 | What happened | Next status | Uses an attempt | What the channel does | Counts against the limit |
 |---|---|---|---|---|
-| 2xx | `SENT` | Yes | Goes on | Until a second after the answer |
-| 429 | `RETRYING` after `Retry-After` | No | Every worker pauses it for `Retry-After`, 1 s if absent, 30 s at most | Until a second after the answer |
-| 401 | `RETRYING` | No | Every worker holds it; one probe every 30 s | Until a second after the answer |
-| Other 4xx | `FAILED` | Yes | Goes on | Until a second after the answer |
-| 5xx or 408 | `RETRYING` with backoff | Yes | Counts toward the circuit breaker | Until a second after the answer |
-| No answer within 5 s | `RETRYING` with backoff | Yes | Counts toward the circuit breaker | 5 s + 2 s from when it went out, then a second more |
+| 2xx | `SENT` | Yes | Goes on | Until 1.1 s after the answer |
+| 429 | `RETRYING` after `Retry-After` | No | Every worker pauses it for `Retry-After`, 1 s if absent, 30 s at most | Until 1.1 s after the answer |
+| 401 | `RETRYING` | No | Every worker holds it; one probe every 30 s | Until 1.1 s after the answer |
+| Other 4xx | `FAILED` | Yes | Goes on | Until 1.1 s after the answer |
+| 5xx or 408 | `RETRYING` with backoff | Yes | Counts toward the circuit breaker | Until 1.1 s after the answer |
+| No answer within 5 s | `RETRYING` with backoff | Yes | Counts toward the circuit breaker | 5 s + 2 s from when it went out, then 1.1 s more |
 | Provider cannot be reached | `RETRYING` after 5 s | No | Every worker rests it for 5 s; counts toward the breaker | Not at all |
 | Message cannot be rendered | `RETRYING` after 5 s | No | Every worker rests it for 5 s | Not at all |
 | Consent withdrawn since queuing | `SKIPPED` | No | Goes on | Not at all |
-| Failed probe while the breaker is testing | `RETRYING` with backoff | No | Breaker stays open, its wait doubles | Until a second after the answer |
+| Failed probe while the breaker is testing | `RETRYING` with backoff | No | Breaker stays open, its wait doubles | Until 1.1 s after the answer |
 
 An attempt is one call that may have reached the provider. A delivery has 5.
 
@@ -103,29 +103,35 @@ The limit is 100 calls a second per channel, as the provider counts them. The wo
 
 1. from when its permit is granted,
 2. while it is in flight, until its answer comes back,
-3. for one second after the answer.
+3. for 1.1 s after the answer: the second the limit is about, and 100 ms for a step of Redis's clock (below).
 
 The provider received the call before it answered, so however long a call was held up on the way, a call granted later cannot reach the provider within a second of it. The answers are sent with the worker's next request to Redis, which it makes anyway, so this costs no extra round trips.
 
-A call that got no answer may still reach the provider later, so it counts for the send timeout plus 2 s, then a second more. If a worker stops in the middle of sending, its calls count that long too: the channel slows for a few seconds and does not go over. A call that never left, because the provider could not be reached, the message could not be rendered or consent was withdrawn, stops counting at once.
+A call that got no answer may still reach the provider later, so it counts for the send timeout plus 2 s, then 1.1 s more. If a worker stops in the middle of sending, its calls count that long too: the channel slows for a few seconds and does not go over. A call that never left, because the provider could not be reached, the message could not be rendered or consent was withdrawn, stops counting at once.
 
 ### When Redis's clock steps forward
 
 The window is timed by Redis's wall clock (`TIME`), the one clock all workers share. If that clock steps forward, the calls of the last moments look older than they are and leave the window early, so new calls are let in early. Permits go out in batches, so the calls granted within the step's span can land in the same second as the next batch.
 
-**How rare it is.** A step needs something to set the clock at once instead of slewing it. chrony, the usual time service on Linux, slews small corrections gradually and steps the clock only in its first updates after boot or when an operator forces it, so a server run that way should not see this during a send. Docker Desktop does step its VM's clock against the Mac's. In the measurements:
+The window is 1.1 s for this. A forward step of up to 100 ms still leaves each call counted for at least a full second after its answer, so it lets nothing in early. A larger step lets in only the calls of the part beyond 100 ms. The margin costs about 9% of the rate on every send: without faults the verification send takes 96 s instead of 87 s, about 85 messages a second per channel instead of 94 ([2026-11-06-2233-load](../tests/verify/results/2026-11-06-2233-load.md) against [2026-11-06-1942-load](../tests/verify/results/2026-11-06-1942-load.md)).
+
+**How rare a step is.** A step needs something to set the clock at once instead of slewing it. chrony, the usual time service on Linux, slews small corrections gradually and steps the clock only in its first updates after boot or when an operator forces it, so a server run that way should not see one during a send. Docker Desktop does step its VM's clock against the Mac's. With the earlier 1 s window:
 
 - A watcher compared the VM's wall clock with its monotonic clock every 10 ms. It saw no step in 6 idle minutes, and one step of 70.7 ms during eight healthy sends, about 12 minutes.
 - Of about 26 measured sends, three went over 100: 102, 109 and 119 calls in one second. The 119 fell in the second that held the 70.7 ms step. The other two were not watched, but looked the same: both channels went over at the same moment while the worker's own record showed 100.
 - Every other second of those sends stayed at or below 100.
 
-**How small it is.** The extra calls are the ones granted within the step's span, and they spread over one second only. The window then counts them like any other call, so the second after is back within the limit. The largest measured was 19 extra calls, once. When the provider counts more than its limit, it answers 429 to the extra calls. The worker retries those, and a retry counts against the limit like any other call. No message is lost and none is sent twice, because each call carries its idempotency key.
+The 70.7 ms step is inside the margin. Steps above 100 ms were not seen and have not been measured against the 1.1 s window.
 
-**What was left out.** Counting each call over 1.1 s would cover steps up to 100 ms, but would cost about 9% of the rate on every send. Taking the time from the workers' monotonic clock would cover any step, but would tie all workers to one host and add its own small error from the delay between reading the clock and reaching Redis. For a rare step that costs a few retried calls, neither was worth it. Run Redis on a host whose clock slews rather than steps, and the provider's 429 remains the last check.
+**How small an overrun is.** The extra calls are the ones granted within the part of the step beyond the margin, and they spread over one second only. The window then counts them like any other call, so the second after is back within the limit. The largest measured with the 1 s window was 19 extra calls, once. When the provider counts more than its limit, it answers 429 to the extra calls. The worker retries those, and a retry counts against the limit like any other call. No message is lost and none is sent twice, because each call carries its idempotency key. The verification suite checks this on purpose: its mock provider enforces 100 a second per channel itself, and one scenario sets the workers' limit to 120. The provider refused 1,060 calls in that send, and every message was still accepted once, in 98 s ([2026-11-06-2254-load](../tests/verify/results/2026-11-06-2254-load.md)).
+
+The provider's 429 only keeps extra messages from being accepted. It does not show that the workers kept to the limit. That is shown by counting every request that reaches the provider, refused ones included, and in every other scenario of the suite that count stayed at or below 100 in any second, with no call refused for the limit.
+
+**What was left out.** Taking the time from the workers' monotonic clock would cover any step, but would tie all workers to one host and add its own small error from the delay between reading the clock and reaching Redis. Run Redis on a host whose clock slews rather than steps, and the provider's 429 remains the last check.
 
 ## Measured behavior
 
-Each scenario below sent the same campaign, 15,411 messages over email and SMS (8,198 and 7,213), on the profiling setup of [performance.md](performance.md#sending-with-the-new-limiter): one worker, the mock provider with the fault named, 100 calls a second per channel. Without faults the same send takes 88 s. Each scenario ran once.
+Each scenario below sent the same campaign, 15,411 messages over email and SMS (8,198 and 7,213), on the profiling setup of [performance.md](performance.md#sending-with-the-new-limiter): one worker, the mock provider with the fault named, 100 calls a second per channel. Without faults the same send takes 88 s. Each scenario ran once. These runs counted each call for 1 s after its answer; with the 1.1 s window a send without faults takes about 9% longer.
 
 | Scenario | Send time | Final statuses | Calls per message | Highest calls in a second at the provider | Accepted twice |
 |---|---|---|---|---|---|

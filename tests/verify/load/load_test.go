@@ -35,7 +35,7 @@ const (
 type faults map[string]string
 
 func healthy() faults {
-	return faults{"VERIFY_429": "0", "VERIFY_5XX": "0", "VERIFY_LOST": "0", "VERIFY_401": "", "VERIFY_SLOW": "0", "VERIFY_SLOW_MIN_MS": "0", "VERIFY_SLOW_MAX_MS": "0"}
+	return faults{"VERIFY_429": "0", "VERIFY_5XX": "0", "VERIFY_LOST": "0", "VERIFY_401": "", "VERIFY_SLOW": "0", "VERIFY_SLOW_MIN_MS": "0", "VERIFY_SLOW_MAX_MS": "0", "RATE_LIMIT_PER_SECOND": "100"}
 }
 
 func with(name, value string) faults {
@@ -109,6 +109,10 @@ type scenario struct {
 	// wantEvents are audit events that must appear, as "type channel alert";
 	// channel and alert may be empty.
 	wantEvents []string
+	// overLimit sets the workers' limit above the provider's, so the provider's own
+	// limit is what holds: it must refuse some calls, and every message must still be
+	// sent once. Calls over 100 a second at the provider are then expected.
+	overLimit bool
 	// wantLate needs slow calls that outlasted the worker's wait, or the scenario
 	// tested nothing.
 	wantLate bool
@@ -117,7 +121,11 @@ type scenario struct {
 func scenarios() []scenario {
 	return []scenario{
 		{name: "healthy", faults: healthy()},
-		{name: "default-faults", faults: faults{"VERIFY_429": "0.02", "VERIFY_5XX": "0.03", "VERIFY_LOST": "0.002", "VERIFY_401": ""}},
+		{name: "default-faults", faults: func() faults {
+			f := healthy()
+			f["VERIFY_429"], f["VERIFY_5XX"], f["VERIFY_LOST"] = "0.02", "0.03", "0.002"
+			return f
+		}()},
 		{name: "429-10pct", faults: with("VERIFY_429", "0.10")},
 		{name: "5xx-30pct", faults: with("VERIFY_5XX", "0.30"), mayFail: true},
 		{name: "lost-5pct", faults: with("VERIFY_LOST", "0.05"), mayFail: true},
@@ -138,6 +146,7 @@ func scenarios() []scenario {
 			name: "sms401-redis-lost", faults: with("VERIFY_401", "sms"), event: loseRedisAt(60*time.Second, fixProviderAt(150*time.Second)), restartsProvider: true,
 			wantEvents: []string{"campaign.alert_opened sms credentials_refused", "campaign.alert_closed sms credentials_refused"},
 		},
+		{name: "workers-at-120", faults: with("RATE_LIMIT_PER_SECOND", "120"), overLimit: true},
 		{name: "postgres-down-20s", faults: healthy(), event: postgresDown(25*time.Second, 20*time.Second)},
 		{name: "graceful-restart", faults: healthy(), event: restartGracefully(20 * time.Second)},
 		{
@@ -286,11 +295,18 @@ func check(s scenario, res result) []string {
 		add("the provider was meant to restart but its counters from before were not kept")
 	}
 	peak, accepted := providerTotals(res)
+	throttled := sum(res, func(stats stack.ProviderStats) int { return stats.Throttled })
+	switch {
+	case s.overLimit && throttled == 0:
+		add("the workers sent over the provider's limit, but it refused nothing")
+	case !s.overLimit && throttled > 0:
+		add("the provider refused %d calls for going over its limit", throttled)
+	}
 	if s.wantLate && late(res) == 0 {
 		add("no slow call outlasted the worker's wait")
 	}
 	for channel, statuses := range res.Final {
-		if peak[channel].calls > rateLimit {
+		if peak[channel].calls > rateLimit && !s.overLimit {
 			add("%s reached %d calls in one second at the provider, over %d, %s into the run", channel, peak[channel].calls, rateLimit, peak[channel].into(res.Started))
 		}
 		// Each message the campaign counts as sent was accepted by the provider once.
@@ -340,10 +356,15 @@ func providerTotals(res result) (peak map[string]busiest, accepted map[string]in
 
 // late counts the slow calls that outlasted the worker's wait, across restarts.
 func late(res result) int {
+	return sum(res, func(stats stack.ProviderStats) int { return stats.Late })
+}
+
+// sum adds up one of the provider's counters over both channels and its restarts.
+func sum(res result, counter func(stack.ProviderStats) int) int {
 	n := 0
 	for _, part := range append(slices.Clone(res.ProviderEarlier), res.Provider) {
 		for _, stats := range part {
-			n += stats.Late
+			n += counter(stats)
 		}
 	}
 	return n
@@ -629,8 +650,8 @@ func jsonDecode(response *http.Response, value any) error {
 func report(started time.Time, results []result) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Load verification, %s\n\n", started.UTC().Format("2006-01-02 15:04 UTC"))
-	b.WriteString("Each run sends the same campaign through the verification stack. Peak is the most calls the mock provider saw in one second, per channel; the limit is 100.\n\n")
-	b.WriteString("| Scenario | Workers | Status | Send time | Sent | Failed | Accepted twice | Peak email / sms | Events | Problems |\n|---|---|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("Each run sends the same campaign through the verification stack. Peak is the most calls the mock provider saw in one second, per channel, refused ones included; the limit is 100. The provider also enforces that limit itself and refuses calls over it with a 429.\n\n")
+	b.WriteString("| Scenario | Workers | Status | Send time | Sent | Failed | Accepted twice | Peak email / sms | Refused over the provider's limit | Events | Problems |\n|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, r := range results {
 		peak, _ := providerTotals(r)
 		sent, failed := 0, 0
@@ -642,8 +663,8 @@ func report(started time.Time, results []result) string {
 		if len(r.Problems) > 0 {
 			problems = strings.Join(r.Problems, "; ")
 		}
-		fmt.Fprintf(&b, "| %s | %d | %s | %.1f s | %d | %d | %d | %d / %d | %s | %s |\n", r.Name, r.Workers, r.Status, r.SendSeconds, sent, failed, r.AcceptedTwice,
-			peak["email"].calls, peak["sms"].calls, strings.Join(r.Events, ", "), problems)
+		fmt.Fprintf(&b, "| %s | %d | %s | %.1f s | %d | %d | %d | %d / %d | %d | %s | %s |\n", r.Name, r.Workers, r.Status, r.SendSeconds, sent, failed, r.AcceptedTwice,
+			peak["email"].calls, peak["sms"].calls, sum(r, func(stats stack.ProviderStats) int { return stats.Throttled }), strings.Join(r.Events, ", "), problems)
 	}
 	return b.String()
 }

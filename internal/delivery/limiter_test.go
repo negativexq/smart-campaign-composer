@@ -297,8 +297,8 @@ func TestProviderNeverSeesMoreThanTheLimitAcrossWorkers(t *testing.T) {
 }
 
 // A call counts while it is in flight, so its answer is what frees the window, and
-// it counts for a second from that answer.
-func TestACallCountsUntilASecondAfterItsAnswer(t *testing.T) {
+// it counts for 1.1 s from that answer.
+func TestACallCountsUntilTheWindowAfterItsAnswer(t *testing.T) {
 	t.Parallel()
 	const limit = 5
 	limiter := delivery.NewRedisLimiter(testsupport.NewRedis(t), limit, testsupport.Unique(t)).RecoverAfter(0)
@@ -322,9 +322,14 @@ func TestACallCountsUntilASecondAfterItsAnswer(t *testing.T) {
 	if permits, err := limiter.Reserve(ctx, "sms", limit); err != nil || permits.Granted != 0 {
 		t.Fatalf("answered calls stopped counting at once: %+v, %v", permits, err)
 	}
-	time.Sleep(1100 * time.Millisecond)
+	// The window is 1.1 s, so a second after the answers they still count.
+	time.Sleep(1000 * time.Millisecond)
+	if permits, err := limiter.Reserve(ctx, "sms", limit); err != nil || permits.Granted != 0 {
+		t.Fatalf("a second after the answers, before the 100 ms margin: %+v, %v", permits, err)
+	}
+	time.Sleep(200 * time.Millisecond)
 	if permits, err := limiter.Reserve(ctx, "sms", limit); err != nil || permits.Granted != limit {
-		t.Fatalf("a second after the answers: %+v, %v", permits, err)
+		t.Fatalf("1.2 s after the answers: %+v, %v", permits, err)
 	}
 }
 

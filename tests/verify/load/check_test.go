@@ -58,6 +58,8 @@ func TestTheChecks(t *testing.T) {
 		{"no messages", plain, func(r *result) { r.Final = map[string]map[string]int{} }, "no messages"},
 		{"a missing event", scenario{name: "paused", wantEvents: []string{"campaign.paused  "}}, func(r *result) {}, `no "campaign.paused  " event`},
 		{"an event that did not happen", plain, func(r *result) { r.EventError = "finished first" }, "did not happen as planned"},
+		{"the provider refused calls over its limit", plain, func(r *result) { r.Provider["sms"] = stack.ProviderStats{Accepted: 8, Throttled: 2} }, "refused 2 calls"},
+		{"the provider refused nothing where it had to", scenario{name: "over", overLimit: true}, func(r *result) {}, "refused nothing"},
 		{"no late calls where they were wanted", scenario{name: "slow", wantLate: true}, func(r *result) {}, "no slow call outlasted"},
 	}
 	for _, c := range cases {

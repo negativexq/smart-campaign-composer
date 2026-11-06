@@ -7,6 +7,13 @@ package mutation
 // refactor that moves the code also brings its case up to date.
 var cases = []Case{
 	{
+		Name:    "window keeps its clock margin",
+		File:    "internal/delivery/limiter.go",
+		Find:    "grantWindow = 1100 * time.Millisecond",
+		Replace: "grantWindow = time.Second",
+		Go:      &GoTest{Package: "./internal/delivery/", Run: "^TestACallCountsUntilTheWindowAfterItsAnswer$"},
+	},
+	{
 		Name:    "finished campaign may be scheduled",
 		File:    "internal/campaign/schedule.go",
 		Find:    "[]string{statusApproved, statusScheduled, statusCompleted, statusCompletedWithFailures}",

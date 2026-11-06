@@ -28,6 +28,8 @@ services:
       MOCK_LOST_RESPONSE_RATE: ${VERIFY_LOST:-0}
       MOCK_UNAUTHORIZED_CHANNELS: ${VERIFY_401:-}
       MOCK_SLOW_RATE: ${VERIFY_SLOW:-0}
+      # The provider's own limit, as a real one enforces it.
+      MOCK_RATE_PER_SECOND: ${VERIFY_PROVIDER_LIMIT:-100}
       MOCK_SLOW_MIN_MS: ${VERIFY_SLOW_MIN_MS:-0}
       MOCK_SLOW_MAX_MS: ${VERIFY_SLOW_MAX_MS:-0}
     ports: !override
