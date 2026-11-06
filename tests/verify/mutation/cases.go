@@ -39,7 +39,7 @@ var cases = []Case{
 		File:    "internal/schedule/schedule.go",
 		Find:    "\tcase s.Kind == KindOnce && s.Reach == ReachEveryone:\n",
 		Replace: "\tcase false:\n",
-		Go:      &GoTest{Package: "./internal/schedule/", Run: "^TestDescribe$"},
+		Go:      &GoTest{Package: "./internal/schedule/", Run: "^TestDescribeReadsLikeASentence$"},
 	},
 	{
 		Name:    "one-time send may choose reach",

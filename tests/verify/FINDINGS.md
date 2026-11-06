@@ -6,6 +6,15 @@ Problems and wrong behaviour that the verification runs found, newest first. Eac
 
 ### Fixed
 
+- **The suites themselves had gaps, found by reading them before a run:**
+  - One mutation case named a test that does not exist (`TestDescribe`). Go ran nothing, passed, and the fault counted as not caught for the wrong reason. Each case's tests now run on the clean source first: they must run at least one test and pass, or the case stops there.
+  - The load suite restarts the mock provider in five scenarios, and a restart sets its counters back to zero. The provider's peak was read only at the end, so the riskiest moments went unchecked, such as losing Redis before the restart. The suite now keeps the counters from just before each stop and checks the highest peak across all of them.
+  - A load scenario whose campaign finished before its event (a Redis flush, an outage) passed without facing the event. Such a run now fails. So does a campaign that had no messages to send.
+  - An event that failed made the test fail, but the results table still said "none". The table now lists it.
+  - The verification stack read `.env`. With a real model key there, a load run would have paid for every campaign it creates. The stack is now pinned to the mock model.
+
+  A stack-free test (`TestTheChecks`) now feeds the load checks a bad result for each rule and expects each one to be reported.
+
 - **A security probe passed for the wrong reason.** The probe for `javascript:` call-to-action links sent the whole content object it had read from the API. The API refused it for its unknown fields before it checked the link, so the probe passed without testing the link at all. It now sends only the fields a save takes, checks that the same body with an `https` link saves, and then expects the `javascript:` link to be refused as `invalid_link` (422). The API was already right. The other probes were checked for the same mistake. Where a refusal could have come from a malformed request, a control was added: the real unsubscribe link must work, oversized images must be refused for their size, and an uploaded image must be read back before checking its metadata. One more showed up on a second run: the SQL-in-a-name probe saved an audience under a fixed name, so the second run got 409 for a name already taken and wrote nothing. The name is now unique per run, and the probe needs both writes stored.
 - **Three unit tests let a broken rule through** (found by the mutation suite, 20 of 23 caught):
   - A repeating schedule cancelled after it had run could show as running. Only a schedule cancelled before its first run was covered.

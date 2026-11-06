@@ -158,6 +158,7 @@ type result struct {
 	ProviderEarlier []map[string]stack.ProviderStats `json:"provider_before_restarts,omitempty"`
 	Events          []string                         `json:"events"`
 	Notes           map[string]any                   `json:"notes,omitempty"`
+	EventError      string                           `json:"event_error,omitempty"`
 	Problems        []string                         `json:"problems,omitempty"`
 }
 
@@ -203,9 +204,7 @@ func runScenario(t *testing.T, s scenario) result {
 	status := stack.WaitFinished(t, campaign, runTimeout)
 	sent := time.Since(r.started)
 	cancel()
-	if err := <-eventDone; err != nil {
-		t.Errorf("event: %v", err)
-	}
+	eventErr := <-eventDone
 
 	res := result{
 		Name: s.name, Workers: workers, Faults: s.faults, Status: status, SendSeconds: seconds(sent),
@@ -214,6 +213,9 @@ func runScenario(t *testing.T, s scenario) result {
 		Provider:        stack.Provider(t),
 		Notes:           r.notes,
 		ProviderEarlier: r.earlier,
+	}
+	if eventErr != nil {
+		res.EventError = eventErr.Error()
 	}
 	res.AcceptedTwice, _ = strconv.Atoi(stack.SQL(t, `SELECT count(*) FROM (SELECT delivery_id FROM delivery_attempts WHERE campaign_id = '%s' AND outcome = 'accepted' GROUP BY 1 HAVING count(*) > 1) x`, campaign))
 	res.PeakRecorded = map[string]int{}
@@ -237,6 +239,9 @@ func runScenario(t *testing.T, s scenario) result {
 func check(s scenario, res result) []string {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
+	if res.EventError != "" {
+		add("the event did not happen as planned: %s", res.EventError)
+	}
 	if !strings.HasPrefix(res.Status, "COMPLETED") {
 		add("the campaign ended %s", res.Status)
 	}

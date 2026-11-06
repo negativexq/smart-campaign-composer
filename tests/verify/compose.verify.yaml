@@ -11,6 +11,9 @@ services:
       SEED_USER_COUNT: ${VERIFY_USERS:-116000}
   api:
     <<: *image
+    environment:
+      # The suites create many campaigns; a real model would cost money on each.
+      LLM_PROVIDER: mock
     ports: !override
       - "${VERIFY_API_PORT:-18081}:8080"
   worker:

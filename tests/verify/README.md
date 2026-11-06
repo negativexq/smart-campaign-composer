@@ -6,7 +6,7 @@ These suites check the system as a whole, beyond `make test`. Run them before a 
 |---|---|---|---|
 | `load` | Performance, retries and idempotency. It sends a full campaign of about 15,400 messages under provider faults (429s, 5xx, lost answers, an outage, refused credentials), a crashed worker, lost Redis data and two workers. In every scenario: each message ends in a final state, none is accepted twice, the provider counts each sent message once, no channel goes over 100 calls a second, and the expected alerts, pauses and resumes appear. | The verification stack | About an hour for all 14 scenarios |
 | `security` | 19 probes from outside: sessions on every route, webhook signatures and replay, unsubscribe link tampering, hostile uploads, SQL and markup in every field, CSV formulas, oversized bodies, nginx paths, logs and error answers. Known open items are recorded, not failed. | The verification stack | About 3 minutes |
-| `mutation` | Whether the tests catch broken code. Each case puts one deliberate fault into the source, runs the tests written for that code, expects them to fail, then restores the file. | `make test-env-up` and the frontend's `node_modules` | About 10 minutes |
+| `mutation` | Whether the tests catch broken code. Each case first runs the tests written for that code on the clean source, where they must run and pass. Then it puts one deliberate fault into the source, expects those tests to fail, and restores the file. | `make test-env-up` and the frontend's `node_modules` | About 2 minutes |
 
 ## Running
 
@@ -30,7 +30,9 @@ make verify-mutation
 make verify-down
 ```
 
-The verification stack runs under its own compose project (`scc-verify`), image and ports (API 18081, provider 18083, web 18080), so it can run next to the demo stack. `verify-down` removes only its own containers and volumes. It seeds 116,000 users; set `VERIFY_USERS` to change that.
+The verification stack runs under its own compose project (`scc-verify`), image and ports (API 18081, provider 18083, web 18080), so it can run next to the demo stack. `verify-down` removes only its own containers and volumes. It seeds 116,000 users (set `VERIFY_USERS` to change that) and always uses the mock model, so a run costs nothing whatever `.env` holds.
+
+`make verify-load` also runs `TestTheChecks`, which needs no stack: it feeds the load checks a bad result for each rule and expects each one to be reported.
 
 To run some load scenarios only, name them:
 
