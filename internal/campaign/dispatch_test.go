@@ -464,6 +464,96 @@ func TestARepeatingScheduleNeverMessagesAnyoneTwice(t *testing.T) {
 	}
 }
 
+func TestEachRunCanBeReadOnItsOwn(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindInterval, EveryHours: 24}); err != nil {
+		t.Fatal(err)
+	}
+	first := referenceTime.Add(24 * time.Hour)
+	if ran, err := scheduler(h, first.Add(time.Second)).RunDue(ctx); err != nil || ran != 1 {
+		t.Fatalf("first run: %d %v", ran, err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE campaign_deliveries SET status = 'SENT' WHERE status = 'QUEUED'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE users SET city = 'İstanbul' WHERE id = $1`, seed.FixtureOtherCity); err != nil {
+		t.Fatal(err)
+	}
+	if ran, err := scheduler(h, first.Add(24*time.Hour+time.Second)).RunDue(ctx); err != nil || ran != 1 {
+		t.Fatalf("second run: %d %v", ran, err)
+	}
+
+	runs, err := h.service.Runs(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 || runs[0].Number != 2 || runs[0].Total-runs[0].Skipped != 2 || runs[0].Sent != 0 || runs[1].Sent == 0 {
+		t.Fatalf("runs, newest first: %+v", runs)
+	}
+	all, err := h.service.RunProgress(ctx, id, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := h.service.RunProgress(ctx, id, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Total != runs[0].Total || all.Total != runs[0].Total+runs[1].Total {
+		t.Fatalf("progress of run 2 %d, of all %d, runs %+v", second.Total, all.Total, runs)
+	}
+	if _, err := h.service.RunProgress(ctx, id, 3); !errors.Is(err, campaign.ErrNotFound) {
+		t.Fatalf("a run that does not exist: %v", err)
+	}
+	count, err := h.service.CountDeliveries(ctx, id, campaign.DeliveryFilter{Run: 2})
+	if err != nil || count != runs[0].Total {
+		t.Fatalf("deliveries of run 2: %d %v", count, err)
+	}
+	report, err := h.service.RunReport(ctx, id, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, channel := range report.Lifecycle {
+		if channel.Accepted != 0 {
+			t.Fatalf("run 2 sent nothing yet: %+v", report.Lifecycle)
+		}
+	}
+
+	list, err := h.service.List(ctx, campaign.ListFilter{Group: "repeating", Sort: "next"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].LastRun == nil || list[0].LastRun.Number != 2 || list[0].Schedule == nil || !list[0].Schedule.Repeats || list[0].Schedule.NextRunAt == nil {
+		t.Fatalf("list row: %+v", list)
+	}
+	groups, err := h.service.CountGroups(ctx, campaign.ListFilter{})
+	if err != nil || groups["repeating"] != 1 || groups["active"] != 1 || groups["all"] != 1 {
+		t.Fatalf("groups: %v %v", groups, err)
+	}
+}
+
+func TestCopiesAreNumbered(t *testing.T) {
+	t.Parallel()
+	h, id := readyCampaign(t)
+	ctx := context.Background()
+	var names []string
+	source := id
+	for range 3 {
+		copied, err := h.service.Duplicate(ctx, source, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, copied.Name)
+		source = copied.ID // copying a copy still numbers from the original name
+	}
+	original, _ := h.service.Get(ctx, id)
+	want := []string{original.Name + " (copy)", original.Name + " (copy 2)", original.Name + " (copy 3)"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("got %q, want %q", names, want)
+	}
+}
+
 // queuedInRun counts the messages a run of the campaign queued.
 func queuedInRun(t *testing.T, h *harness, id string, number int) int {
 	t.Helper()

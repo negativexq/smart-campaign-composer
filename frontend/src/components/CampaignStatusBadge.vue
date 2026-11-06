@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import { campaignStatusMeta } from "../lib/campaignStatus";
+import { campaignStatusMeta, rowStatusMeta } from "../lib/campaignStatus";
 
-const props = defineProps<{ status: string }>();
+// schedule and lastRun, when given, let a repeating campaign say it waits for its next run.
+const props = defineProps<{ status: string; schedule?: { repeats: boolean; next_run_at: string | null } | null; lastRun?: { number: number } | null }>();
 
-const meta = computed(() => campaignStatusMeta(props.status));
+const meta = computed(() => (props.schedule ? rowStatusMeta({ status: props.status, schedule: props.schedule, last_run: props.lastRun }) : campaignStatusMeta(props.status)));
 </script>
 
 <template>

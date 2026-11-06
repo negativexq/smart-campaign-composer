@@ -15,7 +15,8 @@ const LARGEST_REQUEST = 500;
 const REASON_OPTIONS = ["no_consent", "consent_withdrawn", "server_error", "rejected", "timeout", "lease_expired"];
 const PROBLEM_OPTIONS = ["rate_limited", "server_error", "rejected", "timeout"];
 
-const props = defineProps<{ campaignId: string; channels: string[]; abTest?: boolean; refreshKey?: number; progress?: Progress | null }>();
+// run keeps one send of a repeating campaign; none shows every send.
+const props = defineProps<{ campaignId: string; channels: string[]; abTest?: boolean; refreshKey?: number; progress?: Progress | null; run?: number | null }>();
 
 const rows = ref<Delivery[] | null>(null);
 // In the address, so a refresh keeps them and a link can share them.
@@ -35,7 +36,7 @@ async function fetchFrom(offset: number, count: number) {
   let matching = 0;
   while (found.length < count) {
     const limit = Math.min(count - found.length, LARGEST_REQUEST);
-    const page = await getDeliveries(props.campaignId, { ...query.value, limit, offset: offset + found.length });
+    const page = await getDeliveries(props.campaignId, { ...query.value, run: props.run ?? undefined, limit, offset: offset + found.length });
     found.push(...page.deliveries);
     matching = page.total;
     if (page.deliveries.length < limit) break;
@@ -129,6 +130,7 @@ onMounted(() => {
       :campaign-id="campaignId"
       :progress="progress"
       :query="query"
+      :run="run"
       :refresh-key="refreshKey"
       @select="selectFromChart"
       @reported="load(Math.max(rows?.length ?? 0, PAGE))"
@@ -207,7 +209,7 @@ onMounted(() => {
 
     <div v-if="rows?.length" class="export">
       <p class="small muted count" data-testid="delivery-count">{{ shownOf(rows.length, total, "delivery", "deliveries") }}</p>
-      <a class="button button--secondary" :href="deliveriesCsvUrl(campaignId, query)" download data-testid="export-csv">
+      <a class="button button--secondary" :href="deliveriesCsvUrl(campaignId, { ...query, run: run ?? undefined })" download data-testid="export-csv">
         {{ isFiltered(query) ? "Export these as CSV" : "Export all as CSV" }}
       </a>
     </div>

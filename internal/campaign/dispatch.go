@@ -61,13 +61,20 @@ func lockStatus(ctx context.Context, tx pgx.Tx, id string) (string, error) {
 	if err := parsed.Scan(id); err != nil {
 		return "", ErrNotFound
 	}
-	var status string
-	err := tx.QueryRow(ctx, `SELECT status FROM campaigns WHERE id = $1 FOR UPDATE`, parsed).Scan(&status)
+	var (
+		status   string
+		archived bool
+	)
+	err := tx.QueryRow(ctx, `SELECT status, archived_at IS NOT NULL FROM campaigns WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, parsed).Scan(&status, &archived)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
 	}
 	if err != nil {
 		return "", fmt.Errorf("lock campaign: %w", err)
+	}
+	// An archived campaign keeps its report but sends nothing until it is restored.
+	if archived {
+		return "", ErrArchived
 	}
 	return status, nil
 }
@@ -400,7 +407,55 @@ func (s *Service) Live(ctx context.Context, id string) (LiveState, bool, error) 
 }
 
 func (s *Service) Progress(ctx context.Context, id string) (Progress, error) {
+	return s.RunProgress(ctx, id, 0)
+}
+
+// Runs lists a campaign's sends, newest first.
+func (s *Service) Runs(ctx context.Context, id string) ([]RunSummary, error) {
 	if _, err := s.load(ctx, id); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT r.number, r.started_at, r.finished_at, counted.*
+		FROM campaign_runs r CROSS JOIN LATERAL (`+runCounts+`) counted
+		WHERE r.campaign_id = $1
+		ORDER BY r.number DESC`, id)
+	if err != nil {
+		return nil, fmt.Errorf("list runs: %w", err)
+	}
+	runs, err := pgx.CollectRows(rows, pgx.RowToStructByPos[RunSummary])
+	if err != nil {
+		return nil, fmt.Errorf("list runs: %w", err)
+	}
+	return runs, nil
+}
+
+// runID finds run number of a campaign. Number 0 means every run, given as nil.
+func (s *Service) runID(ctx context.Context, id string, number int) (*string, error) {
+	if number < 0 {
+		return nil, ErrUnknownFilter
+	}
+	if number == 0 {
+		return nil, nil //nolint:nilnil // every run is a normal answer
+	}
+	var run string
+	err := s.db.QueryRow(ctx, `SELECT id::text FROM campaign_runs WHERE campaign_id = $1 AND number = $2`, id, number).Scan(&run)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find run: %w", err)
+	}
+	return &run, nil
+}
+
+// RunProgress adds up the deliveries of one run, or of every run when number is 0.
+func (s *Service) RunProgress(ctx context.Context, id string, number int) (Progress, error) {
+	if _, err := s.load(ctx, id); err != nil {
+		return Progress{}, err
+	}
+	run, err := s.runID(ctx, id, number)
+	if err != nil {
 		return Progress{}, err
 	}
 	progress := Progress{ByStatus: map[string]int{}, ByChannel: map[string]map[string]int{}, Responses: map[string]int{}}
@@ -413,12 +468,12 @@ func (s *Service) Progress(ctx context.Context, id string) (Progress, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT c->>0, c->>1, (c->>2)::int, (c->>3)::int
 		FROM campaign_runs r, jsonb_array_elements(r.counts) c
-		WHERE r.campaign_id = $1 AND r.finished_at IS NOT NULL
+		WHERE r.campaign_id = $1 AND r.finished_at IS NOT NULL AND ($2::uuid IS NULL OR r.id = $2)
 		UNION ALL
 		SELECT d.channel, d.status, count(*)::int, sum(d.attempts)::int
 		FROM campaign_runs r JOIN campaign_deliveries d ON d.run_id = r.id
-		WHERE r.campaign_id = $1 AND r.finished_at IS NULL
-		GROUP BY d.channel, d.status`, id)
+		WHERE r.campaign_id = $1 AND r.finished_at IS NULL AND ($2::uuid IS NULL OR r.id = $2)
+		GROUP BY d.channel, d.status`, id, run)
 	if err != nil {
 		return Progress{}, fmt.Errorf("read progress: %w", err)
 	}
@@ -447,13 +502,13 @@ func (s *Service) Progress(ctx context.Context, id string) (Progress, error) {
 		SELECT code, sum(calls)::int FROM (
 			SELECT e.key AS code, e.value::int AS calls
 			FROM campaign_runs r, jsonb_each_text(r.responses) e
-			WHERE r.campaign_id = $1 AND r.finished_at IS NOT NULL
+			WHERE r.campaign_id = $1 AND r.finished_at IS NOT NULL AND ($2::uuid IS NULL OR r.id = $2)
 			UNION ALL
 			SELECT a.response_code::text, count(*)::int
 			FROM campaign_runs r JOIN delivery_attempts a ON a.run_id = r.id
-			WHERE r.campaign_id = $1 AND r.finished_at IS NULL AND a.response_code IS NOT NULL
+			WHERE r.campaign_id = $1 AND r.finished_at IS NULL AND a.response_code IS NOT NULL AND ($2::uuid IS NULL OR r.id = $2)
 			GROUP BY a.response_code
-		) s GROUP BY code`, id)
+		) s GROUP BY code`, id, run)
 	if err != nil {
 		return Progress{}, fmt.Errorf("read responses: %w", err)
 	}
@@ -496,8 +551,10 @@ type DeliveryFilter struct {
 	Arrival string
 	// Variant keeps those who got one version of a test.
 	Variant string
-	Limit   int
-	Offset  int
+	// Run keeps one send of the campaign by its number; 0 keeps every run.
+	Run    int
+	Limit  int
+	Offset int
 }
 
 var arrivals = []string{"delivered", "bounced", "waiting"}
@@ -626,6 +683,9 @@ func (f DeliveryFilter) matching(id string) (string, []any, error) {
 	if f.Variant != "" && f.Variant != "A" && f.Variant != "B" {
 		return "", nil, ErrUnknownFilter
 	}
+	if f.Run < 0 {
+		return "", nil, ErrUnknownFilter
+	}
 	fewestCalls, mostCalls, err := callRange(f.Calls)
 	if err != nil {
 		return "", nil, err
@@ -638,6 +698,9 @@ func (f DeliveryFilter) matching(id string) (string, []any, error) {
 	}
 	from := " FROM campaign_deliveries d"
 	where := []string{"d.campaign_id = $1"}
+	if f.Run > 0 {
+		where = append(where, "d.run_id = (SELECT r.id FROM campaign_runs r WHERE r.campaign_id = $1 AND r.number = "+param(f.Run)+")")
+	}
 	if f.Status != "" {
 		where = append(where, "d.status = "+param(f.Status))
 	}

@@ -99,7 +99,7 @@ func (s *Service) SaveSegment(ctx context.Context, campaignID, name string) (Sav
 
 const savedSegmentSelect = `
 	SELECT s.id::text, s.name, s.spec, s.total, s.sms, s.email, s.counted_at, s.source_campaign_id::text, c.name, s.created_by, s.created_at
-	FROM saved_segments s LEFT JOIN campaigns c ON c.id = s.source_campaign_id `
+	FROM saved_segments s LEFT JOIN campaigns c ON c.id = s.source_campaign_id AND c.deleted_at IS NULL `
 
 func scanSavedSegment(row pgx.CollectableRow) (SavedSegment, error) {
 	var (

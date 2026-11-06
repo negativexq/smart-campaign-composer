@@ -181,3 +181,73 @@ func TestADraftWithoutAnAudienceCanBeDuplicated(t *testing.T) {
 		t.Fatalf("unknown campaign: %d", status)
 	}
 }
+
+func TestASentCampaignListsItsRunsAndReadsOneOnItsOwn(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, ai.NewMock())
+	id := sentCampaign(t, api)
+
+	status, body := call(t, api, http.MethodGet, "/api/campaigns/"+id+"/runs", "")
+	runs, _ := body["runs"].([]any)
+	if status != http.StatusOK || len(runs) != 1 || runs[0].(map[string]any)["number"].(float64) != 1 {
+		t.Fatalf("runs: %d %v", status, body)
+	}
+	for _, path := range []string{"/progress?run=1", "/report?run=1", "/deliveries?run=1&limit=5"} {
+		if status, _ := call(t, api, http.MethodGet, "/api/campaigns/"+id+path, ""); status != http.StatusOK {
+			t.Fatalf("%s: %d", path, status)
+		}
+	}
+	if status, _ := call(t, api, http.MethodGet, "/api/campaigns/"+id+"/progress?run=2", ""); status != http.StatusNotFound {
+		t.Fatalf("a run that does not exist: %d", status)
+	}
+	for _, run := range []string{"0", "-1", "one"} {
+		if status, _ := call(t, api, http.MethodGet, "/api/campaigns/"+id+"/deliveries?run="+run, ""); status != http.StatusBadRequest {
+			t.Fatalf("run %s: %d", run, status)
+		}
+	}
+
+	status, list := call(t, api, http.MethodGet, "/api/campaigns?group=sending", "")
+	groups, _ := list["groups"].(map[string]any)
+	if status != http.StatusOK || groups == nil || groups["all"].(float64) < 1 || list["upcoming"] == nil {
+		t.Fatalf("list: %d %v", status, list)
+	}
+	if status, _ := call(t, api, http.MethodGet, "/api/campaigns?group=nope", ""); status != http.StatusBadRequest {
+		t.Fatalf("unknown group: %d", status)
+	}
+}
+
+func TestCampaignsCanBeTaggedArchivedAndDeletedThroughTheAPI(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, ai.NewMock())
+	sent := sentCampaign(t, api)
+	draft := createCampaign(t, api, "Remind people in İstanbul about their carts from the last 30 days")
+
+	status, body := call(t, api, http.MethodPut, "/api/campaigns/"+sent+"/tags", `{"tags":["Winback"," winback ","Q4"]}`)
+	if status != http.StatusOK || len(body["tags"].([]any)) != 2 {
+		t.Fatalf("tags: %d %v", status, body)
+	}
+	if status, _ := call(t, api, http.MethodPut, "/api/campaigns/"+sent+"/tags", `{"tags":[""]}`); status != http.StatusBadRequest {
+		t.Fatalf("empty tag: %d", status)
+	}
+	status, body = call(t, api, http.MethodGet, "/api/campaign-tags", "")
+	if tags, _ := body["tags"].([]any); status != http.StatusOK || len(tags) != 2 {
+		t.Fatalf("tag list: %d %v", status, body)
+	}
+
+	// A campaign that sent keeps its record, so it is archived rather than deleted.
+	if status, _ := call(t, api, http.MethodDelete, "/api/campaigns/"+sent, ""); status != http.StatusConflict {
+		t.Fatalf("delete a sent campaign: %d", status)
+	}
+	if status, _ := call(t, api, http.MethodDelete, "/api/campaigns/"+sent+"/archive", ""); status != http.StatusConflict {
+		t.Fatalf("restore a campaign that is not archived: %d", status)
+	}
+
+	recorder := httptest.NewRecorder()
+	api.ServeHTTP(recorder, signIn(httptest.NewRequest(http.MethodDelete, "/api/campaigns/"+draft, nil)))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("delete a draft: %d %s", recorder.Code, recorder.Body)
+	}
+	if status, _ := call(t, api, http.MethodGet, "/api/campaigns/"+draft, ""); status != http.StatusNotFound {
+		t.Fatalf("get a deleted draft: %d", status)
+	}
+}

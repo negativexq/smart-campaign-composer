@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/negativexq/smart-campaign-composer/internal/content"
+	"github.com/negativexq/smart-campaign-composer/internal/schedule"
 )
 
 const (
@@ -34,6 +35,31 @@ var groupStatuses = map[string][]string{
 	"failed":    {"GENERATION_FAILED", "COMPLETED_WITH_FAILURES"},
 }
 
+// listGroups says which campaigns each list filter keeps. The groups above keep their
+// statuses; the rest narrow them, so they can overlap: a repeating campaign that is
+// sending is in both repeating and sending.
+var listGroups = func() map[string]string {
+	groups := map[string]string{
+		"review":  `c.status = 'READY_FOR_REVIEW'`,
+		"sending": `c.status = 'DISPATCHING'`,
+		"paused":  `c.status = 'PAUSED'`,
+		// Repeats from now on: a schedule with another time to come that is not a single send.
+		"repeating": `c.status IN ('SCHEDULED', 'DISPATCHING', 'PAUSED') AND EXISTS (
+			SELECT 1 FROM campaign_schedules s
+			WHERE s.campaign_id = c.id AND s.next_run_at IS NOT NULL AND s.spec->>'kind' <> 'once')`,
+	}
+	for group, statuses := range groupStatuses {
+		groups[group] = `c.status IN ('` + strings.Join(statuses, `', '`) + `')`
+	}
+	return groups
+}()
+
+// listGroupOrder is the order group counts are read in.
+var listGroupOrder = []string{"drafts", "review", "active", "repeating", "sending", "paused", "completed", "failed"}
+
+// archivedGroup holds the archived campaigns, which every other group leaves out.
+const archivedGroup = "archived"
+
 // ErrUnknownGroup means a list filter does not exist.
 var ErrUnknownGroup = errors.New("unknown campaign group")
 
@@ -43,19 +69,28 @@ type ListFilter struct {
 	Query             string
 	Channel           string
 	CreatedWithinDays int
-	Sort              string
-	Limit             int
-	Offset            int
+	// Tag keeps campaigns carrying this tag, spelled as it is stored.
+	Tag    string
+	Sort   string
+	Limit  int
+	Offset int
 }
 
 // listOrders holds the only orderings a list can ask for, so no request text
 // reaches the query.
-var listOrders = map[string]string{
-	"":       "c.created_at DESC, c.id",
-	"newest": "c.created_at DESC, c.id",
-	"oldest": "c.created_at, c.id",
-	"name":   "lower(c.name), c.id",
-}
+var listOrders = func() map[string]string {
+	lastStarted := `(SELECT r.started_at FROM campaign_runs r WHERE r.campaign_id = c.id ORDER BY r.number DESC LIMIT 1) DESC NULLS LAST`
+	// What sends soonest first, then what sent last, then the newest.
+	next := `(SELECT s.next_run_at FROM campaign_schedules s WHERE s.campaign_id = c.id) NULLS LAST, ` + lastStarted + `, c.created_at DESC, c.id`
+	return map[string]string{
+		"":          next,
+		"next":      next,
+		"last_sent": lastStarted + `, c.created_at DESC, c.id`,
+		"newest":    "c.created_at DESC, c.id",
+		"oldest":    "c.created_at, c.id",
+		"name":      "lower(c.name), c.id",
+	}
+}()
 
 // Summary is a campaign row. Progress comes from its deliveries, so it stays empty
 // until the campaign is dispatched.
@@ -69,48 +104,151 @@ type Summary struct {
 	Processed int       `json:"deliveries_processed"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// Schedule is the sending rule, when the campaign has one.
+	Schedule *ListSchedule `json:"schedule"`
+	Tags     []string      `json:"tags"`
+	// ArchivedAt is when the campaign left the list, if it did.
+	ArchivedAt *time.Time `json:"archived_at"`
+	// LastRun is the latest send, so a repeating campaign shows its last result rather
+	// than every run added up.
+	LastRun *RunSummary `json:"last_run"`
 }
 
-// campaignsMatching is which campaigns a filter keeps, shared by the list and its total.
-const campaignsMatching = `
-	FROM campaigns c
-	WHERE ($1::text[] IS NULL OR c.status = ANY($1))
-	  AND ($2 = '' OR c.name ILIKE '%' || $2 || '%' ESCAPE '\' OR c.brief ILIKE '%' || $2 || '%' ESCAPE '\')
-	  AND ($3 = '' OR $3 = ANY(c.channels))
-	  AND ($4 = 0 OR c.created_at >= now() - make_interval(days => $4))`
+// ListSchedule is what a list row says about when a campaign sends.
+type ListSchedule struct {
+	Description string     `json:"description"`
+	Repeats     bool       `json:"repeats"`
+	NextRunAt   *time.Time `json:"next_run_at"`
+}
 
-// args checks a filter and gives the values campaignsMatching asks for.
-func (f ListFilter) args() ([]any, error) {
-	var statuses []string
-	if f.Group != "" {
-		known, ok := groupStatuses[f.Group]
-		if !ok {
-			return nil, ErrUnknownGroup
+// RunSummary is one send of a campaign and how its messages ended.
+type RunSummary struct {
+	Number     int        `json:"number"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+	Total      int        `json:"total"`
+	Processed  int        `json:"processed"`
+	Sent       int        `json:"sent"`
+	Failed     int        `json:"failed"`
+	Skipped    int        `json:"skipped"`
+	Unknown    int        `json:"unknown"`
+}
+
+// runCounts adds up run r's deliveries by how they ended: from the counts a finished
+// run kept, or by counting a run still sending.
+const runCounts = `
+	SELECT COALESCE(sum(n), 0)::int AS total,
+	       COALESCE(sum(n) FILTER (WHERE st IN ('SENT', 'FAILED', 'SKIPPED', 'UNKNOWN')), 0)::int AS processed,
+	       COALESCE(sum(n) FILTER (WHERE st = 'SENT'), 0)::int AS sent,
+	       COALESCE(sum(n) FILTER (WHERE st = 'FAILED'), 0)::int AS failed,
+	       COALESCE(sum(n) FILTER (WHERE st = 'SKIPPED'), 0)::int AS skipped,
+	       COALESCE(sum(n) FILTER (WHERE st = 'UNKNOWN'), 0)::int AS unknown
+	FROM (
+		SELECT e->>1 AS st, (e->>2)::int AS n FROM jsonb_array_elements(r.counts) e WHERE r.finished_at IS NOT NULL
+		UNION ALL
+		SELECT d.status, count(*)::int FROM campaign_deliveries d WHERE d.run_id = r.id AND r.finished_at IS NULL GROUP BY d.status
+	) counted`
+
+// matching gives the FROM and WHERE of the campaigns a filter keeps, shared by the
+// list and its total, with their arguments. withGroup false leaves the group and the
+// archive out, for counting every group at once.
+func (f ListFilter) matching(withGroup bool) (string, []any, error) {
+	group := "true"
+	if withGroup {
+		switch known, ok := listGroups[f.Group]; {
+		case f.Group == archivedGroup:
+			group = "c.archived_at IS NOT NULL"
+		case f.Group == "":
+			group = "c.archived_at IS NULL"
+		case ok:
+			group = "c.archived_at IS NULL AND " + known
+		default:
+			return "", nil, ErrUnknownGroup
 		}
-		statuses = known
 	}
 	if _, known := listOrders[f.Sort]; !known || f.CreatedWithinDays < 0 || (f.Channel != "" && f.Channel != "sms" && f.Channel != "email") {
-		return nil, ErrUnknownFilter
+		return "", nil, ErrUnknownFilter
 	}
-	return []any{statuses, escapeLike(strings.TrimSpace(f.Query)), f.Channel, f.CreatedWithinDays}, nil
+	return `
+	FROM campaigns c
+	WHERE c.deleted_at IS NULL AND (` + group + `)
+	  AND ($1 = '' OR c.name ILIKE '%' || $1 || '%' ESCAPE '\' OR c.brief ILIKE '%' || $1 || '%' ESCAPE '\'
+	       OR EXISTS (SELECT 1 FROM unnest(c.tags) t WHERE t ILIKE '%' || $1 || '%' ESCAPE '\'))
+	  AND ($2 = '' OR $2 = ANY(c.channels))
+	  AND ($3 = 0 OR c.created_at >= now() - make_interval(days => $3))
+	  AND ($4 = '' OR $4 = ANY(c.tags))`,
+		[]any{escapeLike(strings.TrimSpace(f.Query)), f.Channel, f.CreatedWithinDays, f.Tag}, nil
 }
 
 // CountCampaigns says how many campaigns a filter keeps across every page.
 func (s *Service) CountCampaigns(ctx context.Context, filter ListFilter) (int, error) {
-	args, err := filter.args()
+	matching, args, err := filter.matching(true)
 	if err != nil {
 		return 0, err
 	}
 	var total int
-	if err := s.db.QueryRow(ctx, `SELECT count(*)`+campaignsMatching, args...).Scan(&total); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT count(*)`+matching, args...).Scan(&total); err != nil {
 		return 0, fmt.Errorf("count campaigns: %w", err)
 	}
 	return total, nil
 }
 
-// List returns one page of campaigns, newest first.
+// CountGroups says how many campaigns each list group holds with the filter's search
+// and channel, whatever group the filter itself picks. "all" holds every one.
+func (s *Service) CountGroups(ctx context.Context, filter ListFilter) (map[string]int, error) {
+	matching, args, err := filter.matching(false)
+	if err != nil {
+		return nil, err
+	}
+	columns := "count(*) FILTER (WHERE c.archived_at IS NULL)"
+	for _, group := range listGroupOrder {
+		columns += ", count(*) FILTER (WHERE c.archived_at IS NULL AND " + listGroups[group] + ")"
+	}
+	columns += ", count(*) FILTER (WHERE c.archived_at IS NOT NULL)"
+	counts := make([]int, len(listGroupOrder)+2)
+	targets := make([]any, len(counts))
+	for i := range counts {
+		targets[i] = &counts[i]
+	}
+	if err := s.db.QueryRow(ctx, `SELECT `+columns+matching, args...).Scan(targets...); err != nil {
+		return nil, fmt.Errorf("count campaign groups: %w", err)
+	}
+	groups := map[string]int{"all": counts[0], archivedGroup: counts[len(counts)-1]}
+	for i, group := range listGroupOrder {
+		groups[group] = counts[i+1]
+	}
+	return groups, nil
+}
+
+// Upcoming is a send planned for later.
+type Upcoming struct {
+	CampaignID string    `json:"campaign_id"`
+	Name       string    `json:"name"`
+	At         time.Time `json:"at"`
+	Repeats    bool      `json:"repeats"`
+}
+
+// UpcomingSends lists the next sends across the workspace, soonest first.
+func (s *Service) UpcomingSends(ctx context.Context, limit int) ([]Upcoming, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT c.id::text, c.name, s.next_run_at, s.spec->>'kind' <> 'once'
+		FROM campaign_schedules s JOIN campaigns c ON c.id = s.campaign_id
+		WHERE s.next_run_at IS NOT NULL AND c.status IN ('SCHEDULED', 'DISPATCHING') AND c.archived_at IS NULL AND c.deleted_at IS NULL
+		ORDER BY s.next_run_at, c.id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("upcoming sends: %w", err)
+	}
+	upcoming, err := pgx.CollectRows(rows, pgx.RowToStructByPos[Upcoming])
+	if err != nil {
+		return nil, fmt.Errorf("upcoming sends: %w", err)
+	}
+	return upcoming, nil
+}
+
+// List returns one page of campaigns, by default what sends next first.
 func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error) {
-	args, err := filter.args()
+	matching, args, err := filter.matching(true)
 	if err != nil {
 		return nil, err
 	}
@@ -123,13 +261,21 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 	rows, err := s.db.Query(ctx, `
 		SELECT c.id::text, c.name, c.brief, c.status,
 		       c.channels, COALESCE(d.total, 0), COALESCE(d.processed, 0),
-		       c.created_at, c.updated_at
+		       c.created_at, c.updated_at, c.tags, c.archived_at, sch.spec, sch.next_run_at,
+		       last.number, last.started_at, last.finished_at, last.total, last.processed, last.sent, last.failed, last.skipped, last.unknown
 		-- Choosing the page first means only its campaigns get counted.
 		FROM (
-			SELECT c.*`+campaignsMatching+`
+			SELECT c.*`+matching+`
 			ORDER BY `+order+`
 			LIMIT $5 OFFSET $6
 		) c
+		LEFT JOIN campaign_schedules sch ON sch.campaign_id = c.id
+		LEFT JOIN LATERAL (
+			SELECT r.number, r.started_at, r.finished_at, counted.*
+			FROM campaign_runs r CROSS JOIN LATERAL (`+runCounts+`) counted
+			WHERE r.campaign_id = c.id
+			ORDER BY r.number DESC LIMIT 1
+		) last ON true
 		-- Finished runs kept their counts; only a run still sending is counted here.
 		LEFT JOIN LATERAL (
 			SELECT COALESCE(sum(r.total), 0) + COALESCE(sum(live.total), 0) AS total,
@@ -147,10 +293,33 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 		return nil, fmt.Errorf("list campaigns: %w", err)
 	}
 	summaries, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Summary, error) {
-		var summary Summary
+		var (
+			summary  Summary
+			spec     []byte
+			next     *time.Time
+			number   *int
+			started  *time.Time
+			finished *time.Time
+			counts   [6]*int
+		)
 		err := row.Scan(&summary.ID, &summary.Name, &summary.Brief, &summary.Status, &summary.Channels,
-			&summary.Total, &summary.Processed, &summary.CreatedAt, &summary.UpdatedAt)
-		return summary, err
+			&summary.Total, &summary.Processed, &summary.CreatedAt, &summary.UpdatedAt, &summary.Tags, &summary.ArchivedAt, &spec, &next,
+			&number, &started, &finished, &counts[0], &counts[1], &counts[2], &counts[3], &counts[4], &counts[5])
+		if err != nil {
+			return summary, err
+		}
+		if spec != nil {
+			var rule schedule.Spec
+			if err := json.Unmarshal(spec, &rule); err != nil {
+				return summary, fmt.Errorf("decode schedule: %w", err)
+			}
+			summary.Schedule = &ListSchedule{Description: rule.Describe(), Repeats: rule.Kind != schedule.KindOnce, NextRunAt: next}
+		}
+		if number != nil {
+			summary.LastRun = &RunSummary{Number: *number, StartedAt: *started, FinishedAt: finished,
+				Total: *counts[0], Processed: *counts[1], Sent: *counts[2], Failed: *counts[3], Skipped: *counts[4], Unknown: *counts[5]}
+		}
+		return summary, nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list campaigns: %w", err)
@@ -211,13 +380,13 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 		       count(*) FILTER (WHERE status = ANY($2)),
 		       count(*) FILTER (WHERE status = ANY($3)),
 		       count(*) FILTER (WHERE status = ANY($4))
-		FROM campaigns`,
+		FROM campaigns WHERE deleted_at IS NULL AND archived_at IS NULL`,
 		groupStatuses["drafts"], groupStatuses["active"], groupStatuses["completed"], groupStatuses["failed"],
 	).Scan(&overview.Counts.Total, &overview.Counts.Drafts, &overview.Counts.Active, &overview.Counts.Completed, &overview.Counts.Failed)
 	if err != nil {
 		return Overview{}, fmt.Errorf("count campaigns: %w", err)
 	}
-	if overview.Recent, err = s.List(ctx, ListFilter{Limit: recentCampaigns}); err != nil {
+	if overview.Recent, err = s.List(ctx, ListFilter{Sort: "newest", Limit: recentCampaigns}); err != nil {
 		return Overview{}, err
 	}
 	if overview.Activity, err = s.queryActivity(ctx, nil, recentActivity); err != nil {
@@ -264,7 +433,7 @@ func (s *Service) queryActivity(ctx context.Context, id *pgtype.UUID, limit int)
 		query += `WHERE a.campaign_id = $1 ORDER BY a.id`
 		args = append(args, *id)
 	} else {
-		query += `ORDER BY a.id DESC LIMIT $1`
+		query += `WHERE c.deleted_at IS NULL ORDER BY a.id DESC LIMIT $1`
 		args = append(args, limit)
 	}
 	return s.readActivity(ctx, query, args...)
@@ -299,7 +468,7 @@ func (s *Service) templateCounts(ctx context.Context) (map[string]int, error) {
 		LEFT JOIN LATERAL (
 			SELECT content FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE 'email' = ANY(c.channels)
+		WHERE 'email' = ANY(c.channels) AND c.deleted_at IS NULL
 		GROUP BY 1`, content.EmailTemplates[0])
 	if err != nil {
 		return nil, fmt.Errorf("count template use: %w", err)
@@ -326,10 +495,11 @@ func (s *Service) Notifications(ctx context.Context) ([]ActivityEntry, error) {
 	return s.readActivity(ctx, `
 		SELECT a.id, a.campaign_id::text, c.name, a.event_type, a.actor_type, a.actor, a.details, a.occurred_at
 		FROM audit_events a JOIN campaigns c ON c.id = a.campaign_id
-		WHERE a.event_type IN ('campaign.completed', 'campaign.run_finished')
+		WHERE c.deleted_at IS NULL
+		  AND (a.event_type IN ('campaign.completed', 'campaign.run_finished')
 		   OR (a.event_type = 'campaign.paused' AND c.status = 'PAUSED')
 		   OR (a.event_type = 'content.generation_failed' AND c.status = 'GENERATION_FAILED')
-		   OR (a.event_type = 'campaign.run' AND (a.details->>'queued')::int > 0)
+		   OR (a.event_type = 'campaign.run' AND (a.details->>'queued')::int > 0))
 		ORDER BY a.id DESC LIMIT $1`, notificationLimit)
 }
 

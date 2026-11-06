@@ -1,17 +1,32 @@
 <script setup lang="ts">
-import type { CampaignSummary } from "../api/campaigns";
+import type { CampaignSummary, RunSummary } from "../api/campaigns";
 import { formatChannel, formatDateTime } from "../lib/format";
 import CampaignStatusBadge from "./CampaignStatusBadge.vue";
 
-defineProps<{ campaigns: CampaignSummary[] }>();
+defineProps<{ campaigns: CampaignSummary[]; tag?: string }>();
+// Picking a tag on a row filters the list by it.
+const emit = defineEmits<{ tag: [string] }>();
 
-function progress(campaign: CampaignSummary) {
-  if (!campaign.deliveries_total) return "—";
-  return `${Math.floor((campaign.deliveries_processed / campaign.deliveries_total) * 100)}%`;
+const count = (value: number) => value.toLocaleString("en-US");
+
+// What kind of campaign it is, in the words of its rule, and the channels it uses.
+function kindOf(campaign: CampaignSummary) {
+  const channels = campaign.channels.map(formatChannel).join(", ");
+  const kind = campaign.schedule?.repeats ? campaign.schedule.description : campaign.schedule ? "One time, at a set time" : "One time";
+  return channels ? `${kind} · ${channels}` : kind;
 }
 
-function channels(campaign: CampaignSummary) {
-  return campaign.channels.length ? campaign.channels.map(formatChannel).join(" + ") : "—";
+function lastResult(run: RunSummary) {
+  if (!run.finished_at) return run.total ? `${Math.floor((run.processed / run.total) * 100)}% done` : "Starting";
+  return `${count(run.sent)} sent`;
+}
+
+function lastDetail(campaign: CampaignSummary, run: RunSummary) {
+  const parts = [];
+  if (campaign.schedule?.repeats || run.number > 1) parts.push(`Run #${run.number}`);
+  parts.push(run.finished_at ? formatDateTime(run.started_at) : `${count(run.processed)} of ${count(run.total)}`);
+  if (run.failed) parts.push(`${count(run.failed)} failed`);
+  return parts.join(" · ");
 }
 </script>
 
@@ -22,20 +37,42 @@ function channels(campaign: CampaignSummary) {
         <tr>
           <th scope="col">Campaign</th>
           <th scope="col">Status</th>
-          <th scope="col" class="optional">Channels</th>
-          <th scope="col" class="optional">Created</th>
-          <th scope="col" class="numeric">Progress</th>
+          <th scope="col" class="optional">Next send</th>
+          <th scope="col">Last send</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="campaign in campaigns" :key="campaign.id" data-testid="campaign-row">
           <td class="name">
             <a :href="`/campaigns/${campaign.id}`" :title="campaign.brief">{{ campaign.name }}</a>
+            <span class="sub small muted" data-testid="campaign-kind">{{ kindOf(campaign) }}</span>
+            <span v-if="campaign.tags?.length" class="row-tags">
+              <button
+                v-for="name in campaign.tags"
+                :key="name"
+                type="button"
+                class="row-tag"
+                :class="{ 'row-tag--on': name === tag }"
+                :aria-pressed="name === tag"
+                data-testid="row-tag"
+                @click="emit('tag', name === tag ? '' : name)"
+              >
+                {{ name }}
+              </button>
+            </span>
           </td>
-          <td><CampaignStatusBadge :status="campaign.status" /></td>
-          <td class="optional">{{ channels(campaign) }}</td>
-          <td class="optional muted">{{ formatDateTime(campaign.created_at) }}</td>
-          <td class="numeric mono">{{ progress(campaign) }}</td>
+          <td><CampaignStatusBadge :status="campaign.status" :schedule="campaign.schedule ?? null" :last-run="campaign.last_run ?? null" /></td>
+          <td class="optional" data-testid="campaign-next">
+            <template v-if="campaign.schedule?.next_run_at">{{ formatDateTime(campaign.schedule.next_run_at) }}</template>
+            <span v-else class="muted">—</span>
+          </td>
+          <td data-testid="campaign-last">
+            <template v-if="campaign.last_run">
+              {{ lastResult(campaign.last_run) }}
+              <span class="sub small muted">{{ lastDetail(campaign, campaign.last_run) }}</span>
+            </template>
+            <span v-else class="muted">Not sent yet</span>
+          </td>
         </tr>
       </tbody>
     </table>
@@ -43,6 +80,35 @@ function channels(campaign: CampaignSummary) {
 </template>
 
 <style scoped>
+.row-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.row-tag {
+  height: 22px;
+  padding: 0 var(--space-2);
+  color: var(--color-text-muted);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.row-tag:hover {
+  color: var(--color-text);
+}
+
+.row-tag--on {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  border-color: transparent;
+}
+
 .wrap {
   overflow-x: auto;
 }
@@ -63,6 +129,7 @@ th,
 td {
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
   white-space: nowrap;
 }
 
@@ -73,7 +140,12 @@ tbody tr:last-child td {
 .name {
   width: 100%;
   max-width: 0;
-  min-width: 180px;
+  min-width: 200px;
+}
+
+.name a,
+.sub {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -89,8 +161,8 @@ tbody tr:last-child td {
   text-decoration: underline;
 }
 
-.numeric {
-  text-align: right;
+.sub {
+  margin-top: 2px;
 }
 
 @media (max-width: 760px) {

@@ -25,7 +25,7 @@ const REFRESH_MS = 5000;
 // Reports come after sending ends, and some may never come, so asking stops in time.
 const MAX_QUIET_CHECKS = 12;
 
-const props = defineProps<{ campaignId: string; progress: Progress; query: DeliveryQuery; refreshKey?: number }>();
+const props = defineProps<{ campaignId: string; progress: Progress; query: DeliveryQuery; refreshKey?: number; run?: number | null }>();
 const emit = defineEmits<{ select: [selection: Partial<DeliveryQuery>]; reported: [] }>();
 
 const report = ref<Report | null>(null);
@@ -39,7 +39,7 @@ let quietChecks = 0;
 async function load() {
   lastLoad = Date.now();
   try {
-    report.value = await getReport(props.campaignId);
+    report.value = await getReport(props.campaignId, props.run);
     error.value = "";
     followReports();
   } catch (failure) {

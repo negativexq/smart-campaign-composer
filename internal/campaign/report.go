@@ -123,30 +123,39 @@ func (s *Service) RecordDeliveryEvent(ctx context.Context, key, event string, oc
 
 // Report reads a campaign's delivery history.
 func (s *Service) Report(ctx context.Context, id string) (Report, error) {
+	return s.RunReport(ctx, id, 0)
+}
+
+// RunReport reads the delivery history of one run, or of every run when number is 0.
+func (s *Service) RunReport(ctx context.Context, id string, number int) (Report, error) {
 	if _, err := s.load(ctx, id); err != nil {
 		return Report{}, err
 	}
-	reasons, err := s.reportReasons(ctx, id)
+	run, err := s.runID(ctx, id, number)
 	if err != nil {
 		return Report{}, err
 	}
-	problems, err := s.reportProblems(ctx, id)
+	reasons, err := s.reportReasons(ctx, id, run)
 	if err != nil {
 		return Report{}, err
 	}
-	timeline, err := s.reportTimeline(ctx, id)
+	problems, err := s.reportProblems(ctx, id, run)
 	if err != nil {
 		return Report{}, err
 	}
-	engagement, err := s.reportEngagement(ctx, id)
+	timeline, err := s.reportTimeline(ctx, id, run)
 	if err != nil {
 		return Report{}, err
 	}
-	lifecycle, err := s.reportLifecycle(ctx, id)
+	engagement, err := s.reportEngagement(ctx, id, run)
 	if err != nil {
 		return Report{}, err
 	}
-	variants, err := s.reportVariants(ctx, id)
+	lifecycle, err := s.reportLifecycle(ctx, id, run)
+	if err != nil {
+		return Report{}, err
+	}
+	variants, err := s.reportVariants(ctx, id, run)
 	if err != nil {
 		return Report{}, err
 	}
@@ -175,10 +184,10 @@ const campaignArrivals = `arrival AS (
 		GROUP BY delivery_id
 	)`
 
-func (s *Service) reportLifecycle(ctx context.Context, id string) ([]ReportLifecycle, error) {
+func (s *Service) reportLifecycle(ctx context.Context, id string, run *string) ([]ReportLifecycle, error) {
 	rows, err := s.db.Query(ctx, `
 		WITH `+campaignArrivals+`,
-		called AS (SELECT DISTINCT delivery_id FROM delivery_attempts WHERE campaign_id = $1)
+		called AS (SELECT DISTINCT delivery_id FROM delivery_attempts WHERE campaign_id = $1 AND ($2::uuid IS NULL OR run_id = $2))
 		SELECT d.channel, count(*),
 		       count(*) FILTER (WHERE d.status <> 'SKIPPED'),
 		       count(called.delivery_id),
@@ -190,9 +199,9 @@ func (s *Service) reportLifecycle(ctx context.Context, id string) ([]ReportLifec
 		FROM campaign_deliveries d
 		LEFT JOIN arrival ON arrival.delivery_id = d.id
 		LEFT JOIN called ON called.delivery_id = d.id
-		WHERE d.campaign_id = $1
+		WHERE d.campaign_id = $1 AND ($2::uuid IS NULL OR d.run_id = $2)
 		GROUP BY d.channel
-		ORDER BY d.channel DESC`, id)
+		ORDER BY d.channel DESC`, id, run)
 	if err != nil {
 		return nil, fmt.Errorf("read report lifecycle: %w", err)
 	}
@@ -203,7 +212,7 @@ func (s *Service) reportLifecycle(ctx context.Context, id string) ([]ReportLifec
 	return lifecycle, nil
 }
 
-func (s *Service) reportVariants(ctx context.Context, id string) ([]ReportVariant, error) {
+func (s *Service) reportVariants(ctx context.Context, id string, run *string) ([]ReportVariant, error) {
 	rows, err := s.db.Query(ctx, `
 		WITH `+campaignArrivals+`
 		SELECT d.variant, d.channel, count(*),
@@ -214,9 +223,9 @@ func (s *Service) reportVariants(ctx context.Context, id string) ([]ReportVarian
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.opened)
 		FROM campaign_deliveries d
 		LEFT JOIN arrival ON arrival.delivery_id = d.id
-		WHERE d.campaign_id = $1 AND d.variant IS NOT NULL
+		WHERE d.campaign_id = $1 AND d.variant IS NOT NULL AND ($2::uuid IS NULL OR d.run_id = $2)
 		GROUP BY d.variant, d.channel
-		ORDER BY d.channel DESC, d.variant`, id)
+		ORDER BY d.channel DESC, d.variant`, id, run)
 	if err != nil {
 		return nil, fmt.Errorf("read report variants: %w", err)
 	}
@@ -227,14 +236,14 @@ func (s *Service) reportVariants(ctx context.Context, id string) ([]ReportVarian
 	return variants, nil
 }
 
-func (s *Service) reportEngagement(ctx context.Context, id string) ([]ReportEngagement, error) {
+func (s *Service) reportEngagement(ctx context.Context, id string, run *string) ([]ReportEngagement, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT d.channel, count(*), count(e.delivery_id)
 		FROM campaign_deliveries d
 		LEFT JOIN delivery_events e ON e.delivery_id = d.id AND e.event_type = 'opened'
-		WHERE d.campaign_id = $1 AND d.status = 'SENT'
+		WHERE d.campaign_id = $1 AND d.status = 'SENT' AND ($2::uuid IS NULL OR d.run_id = $2)
 		GROUP BY d.channel
-		ORDER BY d.channel DESC`, id)
+		ORDER BY d.channel DESC`, id, run)
 	if err != nil {
 		return nil, fmt.Errorf("read report engagement: %w", err)
 	}
@@ -245,13 +254,13 @@ func (s *Service) reportEngagement(ctx context.Context, id string) ([]ReportEnga
 	return engagement, nil
 }
 
-func (s *Service) reportReasons(ctx context.Context, id string) ([]ReportReason, error) {
+func (s *Service) reportReasons(ctx context.Context, id string, run *string) ([]ReportReason, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT last_error, count(*)
 		FROM campaign_deliveries
-		WHERE campaign_id = $1 AND status IN ('FAILED', 'UNKNOWN', 'SKIPPED') AND last_error IS NOT NULL
+		WHERE campaign_id = $1 AND status IN ('FAILED', 'UNKNOWN', 'SKIPPED') AND last_error IS NOT NULL AND ($2::uuid IS NULL OR run_id = $2)
 		GROUP BY last_error
-		ORDER BY count(*) DESC, last_error`, id)
+		ORDER BY count(*) DESC, last_error`, id, run)
 	if err != nil {
 		return nil, fmt.Errorf("read report reasons: %w", err)
 	}
@@ -262,13 +271,13 @@ func (s *Service) reportReasons(ctx context.Context, id string) ([]ReportReason,
 	return reasons, nil
 }
 
-func (s *Service) reportProblems(ctx context.Context, id string) ([]ReportProblem, error) {
+func (s *Service) reportProblems(ctx context.Context, id string, run *string) ([]ReportProblem, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT outcome, count(DISTINCT delivery_id), count(*)
 		FROM delivery_attempts
-		WHERE campaign_id = $1 AND outcome <> 'accepted'
+		WHERE campaign_id = $1 AND outcome <> 'accepted' AND ($2::uuid IS NULL OR run_id = $2)
 		GROUP BY outcome
-		ORDER BY count(*) DESC, outcome`, id)
+		ORDER BY count(*) DESC, outcome`, id, run)
 	if err != nil {
 		return nil, fmt.Errorf("read report problems: %w", err)
 	}
@@ -279,10 +288,10 @@ func (s *Service) reportProblems(ctx context.Context, id string) ([]ReportProble
 	return problems, nil
 }
 
-func (s *Service) reportTimeline(ctx context.Context, id string) (Timeline, error) {
+func (s *Service) reportTimeline(ctx context.Context, id string, run *string) (Timeline, error) {
 	timeline := Timeline{Buckets: []TimelineBucket{}}
 	var first, last *time.Time
-	if err := s.db.QueryRow(ctx, `SELECT min(occurred_at), max(occurred_at) FROM delivery_attempts WHERE campaign_id = $1`, id).Scan(&first, &last); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT min(occurred_at), max(occurred_at) FROM delivery_attempts WHERE campaign_id = $1 AND ($2::uuid IS NULL OR run_id = $2)`, id, run).Scan(&first, &last); err != nil {
 		return timeline, fmt.Errorf("read report timeline: %w", err)
 	}
 	if first == nil || last == nil {
@@ -298,8 +307,8 @@ func (s *Service) reportTimeline(ctx context.Context, id string) (Timeline, erro
 		       count(*) FILTER (WHERE outcome = 'rejected'),
 		       count(*) FILTER (WHERE outcome = 'timeout')
 		FROM delivery_attempts
-		WHERE campaign_id = $1
-		GROUP BY 1`, id, float64(timeline.BucketSeconds))
+		WHERE campaign_id = $1 AND ($3::uuid IS NULL OR run_id = $3)
+		GROUP BY 1`, id, float64(timeline.BucketSeconds), run)
 	if err != nil {
 		return timeline, fmt.Errorf("read report timeline: %w", err)
 	}

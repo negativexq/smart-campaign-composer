@@ -69,6 +69,11 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 		"GET /api/campaigns/{id}":                                a.get,
 		"PATCH /api/campaigns/{id}":                              a.rename,
 		"PUT /api/campaigns/{id}/languages":                      a.setLanguages,
+		"PUT /api/campaigns/{id}/tags":                           a.setTags,
+		"POST /api/campaigns/{id}/archive":                       a.archive,
+		"DELETE /api/campaigns/{id}/archive":                     a.unarchive,
+		"DELETE /api/campaigns/{id}":                             a.deleteCampaign,
+		"GET /api/campaign-tags":                                 a.tags,
 		"POST /api/campaigns/{id}/segment":                       a.proposeSegment,
 		"GET /api/campaigns/{id}/audience":                       a.audience,
 		"GET /api/campaigns/{id}/audience/breakdown":             a.audienceBreakdown,
@@ -83,6 +88,7 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 		"POST /api/campaigns/{id}/schedule":                      a.schedule,
 		"DELETE /api/campaigns/{id}/schedule":                    a.cancelSchedule,
 		"GET /api/campaigns/{id}/progress":                       a.progress,
+		"GET /api/campaigns/{id}/runs":                           a.runs,
 		"GET /api/campaigns/{id}/events":                         a.events,
 		"GET /api/campaigns/{id}/deliveries":                     a.deliveries,
 		"GET /api/campaigns/{id}/deliveries.csv":                 a.deliveriesCSV,
@@ -188,6 +194,9 @@ func (a *api) overview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, overview)
 }
 
+// upcomingSends is how many planned sends the campaign list shows above itself.
+const upcomingSends = 4
+
 func (a *api) list(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	days := 0
@@ -206,6 +215,7 @@ func (a *api) list(w http.ResponseWriter, r *http.Request) {
 		Channel:           query.Get("channel"),
 		CreatedWithinDays: days,
 		Sort:              query.Get("sort"),
+		Tag:               query.Get("tag"),
 		Offset:            offset,
 	}
 	campaigns, err := a.campaigns.List(r.Context(), filter)
@@ -218,7 +228,17 @@ func (a *api) list(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"campaigns": campaigns, "total": total})
+	groups, err := a.campaigns.CountGroups(r.Context(), filter)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	upcoming, err := a.campaigns.UpcomingSends(r.Context(), upcomingSends)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"campaigns": campaigns, "total": total, "groups": groups, "upcoming": upcoming})
 }
 
 func (a *api) emailTemplates(w http.ResponseWriter, r *http.Request) {
@@ -374,6 +394,56 @@ func (a *api) rename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *api) setTags(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Tags []string `json:"tags"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	view, err := a.campaigns.SetTags(r.Context(), r.PathValue("id"), body.Tags)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *api) tags(w http.ResponseWriter, r *http.Request) {
+	tags, err := a.campaigns.Tags(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tags": tags})
+}
+
+func (a *api) archive(w http.ResponseWriter, r *http.Request) {
+	view, err := a.campaigns.Archive(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *api) unarchive(w http.ResponseWriter, r *http.Request) {
+	view, err := a.campaigns.Unarchive(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *api) deleteCampaign(w http.ResponseWriter, r *http.Request) {
+	if err := a.campaigns.Delete(r.Context(), r.PathValue("id")); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *api) setLanguages(w http.ResponseWriter, r *http.Request) {
@@ -626,7 +696,12 @@ func (a *api) cancelSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) progress(w http.ResponseWriter, r *http.Request) {
-	progress, err := a.campaigns.Progress(r.Context(), r.PathValue("id"))
+	run, err := runNumber(r.URL.Query())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	progress, err := a.campaigns.RunProgress(r.Context(), r.PathValue("id"), run)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -683,7 +758,34 @@ func (a *api) events(w http.ResponseWriter, r *http.Request) {
 	stream.send("end", struct{}{})
 }
 
+// runNumber reads the optional run a request asks about; none means every run.
+func runNumber(query url.Values) (int, error) {
+	value := query.Get("run")
+	if value == "" {
+		return 0, nil
+	}
+	run, err := strconv.Atoi(value)
+	if err != nil || run < 1 {
+		return 0, campaign.ErrUnknownFilter
+	}
+	return run, nil
+}
+
+// runs lists a campaign's sends, newest first.
+func (a *api) runs(w http.ResponseWriter, r *http.Request) {
+	runs, err := a.campaigns.Runs(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
 func deliveryFilter(query url.Values) (campaign.DeliveryFilter, error) {
+	run, err := runNumber(query)
+	if err != nil {
+		return campaign.DeliveryFilter{}, err
+	}
 	limit, _ := strconv.Atoi(query.Get("limit"))   //nolint:errcheck // anything invalid means the default
 	offset, _ := strconv.Atoi(query.Get("offset")) //nolint:errcheck // anything invalid means the start
 	from, fromErr := parseTime(query.Get("from"))
@@ -693,7 +795,7 @@ func deliveryFilter(query url.Values) (campaign.DeliveryFilter, error) {
 	}
 	return campaign.DeliveryFilter{
 		Status: query.Get("status"), Channel: query.Get("channel"), Reason: query.Get("reason"), Outcome: query.Get("outcome"),
-		From: from, To: to, Calls: query.Get("calls"), City: query.Get("city"), Opened: query.Get("opened"), Arrival: query.Get("arrival"), Variant: query.Get("variant"), Limit: limit, Offset: offset,
+		From: from, To: to, Calls: query.Get("calls"), City: query.Get("city"), Opened: query.Get("opened"), Arrival: query.Get("arrival"), Variant: query.Get("variant"), Run: run, Limit: limit, Offset: offset,
 	}, nil
 }
 
@@ -761,7 +863,12 @@ func (a *api) duplicate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) report(w http.ResponseWriter, r *http.Request) {
-	report, err := a.campaigns.Report(r.Context(), r.PathValue("id"))
+	run, err := runNumber(r.URL.Query())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	report, err := a.campaigns.RunReport(r.Context(), r.PathValue("id"), run)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -849,6 +956,16 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusConflict, "You already have a saved audience with this name."
 	case errors.Is(err, campaign.ErrSegmentNotSavable):
 		status, message = http.StatusConflict, "This campaign has no audience to save. Resolve anything blocking its rule first."
+	case errors.Is(err, campaign.ErrInvalidTags):
+		status, message = http.StatusBadRequest, "Use up to 10 tags of up to 30 characters each."
+	case errors.Is(err, campaign.ErrArchived):
+		status, message = http.StatusConflict, "This campaign is archived. Restore it before sending or scheduling it."
+	case errors.Is(err, campaign.ErrNotArchived):
+		status, message = http.StatusConflict, "This campaign is not archived."
+	case errors.Is(err, campaign.ErrStillSending):
+		status, message = http.StatusConflict, "This campaign is writing or sending messages. Archive it once that has finished."
+	case errors.Is(err, campaign.ErrSentBefore):
+		status, message = http.StatusConflict, "Only a campaign that never sent or was scheduled can be deleted. Archive this one instead: its report stays."
 	case errors.Is(err, campaign.ErrUnknownGroup):
 		status, message = http.StatusBadRequest, "This campaign filter does not exist."
 	case errors.Is(err, campaign.ErrNotFound):

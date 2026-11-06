@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -85,7 +86,11 @@ type View struct {
 	EmailDesign *content.Design `json:"email_design,omitempty"`
 	Brief       string          `json:"brief"`
 	Status      string          `json:"status"`
-	Channels    []string        `json:"channels"`
+	// Tags group campaigns the way a team thinks of them.
+	Tags []string `json:"tags"`
+	// ArchivedAt is when the campaign left the list, if it did.
+	ArchivedAt *time.Time `json:"archived_at"`
+	Channels   []string   `json:"channels"`
 	// ExcludedLanguages get no version of their own, and their readers get English.
 	ExcludedLanguages []string `json:"excluded_languages"`
 	Tone              string   `json:"tone"`
@@ -304,6 +309,45 @@ func (s *Service) DuplicatePreview(ctx context.Context, id string, rule *int) (D
 	return preview, nil
 }
 
+// copySuffix matches the end a copy's name gets, so copying a copy numbers it from
+// the original name instead of adding another "(copy)".
+var copySuffix = regexp.MustCompile(` \(copy(?: (\d+))?\)$`)
+
+// copyName names a copy after the original: "Name (copy)", then "Name (copy 2)" and
+// on, one past the highest number already in use.
+func copyName(ctx context.Context, tx pgx.Tx, source string) (string, error) {
+	base := copySuffix.ReplaceAllString(source, "")
+	rows, err := tx.Query(ctx, `SELECT name FROM campaigns WHERE starts_with(name, $1 || ' (copy')`, base)
+	if err != nil {
+		return "", fmt.Errorf("find earlier copies: %w", err)
+	}
+	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return "", fmt.Errorf("find earlier copies: %w", err)
+	}
+	highest := 0
+	for _, name := range names {
+		match := copySuffix.FindStringSubmatch(name)
+		if match == nil || strings.TrimSuffix(name, match[0]) != base {
+			continue
+		}
+		number := 1
+		if match[1] != "" {
+			number, _ = strconv.Atoi(match[1]) //nolint:errcheck // the pattern holds digits only
+		}
+		highest = max(highest, number)
+	}
+	suffix := " (copy)"
+	if highest > 0 {
+		suffix = fmt.Sprintf(" (copy %d)", highest+1)
+	}
+	name := []rune(base)
+	if limit := segment.MaxCampaignNameLength - len(suffix); len(name) > limit {
+		name = name[:limit]
+	}
+	return string(name) + suffix, nil
+}
+
 // Duplicate starts a new draft from a campaign: its brief, options, audience rule and
 // messages. Approval, schedule and deliveries stay behind, and the audience is counted
 // again from now, so the copy goes through every check the original did. rule, when
@@ -320,24 +364,23 @@ func (s *Service) Duplicate(ctx context.Context, id string, rule *int) (View, er
 	if source.Content != nil {
 		status = statusReady
 	}
-	name := []rune(source.Name)
-	const suffix = " (copy)"
-	if len(name) > segment.MaxCampaignNameLength-len(suffix) {
-		name = name[:segment.MaxCampaignNameLength-len(suffix)]
-	}
-
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return View{}, fmt.Errorf("begin duplicate: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
+	name, err := copyName(ctx, tx, source.Name)
+	if err != nil {
+		return View{}, err
+	}
+
 	var copied string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO campaigns (brief, name, name_source, created_by, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, email_design, status)
-		SELECT brief, $2, name_source, $3, channels, excluded_languages, tone, offer_percent, COALESCE($5, not_messaged_within_days), ab_test, variant_a_percent, email_template, email_design, $4
+		INSERT INTO campaigns (tags, brief, name, name_source, created_by, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, email_design, status)
+		SELECT tags, brief, $2, name_source, $3, channels, excluded_languages, tone, offer_percent, COALESCE($5, not_messaged_within_days), ab_test, variant_a_percent, email_template, email_design, $4
 		FROM campaigns WHERE id = $1
-		RETURNING id::text`, id, string(name)+suffix, personFrom(ctx), status, rule).Scan(&copied); err != nil {
+		RETURNING id::text`, id, name, personFrom(ctx), status, rule).Scan(&copied); err != nil {
 		return View{}, fmt.Errorf("copy campaign: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -1001,12 +1044,12 @@ func (s *Service) loadFrom(ctx context.Context, q segment.Querier, id string) (V
 		snapshot     []byte
 	)
 	err := q.QueryRow(ctx, `
-		SELECT c.name, c.name_source, c.email_template, c.email_design, c.brief, c.status, c.channels, c.excluded_languages, c.tone, c.ab_test, c.variant_a_percent, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
+		SELECT c.name, c.name_source, c.email_template, c.email_design, c.brief, c.status, c.tags, c.archived_at, c.channels, c.excluded_languages, c.tone, c.ab_test, c.variant_a_percent, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1`, parsed).Scan(&view.Name, &view.NameSource, &view.EmailTemplate, &view.EmailDesign, &view.Brief, &view.Status, &view.Channels, &view.ExcludedLanguages, &view.Tone, &view.ABTest, &view.VariantAPercent, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt, &snapshot)
+		WHERE c.id = $1 AND c.deleted_at IS NULL`, parsed).Scan(&view.Name, &view.NameSource, &view.EmailTemplate, &view.EmailDesign, &view.Brief, &view.Status, &view.Tags, &view.ArchivedAt, &view.Channels, &view.ExcludedLanguages, &view.Tone, &view.ABTest, &view.VariantAPercent, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt, &snapshot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}

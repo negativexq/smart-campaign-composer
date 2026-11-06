@@ -117,6 +117,9 @@ export type Campaign = {
   content_warnings: ContentIssue[];
   approved_at?: string;
   schedule?: CampaignSchedule;
+  tags?: string[];
+  /** When the campaign was archived; nothing sends from the archive. */
+  archived_at?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -131,7 +134,29 @@ export type CampaignSummary = {
   deliveries_processed: number;
   created_at: string;
   updated_at: string;
+  /** The sending rule, when the campaign has one. */
+  schedule?: { description: string; repeats: boolean; next_run_at: string | null } | null;
+  /** The latest send, so a repeating campaign shows its last result. */
+  last_run?: RunSummary | null;
+  tags?: string[];
+  archived_at?: string | null;
 };
+
+/** One send of a campaign and how its messages ended. */
+export type RunSummary = {
+  number: number;
+  started_at: string;
+  finished_at: string | null;
+  total: number;
+  processed: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  unknown: number;
+};
+
+/** A send planned for later. */
+export type UpcomingSend = { campaign_id: string; name: string; at: string; repeats: boolean };
 
 export type ActivityEntry = {
   id?: number;
@@ -162,7 +187,15 @@ export type ChannelUse = {
   busiest_second_last_hour: number;
 };
 
-export type CampaignGroup = "" | "drafts" | "active" | "completed" | "failed";
+export type CampaignGroup = "" | "drafts" | "review" | "active" | "repeating" | "sending" | "paused" | "completed" | "failed" | "archived";
+
+export type CampaignList = {
+  campaigns: CampaignSummary[];
+  total: number;
+  /** How many campaigns each group holds with the same search and channel; "all" holds every one. */
+  groups?: Partial<Record<CampaignGroup | "all", number>>;
+  upcoming?: UpcomingSend[];
+};
 
 export type AiConfig = { llm_provider: string; llm_model: string };
 export type AppSettings = AiConfig & { rate_limit_per_second: number; max_attempts: number; customers: number };
@@ -387,18 +420,46 @@ export function getOverview(): Promise<Overview> {
   return request<Overview>("/api/overview");
 }
 
-export type CampaignListFilter = { group: CampaignGroup; query: string; channel?: string; createdWithinDays?: string; sort?: string };
+export type CampaignListFilter = { group: CampaignGroup; query: string; channel?: string; createdWithinDays?: string; sort?: string; tag?: string };
 
-export function listCampaigns(filter: CampaignListFilter, offset = 0): Promise<{ campaigns: CampaignSummary[]; total: number }> {
+export function listCampaigns(filter: CampaignListFilter, offset = 0): Promise<CampaignList> {
   const params = new URLSearchParams();
   if (filter.group) params.set("group", filter.group);
   if (filter.query.trim()) params.set("q", filter.query.trim());
   if (filter.channel) params.set("channel", filter.channel);
   if (filter.createdWithinDays) params.set("created_within_days", filter.createdWithinDays);
   if (filter.sort) params.set("sort", filter.sort);
+  if (filter.tag) params.set("tag", filter.tag);
   if (offset) params.set("offset", String(offset));
   const suffix = params.size ? `?${params}` : "";
   return request(`/api/campaigns${suffix}`);
+}
+
+export type TagUse = { tag: string; campaigns: number };
+
+/** Tags on campaigns that are not archived, with how many carry each. */
+export async function getTags(): Promise<TagUse[]> {
+  return (await request<{ tags: TagUse[] }>("/api/campaign-tags")).tags ?? [];
+}
+
+export function setTags(id: string, tags: string[]): Promise<Campaign> {
+  return request<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/tags`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tags }),
+  });
+}
+
+export function archiveCampaign(id: string): Promise<Campaign> {
+  return request<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/archive`, { method: "POST" });
+}
+
+export function unarchiveCampaign(id: string): Promise<Campaign> {
+  return request<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/archive`, { method: "DELETE" });
+}
+
+export async function deleteCampaign(id: string): Promise<void> {
+  await request<void>(`/api/campaigns/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export async function getActivity(id: string): Promise<ActivityEntry[]> {
@@ -461,11 +522,16 @@ export function cancelSchedule(id: string): Promise<Campaign> {
   return request<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/schedule`, { method: "DELETE" });
 }
 
-export function getProgress(id: string): Promise<Progress> {
-  return request<Progress>(`/api/campaigns/${encodeURIComponent(id)}/progress`);
+/** run limits the counts to one send of the campaign; none counts every send. */
+export function getProgress(id: string, run?: number | null): Promise<Progress> {
+  return request<Progress>(`/api/campaigns/${encodeURIComponent(id)}/progress${run ? `?run=${run}` : ""}`);
 }
 
-function deliveryParams(filter: Partial<DeliveryQuery>, start: Record<string, string> = {}) {
+export async function getRuns(id: string): Promise<RunSummary[]> {
+  return (await request<{ runs?: RunSummary[] }>(`/api/campaigns/${encodeURIComponent(id)}/runs`)).runs ?? [];
+}
+
+function deliveryParams(filter: Partial<DeliveryQuery> & { run?: number }, start: Record<string, string> = {}) {
   const params = new URLSearchParams(start);
   for (const [key, value] of Object.entries(filter)) {
     if (value) params.set(key, String(value));
@@ -474,7 +540,7 @@ function deliveryParams(filter: Partial<DeliveryQuery>, start: Record<string, st
 }
 
 /** The address of everything a filter keeps, as a file to download. */
-export function deliveriesCsvUrl(id: string, filter: Partial<DeliveryQuery>): string {
+export function deliveriesCsvUrl(id: string, filter: Partial<DeliveryQuery> & { run?: number }): string {
   const params = deliveryParams(filter).toString();
   return `/api/campaigns/${encodeURIComponent(id)}/deliveries.csv${params ? `?${params}` : ""}`;
 }
@@ -501,7 +567,7 @@ export function duplicateCampaign(id: string, notMessagedWithinDays: number | nu
   return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/duplicate`, notMessagedWithinDays == null ? {} : { not_messaged_within_days: notMessagedWithinDays });
 }
 
-export function getDeliveries(id: string, filter: Partial<DeliveryQuery> & { limit: number; offset?: number }): Promise<{ deliveries: Delivery[]; total: number }> {
+export function getDeliveries(id: string, filter: Partial<DeliveryQuery> & { run?: number; limit: number; offset?: number }): Promise<{ deliveries: Delivery[]; total: number }> {
   const { limit, offset, ...rest } = filter;
   const params = deliveryParams(rest, { limit: String(limit), ...(offset ? { offset: String(offset) } : {}) });
   return request(`/api/campaigns/${encodeURIComponent(id)}/deliveries?${params}`);
@@ -548,8 +614,8 @@ export type Report = {
   variants?: ReportVariant[];
 };
 
-export async function getReport(id: string): Promise<Report> {
-  return request<Report>(`/api/campaigns/${encodeURIComponent(id)}/report`);
+export async function getReport(id: string, run?: number | null): Promise<Report> {
+  return request<Report>(`/api/campaigns/${encodeURIComponent(id)}/report${run ? `?run=${run}` : ""}`);
 }
 
 export async function getDeliveryAttempts(id: string, delivery: string): Promise<DeliveryAttempt[]> {

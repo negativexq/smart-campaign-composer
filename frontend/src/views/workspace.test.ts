@@ -139,7 +139,7 @@ describe("overview", () => {
     const wrapper = mount(CampaignsView);
     await flushPromises();
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("group=failed"))).toBe(true);
-    await wrapper.findAll(".filters button")[0].trigger("click");
+    await wrapper.find("[data-testid=group-all]").trigger("click");
     expect(window.location.search).toBe("");
     wrapper.unmount();
   });
@@ -555,40 +555,79 @@ describe("campaign list", () => {
     await flushPromises();
   }
 
-  it("shows real progress and a dash when nothing was dispatched", async () => {
+  it("shows what each campaign is, when it sends next and how its last send went", async () => {
+    const run = (overrides: Record<string, unknown>) => ({ number: 1, started_at: "2026-11-03T12:00:00Z", finished_at: "2026-11-03T12:05:00Z", total: 0, processed: 0, sent: 0, failed: 0, skipped: 0, unknown: 0, ...overrides });
     const { wrapper } = await open("/campaigns", {
       "/api/campaigns": {
         campaigns: [
           summary(),
-          summary({ id: "c2", status: "DISPATCHING", channels: ["email", "sms"], deliveries_total: 200, deliveries_processed: 137 }),
+          summary({ id: "c2", status: "DISPATCHING", channels: ["email", "sms"], last_run: run({ finished_at: null, total: 200, processed: 137 }) }),
+          summary({
+            id: "c3",
+            status: "SCHEDULED",
+            schedule: { description: "Every day at 18:00, reaching only people not reached before", repeats: true, next_run_at: "2026-11-06T18:00:00Z" },
+            last_run: run({ number: 14, total: 1300, processed: 1300, sent: 1240, failed: 3 }),
+          }),
         ],
-        total: 2,
+        total: 3,
+        groups: { all: 3, drafts: 1, repeating: 1, active: 2 },
+        upcoming: [{ campaign_id: "c3", name: "Abandoned cart", at: "2026-11-06T18:00:00Z", repeats: true }],
       },
     });
     await settle();
 
     const rows = wrapper.findAll("[data-testid=campaign-row]");
     expect(rows[0].text()).toContain("Draft");
-    expect(rows[0].text()).toContain("—");
+    expect(rows[0].text()).toContain("Not sent yet");
     expect(rows[1].text()).toContain("Sending");
-    expect(rows[1].text()).toContain("Email + SMS");
-    expect(rows[1].text()).toContain("68%");
+    expect(rows[1].text()).toContain("One time · Email, SMS");
+    expect(rows[1].text()).toContain("68% done");
     expect(rows[1].find("a").attributes("href")).toBe("/campaigns/c2");
+    expect(rows[2].text()).toContain("Waiting for next run");
+    expect(rows[2].find("[data-testid=campaign-kind]").text()).toContain("Every day at 18:00");
+    expect(rows[2].find("[data-testid=campaign-last]").text()).toContain("1,240 sent");
+    expect(rows[2].find("[data-testid=campaign-last]").text()).toContain("Run #14");
+    expect(rows[2].find("[data-testid=campaign-last]").text()).toContain("3 failed");
+    expect(wrapper.find("[data-testid=group-repeating]").text()).toContain("1");
+    expect(wrapper.find("[data-testid=upcoming]").text()).toContain("Abandoned cart");
   });
 
-  it("filters by channel and age and sorts on the server", async () => {
+  it("filters by tag from the menu or a row, and keeps the archive apart", async () => {
+    const tagged = summary({ tags: ["Winback", "Q4"] });
+    const { wrapper, fetchMock } = await open("/campaigns", {
+      "/api/campaigns": { campaigns: [tagged], total: 1, groups: { all: 1, archived: 2 } },
+      "/api/campaigns?tag=Q4": { campaigns: [tagged], total: 1, groups: { all: 1, archived: 0 } },
+      "/api/campaigns?group=archived": { campaigns: [], total: 2, groups: { all: 1, archived: 2 } },
+      "/api/campaign-tags": { tags: [{ tag: "Q4", campaigns: 1 }, { tag: "Winback", campaigns: 1 }] },
+    });
+    await settle();
+
+    expect(wrapper.findAll("[data-testid=row-tag]").map((tag) => tag.text())).toEqual(["Winback", "Q4"]);
+    expect(wrapper.findAll("#campaign-tag option").map((option) => option.text())).toEqual(["All tags", "Q4", "Winback"]);
+    await wrapper.findAll("[data-testid=row-tag]")[1].trigger("click");
+    await settle();
+    expect(fetchMock).toHaveBeenCalledWith("/api/campaigns?tag=Q4", undefined);
+    expect((wrapper.find("#campaign-tag").element as HTMLSelectElement).value).toBe("Q4");
+    expect(window.location.search).toBe("?tag=Q4");
+
+    await wrapper.find("#campaign-tag").setValue("");
+    await settle();
+    expect(wrapper.find("[data-testid=group-archived]").text()).toContain("2");
+    await wrapper.find("[data-testid=group-archived]").trigger("click");
+    await settle();
+    expect(fetchMock).toHaveBeenCalledWith("/api/campaigns?group=archived", undefined);
+  });
+
+  it("filters by channel and sorts on the server", async () => {
     const { wrapper, fetchMock } = await open("/campaigns", { "/api/campaigns": { campaigns: [summary()], total: 1 } });
     await settle();
 
     await wrapper.find("#campaign-channel").setValue("sms");
     await settle();
     expect(fetchMock).toHaveBeenCalledWith("/api/campaigns?channel=sms", undefined);
-    await wrapper.find("#campaign-age").setValue("30");
+    await wrapper.find("#campaign-sort").setValue("last_sent");
     await settle();
-    expect(fetchMock).toHaveBeenCalledWith("/api/campaigns?channel=sms&created_within_days=30", undefined);
-    await wrapper.find("#campaign-sort").setValue("name");
-    await settle();
-    expect(fetchMock).toHaveBeenCalledWith("/api/campaigns?channel=sms&created_within_days=30&sort=name", undefined);
+    expect(fetchMock).toHaveBeenCalledWith("/api/campaigns?channel=sms&sort=last_sent", undefined);
   });
 
   it("filters by group and search on the server", async () => {
@@ -599,7 +638,7 @@ describe("campaign list", () => {
     });
     await settle();
 
-    await wrapper.findAll("button").find((button) => button.text() === "Drafts")!.trigger("click");
+    await wrapper.find("[data-testid=group-drafts]").trigger("click");
     await settle();
     expect(wrapper.find("[data-testid=no-results]").exists()).toBe(true);
 
@@ -617,6 +656,126 @@ describe("campaign list", () => {
 
 describe("campaign detail", () => {
   const routes = { "/api/campaigns/c1": campaign, "/api/campaigns/c1/activity": { activity } };
+
+  it("lists a repeating campaign's runs and opens one on its own", async () => {
+    const progress = (total: number) => ({ total, processed: total, attempts: total, by_status: { SENT: total }, by_channel: { sms: { SENT: total }, email: {} }, responses: {} });
+    const repeating = {
+      ...campaign,
+      status: "COMPLETED",
+      schedule: { spec: { kind: "interval", every_hours: 24 }, description: "Every day", next_run_at: null, last_run_at: "2026-11-04T12:00:00Z", runs: 2 },
+    };
+    const run = (number: number, sent: number) => ({ number, started_at: `2026-11-0${number + 2}T12:00:00Z`, finished_at: `2026-11-0${number + 2}T12:05:00Z`, total: sent, processed: sent, sent, failed: 0, skipped: 0, unknown: 0 });
+    const { wrapper, fetchMock } = await open("/campaigns/c1", {
+      "/api/campaigns/c1": repeating,
+      "/api/campaigns/c1/activity": { activity },
+      "/api/campaigns/c1/progress": progress(30),
+      "/api/campaigns/c1/progress?run=2": progress(10),
+      "/api/campaigns/c1/runs": { runs: [run(2, 10), run(1, 20)] },
+    });
+
+    expect(wrapper.findAll("[role=tab]").map((tab) => tab.text())).toContain("Runs");
+    await wrapper.find("#tab-runs").trigger("click");
+    expect(wrapper.findAll("[data-testid=run-row]")).toHaveLength(2);
+    expect(wrapper.text()).toContain("Sent, every run");
+
+    await wrapper.find("[data-testid=open-run-2]").trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith("/api/campaigns/c1/progress?run=2", undefined);
+    expect(wrapper.find("[data-testid=run-note]").text()).toContain("run #2");
+    expect(window.location.search).toBe("?run=2");
+
+    await wrapper.find("[data-testid=all-runs]").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=run-note]").exists()).toBe(false);
+    expect(window.location.search).toBe("");
+  });
+
+  // Answers writes by method and path, and reads through the routes as before.
+  function stubWrites(writes: Record<string, { status: number; body?: unknown }>) {
+    const base = vi.mocked(fetch).getMockImplementation()!;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const write = init?.method ? writes[`${init.method} ${url}`] : undefined;
+      if (!write) return base(url, init as never);
+      return { ok: write.status < 400, status: write.status, json: async () => write.body ?? null } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("adds and removes tags on a campaign", async () => {
+    const { wrapper } = await open("/campaigns/c1", { ...routes, "/api/campaigns/c1": { ...campaign, tags: ["Q4"] }, "/api/campaign-tags": { tags: [{ tag: "Winback", campaigns: 3 }] } });
+    const fetchMock = stubWrites({
+      "PUT /api/campaigns/c1/tags": { status: 200, body: { ...campaign, tags: ["Q4", "Winback"] } },
+    });
+    expect(wrapper.findAll("[data-testid=tag]").map((tag) => tag.text())).toEqual(["Q4×"]);
+
+    await wrapper.find("[data-testid=add-tag]").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("datalist option").attributes("value")).toBe("Winback");
+    await wrapper.find("[data-testid=tag-input]").setValue("  Winback ");
+    await wrapper.find("[data-testid=tag-editor] form").trigger("submit");
+    await flushPromises();
+    const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")!;
+    expect(JSON.parse(put[1]!.body as string)).toEqual({ tags: ["Q4", "Winback"] });
+    expect(wrapper.findAll("[data-testid=tag]")).toHaveLength(2);
+    expect(wrapper.find("[data-testid=tag-input]").exists()).toBe(false);
+  });
+
+  it("archives a scheduled campaign after saying its schedule ends", async () => {
+    // A scheduled campaign is watched live; this page test needs no stream.
+    vi.stubGlobal("EventSource", class { close() {} addEventListener() {} });
+    const scheduled = { ...campaign, status: "SCHEDULED", schedule: { spec: { kind: "interval", every_hours: 24 }, description: "Every day", next_run_at: "2026-11-07T12:00:00Z", runs: 0 } };
+    const { wrapper } = await open("/campaigns/c1", { ...routes, "/api/campaigns/c1": scheduled });
+    expect(wrapper.find("[data-testid=delete]").exists()).toBe(false);
+
+    await wrapper.find("[data-testid=more-actions]").trigger("click");
+    expect(wrapper.find("[data-testid=delete]").exists()).toBe(false);
+    await wrapper.find("[data-testid=archive]").trigger("click");
+    expect(wrapper.find("[data-testid=archive-cancels]").exists()).toBe(true);
+
+    const archived = { ...campaign, status: "APPROVED", archived_at: "2026-11-06T12:00:00Z" };
+    const fetchMock = stubWrites({ "POST /api/campaigns/c1/archive": { status: 200, body: archived } });
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
+      url === "/api/campaigns/c1" && !init?.method ? ({ ok: true, status: 200, json: async () => archived } as Response) : base(url, init),
+    );
+    await wrapper.find("[data-testid=confirm-action]").trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith("/api/campaigns/c1/archive", { method: "POST" });
+    expect(wrapper.find("[data-testid=archive-dialog]").exists()).toBe(false);
+    expect(wrapper.find("[data-testid=archived-note]").exists()).toBe(true);
+    expect(wrapper.find("[data-testid=restore]").exists()).toBe(true);
+    expect(wrapper.find("[data-testid=send-now]").exists()).toBe(false);
+  });
+
+  it("deletes a campaign that never sent and goes back to the list", async () => {
+    const { wrapper } = await open("/campaigns/c1", { ...routes, "/api/campaigns/c1/runs": { runs: [] }, "/api/campaigns": { campaigns: [], total: 0 } });
+    const fetchMock = stubWrites({ "DELETE /api/campaigns/c1": { status: 204 } });
+
+    await wrapper.find("[data-testid=more-actions]").trigger("click");
+    await wrapper.find("[data-testid=delete]").trigger("click");
+    expect(wrapper.find("[data-testid=delete-dialog]").text()).toContain("cannot be brought back");
+    await wrapper.find("[data-testid=confirm-action]").trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith("/api/campaigns/c1", { method: "DELETE" });
+    expect(window.location.pathname).toBe("/campaigns");
+  });
+
+  it("keeps the delete dialog open with the reason when it is refused", async () => {
+    const { wrapper } = await open("/campaigns/c1", routes);
+    stubWrites({ "DELETE /api/campaigns/c1": { status: 409, body: { error: "Only a campaign that never sent or was scheduled can be deleted." } } });
+    await wrapper.find("[data-testid=more-actions]").trigger("click");
+    await wrapper.find("[data-testid=delete]").trigger("click");
+    await wrapper.find("[data-testid=confirm-action]").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid=delete-dialog] [role=alert]").text()).toContain("never sent");
+    expect(window.location.pathname).toBe("/campaigns/c1");
+  });
+
+  it("gives a one-time campaign no runs tab", async () => {
+    const { wrapper } = await open("/campaigns/c1", { ...routes, "/api/campaigns/c1/runs": { runs: [] } });
+    expect(wrapper.findAll("[role=tab]").map((tab) => tab.text())).not.toContain("Runs");
+  });
 
   it("offers only sections that have real data", async () => {
     const { wrapper } = await open("/campaigns/c1", routes);
@@ -681,7 +840,18 @@ describe("campaign name", () => {
     expect(wrapper.find("h1").text()).toBe("Cart Recovery");
     expect(wrapper.find("[data-testid=campaign-name]").text()).not.toContain("AI suggested");
     expect(wrapper.find("[data-testid=brief-text]").text()).toBe("Istanbul cart reminder");
-    expect(wrapper.find("#panel-overview").element.firstElementChild?.getAttribute("aria-label")).toBe("Campaign brief");
+    // The brief leads the page above the tabs, so it stays in view on every one.
+    expect(wrapper.find("[data-testid=brief]").element.compareDocumentPosition(wrapper.find("[role=tablist]").element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await wrapper.find("#tab-activity").trigger("click");
+    expect(wrapper.find("[data-testid=brief-text]").exists()).toBe(true);
+  });
+
+  it("shortens a long brief until it is opened", async () => {
+    const brief = "Remind people about their carts. ".repeat(12).trim();
+    const { wrapper } = await open("/campaigns/c1", { ...routes, "/api/campaigns/c1": { ...campaign, brief } });
+    expect(wrapper.find("[data-testid=brief-text]").text().endsWith("…")).toBe(true);
+    await wrapper.find("[data-testid=brief-toggle]").trigger("click");
+    expect(wrapper.find("[data-testid=brief-text]").text()).toBe(brief);
   });
 
   it("marks a suggested name while the campaign is being set up", async () => {
