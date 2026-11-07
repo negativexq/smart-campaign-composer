@@ -15,8 +15,9 @@ import (
 func TestTheChecks(t *testing.T) {
 	good := func() result {
 		return result{
-			Status: "COMPLETED",
-			Final:  map[string]map[string]int{"email": {"SENT": 10}, "sms": {"SENT": 8}},
+			Status:   "COMPLETED",
+			Expected: map[string]int{"email": 10, "sms": 8},
+			Final:    map[string]map[string]int{"email": {"SENT": 10}, "sms": {"SENT": 8}},
 			Provider: map[string]stack.ProviderStats{
 				"email": {Accepted: 10, PeakPerSecond: 100},
 				"sms":   {Accepted: 8, PeakPerSecond: 90},
@@ -56,6 +57,17 @@ func TestTheChecks(t *testing.T) {
 		}, "accepted 13 sms"},
 		{"a restart with no counters kept", restarted, func(r *result) {}, "counters from before"},
 		{"no messages", plain, func(r *result) { r.Final = map[string]map[string]int{} }, "no messages"},
+		// Issue #14: messages lost before they were queued break no other rule.
+		{"a message never queued", plain, func(r *result) {
+			r.Final["sms"]["SENT"] = 7
+			r.Provider["sms"] = stack.ProviderStats{Accepted: 7, PeakPerSecond: 90}
+		}, "8 sms messages were expected and 7 ended"},
+		{"a message too many", plain, func(r *result) {
+			r.Final["email"]["SENT"] = 11
+			r.Provider["email"] = stack.ProviderStats{Accepted: 11, PeakPerSecond: 100}
+		}, "10 email messages were expected and 11 ended"},
+		{"a channel the campaign does not use", plain, func(r *result) { delete(r.Expected, "sms") }, "was not to use sms"},
+		{"no expected count", plain, func(r *result) { r.Expected = nil }, "how many messages to expect"},
 		{"a missing event", scenario{name: "paused", wantEvents: []string{"campaign.paused  "}}, func(r *result) {}, `no "campaign.paused  " event`},
 		{"an event that did not happen", plain, func(r *result) { r.EventError = "finished first" }, "did not happen as planned"},
 		{"the provider refused calls over its limit", plain, func(r *result) { r.Provider["sms"] = stack.ProviderStats{Accepted: 8, Throttled: 2} }, "refused 2 calls"},

@@ -4,6 +4,10 @@ Problems and wrong behaviour that the verification runs found, newest first. Eac
 
 ## 2026-11-07
 
+### Fixed: the load checks did not count the messages
+
+The load checks only required that a run had more than zero messages. A message lost before it was queued would have passed every rule: what was queued all ended SENT, the provider accepted as many as were sent, and nothing was accepted twice. Found by reading the checks, not by a run, and reported as issue #14. Each run now reads, right after approval, how many people the review counted on each channel, and every one of them must end in a final state. A healthy run on 116,000 users expected 8,198 email and 7,213 SMS messages and sent exactly those. `TestTheChecks` has cases for one message missing, one too many and a channel the campaign does not use.
+
 ### Checked, nothing wrong found
 
 Three load scenarios were added and run once each ([2026-11-06-2212-load](results/2026-11-06-2212-load.md)). In all three every message ended SENT, none was accepted twice, the provider accepted exactly as many as were sent, and neither channel went over 100 calls a second.

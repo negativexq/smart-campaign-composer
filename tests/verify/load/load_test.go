@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -178,12 +179,15 @@ func scenarios() []scenario {
 
 // result is what one scenario measured.
 type result struct {
-	Name          string                         `json:"name"`
-	Workers       int                            `json:"workers"`
-	Faults        faults                         `json:"faults"`
-	Status        string                         `json:"status"`
-	SendSeconds   float64                        `json:"send_seconds"`
-	Started       time.Time                      `json:"started"`
+	Name        string    `json:"name"`
+	Workers     int       `json:"workers"`
+	Faults      faults    `json:"faults"`
+	Status      string    `json:"status"`
+	SendSeconds float64   `json:"send_seconds"`
+	Started     time.Time `json:"started"`
+	// Expected is how many messages each channel was to send, as the campaign's
+	// audience was counted at review, before dispatch could lose or add any.
+	Expected      map[string]int                 `json:"expected"`
 	Final         map[string]map[string]int      `json:"final"`
 	Outcomes      map[string]map[string]int      `json:"outcomes"`
 	AcceptedTwice int                            `json:"accepted_twice"`
@@ -227,6 +231,7 @@ func runScenario(t *testing.T, s scenario) result {
 	// A fresh provider and fresh workers: the provider's counters start at zero.
 	stack.Compose(t, s.faults, "up", "-d", "--no-deps", "--force-recreate", "--wait", "--scale", "worker="+strconv.Itoa(workers), "worker", "mock-provider")
 	campaign := stack.Approved(t, stack.Brief)
+	expected := expectedMessages(t, campaign)
 
 	r := &run{campaign: campaign, started: time.Now(), notes: map[string]any{}}
 	stack.Dispatch(t, campaign)
@@ -243,7 +248,7 @@ func runScenario(t *testing.T, s scenario) result {
 	eventErr := <-eventDone
 
 	res := result{
-		Name: s.name, Workers: workers, Faults: s.faults, Status: status, SendSeconds: seconds(sent), Started: r.started,
+		Name: s.name, Workers: workers, Faults: s.faults, Status: status, SendSeconds: seconds(sent), Started: r.started, Expected: expected,
 		Final:           counts(t, `SELECT channel, status, count(*) FROM campaign_deliveries WHERE campaign_id = '%s' AND status <> 'SKIPPED' GROUP BY 1, 2`, campaign),
 		Outcomes:        counts(t, `SELECT channel, outcome, count(*) FROM delivery_attempts WHERE campaign_id = '%s' GROUP BY 1, 2`, campaign),
 		Provider:        stack.Provider(t),
@@ -268,6 +273,26 @@ func runScenario(t *testing.T, s scenario) result {
 		AND event_type IN ('campaign.alert_opened', 'campaign.alert_closed', 'campaign.paused', 'campaign.resumed')
 		ORDER BY id`, campaign))
 	return res
+}
+
+// expectedMessages reads how many messages each of the campaign's channels is to
+// send: the people the review counted who can be reached there. A channel the
+// campaign does not use expects none.
+func expectedMessages(t *testing.T, campaign string) map[string]int {
+	t.Helper()
+	view := stack.Decode[struct {
+		Channels []string       `json:"channels"`
+		Audience map[string]any `json:"audience"`
+	}](t, stack.API(t, http.MethodGet, "/api/campaigns/"+campaign, nil, http.StatusOK))
+	expected := map[string]int{}
+	for _, channel := range view.Channels {
+		count, ok := view.Audience[channel].(float64)
+		if !ok {
+			t.Fatalf("the campaign's audience has no %s count: %v", channel, view.Audience)
+		}
+		expected[channel] = int(count)
+	}
+	return expected
 }
 
 // check lists what went wrong in a run. Each rule holds in every scenario unless
@@ -302,6 +327,25 @@ func check(s scenario, res result) []string {
 	}
 	if total == 0 {
 		add("the campaign had no messages")
+	}
+	// Every message the review counted must end somewhere: one lost before it was
+	// queued would otherwise pass every rule below, since none of them can see it.
+	for _, channel := range slices.Sorted(maps.Keys(res.Expected)) {
+		ended := 0
+		for _, n := range res.Final[channel] {
+			ended += n
+		}
+		if ended != res.Expected[channel] {
+			add("%d %s messages were expected and %d ended", res.Expected[channel], channel, ended)
+		}
+	}
+	if len(res.Expected) == 0 {
+		add("the run does not say how many messages to expect")
+	}
+	for channel := range res.Final {
+		if _, ok := res.Expected[channel]; !ok {
+			add("%s messages were sent although the campaign was not to use %s", channel, channel)
+		}
 	}
 	if s.restartsProvider && len(res.ProviderEarlier) == 0 {
 		add("the provider was meant to restart but its counters from before were not kept")
