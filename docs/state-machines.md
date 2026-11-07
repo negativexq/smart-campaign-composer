@@ -220,7 +220,7 @@ These two columns lie across the status, rather than being statuses of their own
   - Archiving sets `archived_at`. It is refused while the campaign is writing, sending or paused.
   - A `SCHEDULED` campaign loses its later sends: it goes back to `APPROVED` if it never sent, or to `DISPATCHING` so the worker closes it with what it sent.
   - Restoring clears `archived_at` and does not bring the schedule back.
-  - An archived campaign cannot send, schedule or approve, since `lockStatus` refuses it.
+  - An archived campaign cannot send, schedule or approve. It also cannot write messages, change its audience or languages, or take an edit. Every one of these paths goes through `lockStatus`, which refuses it under the row lock, so archiving and a change cannot pass each other. Renaming and tags stay open, since they only organize the list.
 - **Delete:**
   - Deleting sets `deleted_at`. It is final, and every page and count leaves the campaign out.
   - The row stays because the append-only audit trail points at it.
@@ -293,5 +293,6 @@ Each fix has its own issue and pull request, and a test that fails without it.
 |---|---|---|---|
 | [#2](https://github.com/negativexq/smart-campaign-composer/issues/2) | Approving froze whatever was stored at that moment. Messages edited in another tab, rewritten or written for a new audience after the review page loaded were approved unseen | The approval request carried nothing about what the page showed | `review_revision`, compared under the row lock; an older one gets `409` |
 | [#3](https://github.com/negativexq/smart-campaign-composer/issues/3) | A regeneration undid an edit made just before it started, and messages written for a replaced audience were saved as ready for review. A campaign deleted at that moment started generating and called the model | `StartGeneration` read the campaign, then claimed it in a separate statement, and worked from the earlier copy | Lock, read and claim in one transaction |
+| [#4](https://github.com/negativexq/smart-campaign-composer/issues/4) | An archived campaign could start writing messages, which archiving itself refuses, and could take edits and a new audience out of sight | Only sending, scheduling, approving and languages checked for an archived campaign | Generation, audience proposals and edits refuse it under the row lock, including when it is archived while the model answers |
 
 The `CANCELLED` status is allowed by the constraint and shown by the frontend, but nothing sets it. Cancelling a schedule moves a campaign to one of the statuses above instead.

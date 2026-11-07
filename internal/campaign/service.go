@@ -595,6 +595,10 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 	if err != nil {
 		return View{}, err
 	}
+	// Checked before the model is asked, and again when the result is saved.
+	if stored.ArchivedAt != nil {
+		return View{}, ErrArchived
+	}
 	switch {
 	case stored.Status == statusDraft, stored.Status == statusReady, stored.Status == statusFailed, generationAbandoned(stored):
 	case stored.Status == statusGenerating:
@@ -884,6 +888,10 @@ func (s *Service) saveProposal(ctx context.Context, id, brief string, briefChang
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
+	// A campaign archived or deleted while the model answered keeps its audience.
+	if _, err := lockStatus(ctx, tx, id); err != nil {
+		return err
+	}
 	// A name someone chose stays. Otherwise a suggestion wins, and a provisional
 	// name follows the brief it came from. Content was written for the previous
 	// audience, so the campaign goes back to a draft without any.
