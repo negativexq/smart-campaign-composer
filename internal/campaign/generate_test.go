@@ -472,7 +472,7 @@ func TestAMissingButtonIsPointedOutOnceAndOnlyWhileItCanBeFixed(t *testing.T) {
 	if count(saved) != 1 {
 		t.Fatalf("warnings: %+v", saved.ContentWarnings)
 	}
-	approved, err := h.service.Approve(ctx, id)
+	approved, err := approveReviewed(ctx, h.service, id)
 	if err != nil {
 		t.Fatalf("approve: %v", err)
 	}
@@ -806,7 +806,7 @@ func TestAHandEditedDiscountMustMatchAcrossChannelsToApprove(t *testing.T) {
 		if _, err = h.service.SaveContent(ctx, id, edited); err != nil {
 			t.Fatalf("save: %v", err)
 		}
-		if _, err = h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrChannelDiscount) {
+		if _, err = approveReviewed(ctx, h.service, id); !errors.Is(err, campaign.ErrChannelDiscount) {
 			t.Fatalf("approve: %v", err)
 		}
 		return
@@ -1120,13 +1120,13 @@ func TestATestCannotBeApprovedWithoutOrWithADifferentOffer(t *testing.T) {
 	if _, err := h.service.SaveContent(ctx, id, edited); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrLanguageDiscount) {
+	if _, err := approveReviewed(ctx, h.service, id); !errors.Is(err, campaign.ErrLanguageDiscount) {
 		t.Fatalf("different offers: %v", err)
 	}
 	if _, err := h.pool.Exec(ctx, `UPDATE campaign_versions SET content = content - 'variant_b' WHERE campaign_id = $1`, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrMissingVariant) {
+	if _, err := approveReviewed(ctx, h.service, id); !errors.Is(err, campaign.ErrMissingVariant) {
 		t.Fatalf("no second version: %v", err)
 	}
 }
@@ -1143,7 +1143,7 @@ func TestEachPersonStaysOnOneSideOfATest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if _, err := h.service.Dispatch(ctx, id); err != nil {
@@ -1232,7 +1232,7 @@ func TestACampaignWithOneVersionHasNoSides(t *testing.T) {
 	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if _, err := h.service.Dispatch(ctx, id); err != nil {
@@ -1318,7 +1318,7 @@ func TestTheShareEnteredDecidesTheSplit(t *testing.T) {
 	if onA(20) != chosen {
 		t.Fatal("the same share moved people")
 	}
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if _, err := h.service.Dispatch(ctx, id); err != nil {

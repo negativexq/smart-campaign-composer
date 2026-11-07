@@ -94,7 +94,7 @@ func TestTheAuditTrailNamesWhoDidEachStep(t *testing.T) {
 	id := campaignWithAudience(t, api)
 	generate(t, api, id, "")
 	base := "/api/campaigns/" + id
-	call(t, api, http.MethodPost, base+"/approve", "")
+	call(t, api, http.MethodPost, base+"/approve", reviewedBody(t, api, base))
 	if status, body := call(t, api, http.MethodPost, base+"/schedule", `{"kind":"weekly","days":["mon"],"time":"09:30","timezone":"UTC"}`); status != http.StatusOK {
 		t.Fatalf("schedule: %d %+v", status, body)
 	}

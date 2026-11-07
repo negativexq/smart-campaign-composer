@@ -175,7 +175,7 @@ async function confirm() {
   submitting.value = true;
   actionError.value = "";
   try {
-    await approveCampaign(props.campaignId, campaign.value?.review_revision);
+    await approveCampaign(props.campaignId, campaign.value?.review_revision ?? "");
     const spec = buildSchedule(form.value);
     if (spec) await scheduleCampaign(props.campaignId, spec);
     else await dispatchCampaign(props.campaignId);

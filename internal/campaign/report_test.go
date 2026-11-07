@@ -17,7 +17,7 @@ func sentCampaign(t *testing.T) (*harness, string, map[string]string) {
 	t.Helper()
 	h, id := readyCampaign(t)
 	ctx := context.Background()
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if _, err := h.service.Dispatch(ctx, id); err != nil {

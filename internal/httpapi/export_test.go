@@ -16,10 +16,12 @@ func sentCampaign(t *testing.T, api http.Handler) string {
 	if got := generate(t, api, id, `{}`); got.Code != http.StatusOK {
 		t.Fatalf("generate: %d", got.Code)
 	}
-	for _, step := range []string{"approve", "dispatch"} {
-		if status, view := call(t, api, http.MethodPost, "/api/campaigns/"+id+"/"+step, ""); status >= 300 {
-			t.Fatalf("%s: %d %v", step, status, view)
-		}
+	base := "/api/campaigns/" + id
+	if status, view := call(t, api, http.MethodPost, base+"/approve", reviewedBody(t, api, base)); status >= 300 {
+		t.Fatalf("approve: %d %v", status, view)
+	}
+	if status, view := call(t, api, http.MethodPost, base+"/dispatch", ""); status >= 300 {
+		t.Fatalf("dispatch: %d %v", status, view)
 	}
 	return id
 }
@@ -134,7 +136,7 @@ func TestDuplicateStartsANewDraftFromTheOriginal(t *testing.T) {
 	if status, _ := call(t, api, http.MethodPost, "/api/campaigns/"+newID+"/dispatch", ""); status < 300 {
 		t.Fatalf("an unapproved copy was sent: %d", status)
 	}
-	if status, view := call(t, api, http.MethodPost, "/api/campaigns/"+newID+"/approve", ""); status != http.StatusOK {
+	if status, view := call(t, api, http.MethodPost, "/api/campaigns/"+newID+"/approve", reviewedBody(t, api, "/api/campaigns/"+newID)); status != http.StatusOK {
 		t.Fatalf("approve copy: %d %v", status, view)
 	}
 	// The original stays as it was.

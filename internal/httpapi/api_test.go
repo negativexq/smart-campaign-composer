@@ -299,3 +299,13 @@ func TestReportAndDeliveryFiltersThroughTheAPI(t *testing.T) {
 		}
 	}
 }
+
+// reviewedBody is what the review page sends with an approval: the review revision
+// of the campaign at base as it reads now.
+func reviewedBody(t *testing.T, api http.Handler, base string) string {
+	t.Helper()
+	_, view := call(t, api, http.MethodGet, base, "")
+	revision, _ := view["review_revision"].(string)
+	body, _ := json.Marshal(map[string]string{"revision": revision})
+	return string(body)
+}

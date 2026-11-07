@@ -198,9 +198,13 @@ func SQL(t testing.TB, query string, args ...any) string {
 func Approved(t testing.TB, brief string) string {
 	t.Helper()
 	created := Decode[struct{ ID string }](t, API(t, http.MethodPost, "/api/campaigns", map[string]string{"brief": brief}, http.StatusCreated))
-	for _, step := range []string{"segment", "generate", "approve"} {
+	for _, step := range []string{"segment", "generate"} {
 		API(t, http.MethodPost, "/api/campaigns/"+created.ID+"/"+step, map[string]string{}, http.StatusOK)
 	}
+	reviewed := Decode[struct {
+		ReviewRevision string `json:"review_revision"`
+	}](t, API(t, http.MethodGet, "/api/campaigns/"+created.ID, nil, http.StatusOK))
+	API(t, http.MethodPost, "/api/campaigns/"+created.ID+"/approve", map[string]string{"revision": reviewed.ReviewRevision}, http.StatusOK)
 	return created.ID
 }
 

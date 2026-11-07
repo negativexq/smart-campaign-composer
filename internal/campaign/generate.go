@@ -70,6 +70,7 @@ var (
 	ErrMissingLanguage    = errors.New("part of the audience reads a language with no messages")
 	ErrContentChanged     = errors.New("the messages changed since they were read")
 	ErrReviewChanged      = errors.New("the campaign changed since it was reviewed")
+	ErrReviewRequired     = errors.New("an approval must name the review it was given on")
 )
 
 // freeToDraft is the SQL condition for a campaign nothing else is generating
