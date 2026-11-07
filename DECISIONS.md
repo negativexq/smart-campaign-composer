@@ -324,7 +324,7 @@ Generated messages get the same treatment: a city or number that is not in the b
 
 ## The benchmark draws the limits, it is not a target
 
-`tests/benchmark` holds 247 hard briefs, refinements and content instructions with their expected answers. `make test` runs the checks on them with no model, and `make benchmark` runs them through a real model and writes a report to `tests/benchmark/results`.
+`tests/benchmark` holds 247 hard briefs, refinements and content instructions with their expected answers. `make test` runs the checks on them with no model, and `make benchmark` runs them through a real model and writes a report to `tests/benchmark/results`. With no model, the backend has 35 known gaps today: 4 of 134 correct answers are blocked, 13 of 525 wrong answers get through, and 18 of 66 answers that drop a condition get through; 12 of those 18 are briefs asking for data the platform does not have. They are listed in `tests/benchmark/known_gaps.txt`, and the test fails on any gap not in the list and on any listed gap that closed, so a regression cannot pass as a measurement and a fix updates the list and these numbers with it.
 
 The first run changed a design rule. Three of its four silently wrong audiences came from our own check: the model read `alışverişi olmayan` correctly, our narrower reading called that a contradiction, and the model obeyed the correction. A wrong correction is worse than none, so the backend now refuses only a clear opposite. Where it is unsure it leaves the answer alone. Blocking rarely hurts, and the checks are not tightened further to chase the remaining cases.
 

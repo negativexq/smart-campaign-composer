@@ -1,0 +1,42 @@
+# Gaps TestChecksOnTheCases finds today, with no model involved. A gap not listed
+# here fails the test, and so does a listed one that no longer happens.
+#
+# correct: a correct answer the backend blocks.
+# wrong:   a wrong answer (case, then the mistake) the backend lets through.
+# naive:   an answer that drops a condition and is let through.
+
+correct: noise-21
+correct: noise-24
+correct: noise-25
+correct: unseen_negation-18
+naive: ambiguous-06
+naive: ambiguous-07
+naive: behavior-21
+naive: language-09
+naive: many_cities-08
+naive: other_places-12
+naive: unsupported-08
+naive: unsupported-09
+naive: unsupported-10
+naive: unsupported-11
+naive: unsupported-12
+naive: unsupported-13
+naive: unsupported-14
+naive: unsupported-15
+naive: unsupported-16
+naive: unsupported-17
+naive: unsupported-18
+naive: unsupported-20
+wrong: behavior-04 other_cart_window
+wrong: combined-05 dropped_purchased_window
+wrong: unseen_negation-02 dropped_not_purchased_window
+wrong: unseen_negation-02 flipped_to_purchased
+wrong: unseen_negation-03 dropped_not_purchased_window
+wrong: unseen_negation-03 flipped_to_purchased
+wrong: unseen_negation-05 dropped_not_purchased_window
+wrong: unseen_negation-05 flipped_to_purchased
+wrong: unseen_negation-08 dropped_not_purchased_window
+wrong: unseen_negation-08 flipped_to_purchased
+wrong: unseen_negation-15 dropped_not_purchased_window
+wrong: unseen_negation-18 dropped_purchased_window
+wrong: unseen_negation-18 flipped_to_not_purchased
