@@ -147,6 +147,7 @@ func scenarios() []scenario {
 		},
 		{name: "redis-lost", faults: healthy(), event: loseRedisAt(30*time.Second, nil)},
 		{name: "redis-crashed-5x", faults: healthy(), event: crashRedis(20*time.Second, 5, 12*time.Second)},
+		{name: "redis-crashed-5x-2workers", faults: healthy(), event: crashRedis(20*time.Second, 5, 12*time.Second), workers: 2},
 		{name: "redis-flushed-10x", faults: healthy(), event: flushRedis(20*time.Second, 10, 2*time.Second)},
 		{name: "redis-flushed-10x-2workers", faults: healthy(), event: flushRedis(20*time.Second, 10, 2*time.Second), workers: 2},
 		{

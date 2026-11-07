@@ -4,7 +4,7 @@ These suites check the system as a whole, beyond `make test`. Run them before a 
 
 | Suite | What it checks | Needs | Time |
 |---|---|---|---|
-| `load` | Performance, retries and idempotency. It sends a full campaign of about 15,400 messages under provider faults (429s, 5xx, lost answers, slow answers that outlast the worker's wait, an outage, refused credentials), a crashed worker, a worker stopped as a deploy does, PostgreSQL killed for 20 s, lost Redis data, two workers, the wall clock stepped forward, and workers set above the provider's limit. The mock provider enforces 100 calls a second per channel itself, as a real one does, and refuses calls over it with a 429; outside the over-limit scenario any such refusal fails the run. In every scenario: each message ends in a final state, none is accepted twice, the provider counts each sent message once, no channel goes over 100 calls a second, and the expected alerts, pauses and resumes appear. | The verification stack | About 95 minutes for all 23 scenarios |
+| `load` | Performance, retries and idempotency. It sends a full campaign of about 15,400 messages under provider faults (429s, 5xx, lost answers, slow answers that outlast the worker's wait, an outage, refused credentials), a crashed worker, a worker stopped as a deploy does, PostgreSQL killed for 20 s, lost Redis data, two workers, the wall clock stepped forward, and workers set above the provider's limit. The mock provider enforces 100 calls a second per channel itself, as a real one does, and refuses calls over it with a 429; outside the over-limit scenario any such refusal fails the run. In every scenario: each message ends in a final state, none is accepted twice, the provider counts each sent message once, no channel goes over 100 calls a second, and the expected alerts, pauses and resumes appear. | The verification stack | About 100 minutes for all 24 scenarios |
 | `security` | 19 probes from outside: sessions on every route, webhook signatures and replay, unsubscribe link tampering, hostile uploads, SQL and markup in every field, CSV formulas, oversized bodies, nginx paths, logs and error answers. Known open items are recorded, not failed. | The verification stack | About 3 minutes |
 | `mutation` | Whether the tests catch broken code. Each case first runs the tests written for that code on the clean source, where they must run and pass. Then it puts one deliberate fault into the source, expects those tests to fail, and restores the file. | `make test-env-up` and the frontend's `node_modules` | About 2 minutes |
 
@@ -20,7 +20,7 @@ Every scenario sends the same campaign, 8,198 emails and 7,213 SMS on the defaul
 The two clock scenarios beyond the margin are the exception to the last two checks: they measure how far a channel goes over.
 - **The scenario faced its event.** A campaign that finishes before its event, or an event that fails, fails the run.
 
-What each scenario does and what it adds to those checks. Times are from the full run of 2026-11-06 22:54 UTC ([results](results/2026-11-06-2254-load.md)), for the clock scenarios from [2026-11-07 00:01 UTC](results/2026-11-07-0001-load.md), and for `redis-crashed-5x` from [2026-11-07 00:41 UTC](results/2026-11-07-0041-load.md).
+What each scenario does and what it adds to those checks. Times are from the full run of 2026-11-06 22:54 UTC ([results](results/2026-11-06-2254-load.md)), for the clock scenarios from [2026-11-07 00:01 UTC](results/2026-11-07-0001-load.md), for `redis-crashed-5x` from [2026-11-07 00:41 UTC](results/2026-11-07-0041-load.md), and for its two-worker variant from [2026-11-07 00:58 UTC](results/2026-11-07-0058-load.md).
 
 | Scenario | What happens | What it measures | Time |
 |---|---|---|---|
@@ -39,6 +39,7 @@ What each scenario does and what it adds to those checks. Times are from the ful
 | `postgres-down-20s` | PostgreSQL is killed at 25 s and started 20 s later. | Sending waits out the database and recovers from its log, with nothing lost or sent twice. | 122 s |
 | `redis-lost` | Redis is killed at 30 s and started empty. | The limiter's 8 s hold after it loses its window keeps the limit. | 108 s |
 | `redis-crashed-5x` | Redis is killed five times, 12 s apart, from 20 s, and started again at once without being emptied, as after a crash. | Redis comes back empty, so the hold starts each time. Before Redis ran without snapshots, it came back from an old snapshot and went over 100 ([FINDINGS](FINDINGS.md)). | 136 s |
+| `redis-crashed-5x-2workers` | The same with two workers sending. | The hold holds for both workers, which share the limit. | 135 s |
 | `redis-flushed-10x` | Redis is flushed 10 times, 2 s apart, from 20 s. | The same hold, again and again. | 128 s |
 | `redis-flushed-10x-2workers` | The same with two workers. | The hold holds across workers. | 128 s |
 | `sms401-redis-lost` | SMS credentials refused, Redis lost at 60 s, the provider fixed at 150 s. | The credential lock is lost with Redis and set again, and the limit holds. | 277 s |
