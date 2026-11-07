@@ -149,10 +149,10 @@ stateDiagram-v2
     QUEUED --> SENDING: claimed
     RETRYING --> SENDING: claimed when due
     SENDING --> SENT: accepted
-    SENDING --> RETRYING: try again, or lease expired with attempts left
+    SENDING --> RETRYING: try again, lease expired with attempts left, or another message to the person is being sent
     SENDING --> FAILED: refused, or attempts ran out
     SENDING --> UNKNOWN: attempts ran out after a call with no answer
-    SENDING --> SKIPPED: consent withdrawn
+    SENDING --> SKIPPED: consent withdrawn, or messaged recently under the campaign's rule
 ```
 
 `SENT`, `FAILED`, `UNKNOWN` and `SKIPPED` are final. Someone skipped in one run can get a new delivery, with a new idempotency key, in a later run; the skipped row itself never changes.
@@ -166,6 +166,7 @@ stateDiagram-v2
 | `SENDING` | Any outcome | `record` | `WHERE claim_token = $2 AND status = 'SENDING'`; the attempt row commits with it |
 | `SENDING` with an expired lease | `RETRYING`, or `UNKNOWN` at the last attempt | `RecoverExpired` | `FOR UPDATE SKIP LOCKED`; the attempt row commits with it |
 | `SENDING`, not confirmed by the limiter | `RETRYING`, no attempt used | `settle` | Same as `record` |
+| `SENDING` under a "not messaged recently" rule | `SKIPPED` (`messaged_recently`) or `RETRYING` (`another_message_sending`), no attempt used | `holdBack` | The person's advisory lock, then the check in a statement of its own; written as `record` does, before the lock is let go |
 
 ### Invariants
 
@@ -179,6 +180,7 @@ stateDiagram-v2
 
 - **Worker crash:** a worker that dies after claiming leaves its rows in `SENDING`. After the one-minute lease, any worker takes them back and counts an attempt, because the call may have gone out. The retry carries the same key, so the provider does not accept it twice. A message whose workers keep crashing ends as `UNKNOWN` instead of looping. It can also end that way without ever having reached the provider.
 - **Lease and call timing:** the lease is far longer than a call: at most a 5-second limiter settle, a 5-second call and a 5-second record. A lease can therefore run out under a live worker only if that worker is stopped for most of a minute, and then the idempotency key still prevents a second acceptance.
+- **Two sends to one person:** a message under a "not messaged recently" rule is checked just before its call, under a lock per person. Two such messages claimed together take turns: the first to look sees the other being sent and steps back, writing that before the second looks, so the second goes and the first is later skipped. The lock is not held during the call, so a message from a campaign without the rule that is claimed and sent between the check and the call still goes. That gap has not been measured.
 - **Graceful stop:** a worker that stops gracefully finishes the calls it has started, within `MaxDrain`, before it exits.
 
 ## Run
