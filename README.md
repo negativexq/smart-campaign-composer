@@ -208,7 +208,7 @@ docker compose down -v
 
 ## LLM provider
 
-The system runs on a deterministic mock by default, and the top bar says so with a `Mock AI` badge. To use a real model, copy `.env.example` to `.env`, then set `LLM_PROVIDER=anthropic` with `ANTHROPIC_API_KEY`, or `LLM_PROVIDER=openai` with `OPENAI_API_KEY`. `ANTHROPIC_MODEL` and `OPENAI_MODEL` change the model. A chosen provider without its key stops the API at startup instead of quietly using the mock.
+The system runs on a deterministic mock by default, and the top bar says so with a `Mock AI` badge. To use a real model, copy `.env.example` to `.env`, then set `LLM_PROVIDER=anthropic` with `ANTHROPIC_API_KEY`, or `LLM_PROVIDER=openai` with `OPENAI_API_KEY`. `ANTHROPIC_MODEL` and `OPENAI_MODEL` change the model; without them it is `claude-haiku-5-5` or `gpt-6-luna`, the two models the benchmark measured. A chosen provider without its key stops the API at startup instead of quietly using the mock.
 
 ## Telemetry
 

@@ -81,8 +81,8 @@ type Provider interface {
 }
 
 const (
-	defaultAnthropicModel = "claude-opus-5-5"
-	defaultOpenAIModel    = "gpt-6-astra"
+	defaultAnthropicModel = "claude-haiku-5-5"
+	defaultOpenAIModel    = "gpt-6-luna"
 	// mockStreamDelay makes the mock's stream visible in a demo; tests skip it.
 	mockStreamDelay = 25 * time.Millisecond
 )

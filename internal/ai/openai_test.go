@@ -322,12 +322,12 @@ func TestFactoryBuildsOpenAIWithItsModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
-	if provider.Name() != "openai" || provider.Model() != "gpt-6-astra" {
+	if provider.Name() != "openai" || provider.Model() != "gpt-6-luna" {
 		t.Fatalf("default: %s %s", provider.Name(), provider.Model())
 	}
-	env["OPENAI_MODEL"] = "gpt-6-luna"
+	env["OPENAI_MODEL"] = "gpt-6-astra"
 	provider, err = ai.NewFromEnv(func(key string) string { return env[key] })
-	if err != nil || provider.Model() != "gpt-6-luna" {
+	if err != nil || provider.Model() != "gpt-6-astra" {
 		t.Fatalf("override: %v %v", provider, err)
 	}
 }

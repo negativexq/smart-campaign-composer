@@ -198,3 +198,17 @@ func TestAnthropicSendsEveryFilterAsRequiredButNullable(t *testing.T) {
 		t.Fatalf("Claude refuses an enum under a type list with null: %s", language)
 	}
 }
+
+func TestFactoryBuildsAnthropicWithTheMeasuredModel(t *testing.T) {
+	t.Parallel()
+	env := map[string]string{"LLM_PROVIDER": "anthropic", "ANTHROPIC_API_KEY": "k"}
+	provider, err := ai.NewFromEnv(func(key string) string { return env[key] })
+	if err != nil || provider.Name() != "anthropic" || provider.Model() != "claude-haiku-5-5" {
+		t.Fatalf("default: %v %v", provider, err)
+	}
+	env["ANTHROPIC_MODEL"] = "claude-sonnet-5-5"
+	provider, err = ai.NewFromEnv(func(key string) string { return env[key] })
+	if err != nil || provider.Model() != "claude-sonnet-5-5" {
+		t.Fatalf("chosen model: %v %v", provider, err)
+	}
+}
