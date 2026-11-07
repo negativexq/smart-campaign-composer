@@ -103,32 +103,55 @@ func (s *Service) RecordAsset(ctx context.Context, name string, image asset.Imag
 }
 
 // DeleteAsset forgets an image nothing shows, and says which file is no longer needed.
+// DeleteAsset removes an image nothing shows. It locks the image's row first and only
+// then looks for what uses it, in a statement of its own: a save that holds the image
+// has then either committed, and is seen, or waits and finds the image gone. Checking
+// in the DELETE itself would not do, because a row that was only locked is not read
+// again when the lock is released. The caller removes the file after this commits.
 func (s *Service) DeleteAsset(ctx context.Context, id string) (string, error) {
 	var parsed pgtype.UUID
 	if err := parsed.Scan(id); err != nil {
 		return "", ErrAssetNotFound
 	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("begin delete asset: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+
 	var fileName string
-	err := s.db.QueryRow(ctx, `DELETE FROM assets a WHERE a.id = $1 AND NOT `+assetUsed+` RETURNING a.file_name`, parsed).Scan(&fileName)
+	err = tx.QueryRow(ctx, `SELECT file_name FROM assets WHERE id = $1 FOR UPDATE`, parsed).Scan(&fileName)
 	if errors.Is(err, pgx.ErrNoRows) {
-		if _, err := s.AssetByID(ctx, id); err != nil {
-			return "", err
-		}
-		return "", ErrAssetInUse
+		return "", ErrAssetNotFound
 	}
 	if err != nil {
+		return "", fmt.Errorf("lock asset: %w", err)
+	}
+	var used bool
+	if err := tx.QueryRow(ctx, `SELECT `+assetUsed+` FROM assets a WHERE a.id = $1`, parsed).Scan(&used); err != nil {
+		return "", fmt.Errorf("check asset use: %w", err)
+	}
+	if used {
+		return "", ErrAssetInUse
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM assets WHERE id = $1`, parsed); err != nil {
 		return "", fmt.Errorf("delete asset: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("commit delete asset: %w", err)
 	}
 	return fileName, nil
 }
 
-func (s *Service) checkAssetsExist(ctx context.Context, ids []string) error {
+// lockAssets keeps images from being deleted until tx ends, for a write that is about
+// to show them. An image deleted meanwhile is not found, and the write is refused.
+func lockAssets(ctx context.Context, tx pgx.Tx, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
 	var known int
-	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM assets WHERE id::text = ANY($1)`, ids).Scan(&known); err != nil {
-		return fmt.Errorf("check assets: %w", err)
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM assets WHERE id::text = ANY($1) FOR SHARE) held`, ids).Scan(&known); err != nil {
+		return fmt.Errorf("lock assets: %w", err)
 	}
 	unique := map[string]bool{}
 	for _, id := range ids {
@@ -163,19 +186,27 @@ func (s *Service) SaveBrand(ctx context.Context, brand content.Brand) (content.B
 	if problem := brand.Check(); problem != "" {
 		return content.Brand{}, &DesignError{problem}
 	}
-	if brand.LogoAssetID != "" {
-		if err := s.checkAssetsExist(ctx, []string{brand.LogoAssetID}); err != nil {
-			return content.Brand{}, err
-		}
-	}
 	spec, err := json.Marshal(brand)
 	if err != nil {
 		return content.Brand{}, fmt.Errorf("encode brand: %w", err)
 	}
-	if _, err := s.db.Exec(ctx, `
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return content.Brand{}, fmt.Errorf("begin save brand: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+	if brand.LogoAssetID != "" {
+		if err := lockAssets(ctx, tx, []string{brand.LogoAssetID}); err != nil {
+			return content.Brand{}, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO brand_profile (spec) VALUES ($1)
 		ON CONFLICT (only_row) DO UPDATE SET spec = EXCLUDED.spec, updated_at = now()`, spec); err != nil {
 		return content.Brand{}, fmt.Errorf("save brand: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return content.Brand{}, fmt.Errorf("commit brand: %w", err)
 	}
 	return brand, nil
 }

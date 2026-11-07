@@ -950,6 +950,13 @@ func (s *Service) SaveContentAt(ctx context.Context, id, revision string, edited
 	if _, err := lockStatus(ctx, tx, id); err != nil {
 		return View{}, err
 	}
+	// A design newly chosen was copied from the library before this; its images
+	// must still be there.
+	if edited.EmailDesign != nil {
+		if err := lockAssets(ctx, tx, edited.EmailDesign.AssetIDs()); err != nil {
+			return View{}, err
+		}
+	}
 	result, err := tx.Exec(ctx, `UPDATE campaigns SET updated_at = now() WHERE id = $1 AND status = $2`, id, statusReady)
 	if err != nil {
 		return View{}, fmt.Errorf("touch campaign: %w", err)
