@@ -20,6 +20,7 @@ This page covers what protects the system, the checks that were run against it, 
 | Refused credentials | A 401 from the provider uses no attempt. It locks the channel for every worker, and one call every 30 s tests the key. | `internal/delivery`, [errors-and-retries.md](errors-and-retries.md#401-the-provider-refuses-the-credentials) |
 | Telemetry | Metrics carry no campaign, user, email, phone, brief or message labels. | `internal/telemetry` |
 | Secrets | API keys and signing secrets come from environment variables. They are not stored in the repository or the database. | `compose.yaml`, `cmd/` |
+| Scans on every change | CI fails when Trivy finds a secret in the files git tracks, or a HIGH or CRITICAL vulnerability with a fix available in the backend or frontend image. Ignored files such as `.env` are not sent to the scan. | `Makefile` (`scan-secrets`, `scan-images`), `.github/workflows/ci.yml` |
 
 ## Checks run on 2026-11-06
 
@@ -105,6 +106,12 @@ cd frontend && npm test && npm run build && npm audit
 
 ```bash
 trivy fs --scanners vuln,secret,misconfig --skip-dirs frontend/node_modules .
+```
+
+The scans CI runs, with Trivy in a container, so only Docker is needed:
+
+```bash
+make scan
 ```
 
 ```bash

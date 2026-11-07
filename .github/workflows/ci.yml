@@ -76,6 +76,17 @@ jobs:
       - name: Type check and build
         run: npm run build
 
+  security:
+    name: Secret and image scans
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Look for secrets in the repository
+        run: make scan-secrets
+      - name: Scan the backend and frontend images
+        run: make scan-images
+
   system:
     name: End-to-end and chaos tests
     runs-on: ubuntu-latest

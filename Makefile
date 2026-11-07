@@ -1,6 +1,6 @@
 COMPOSE_TEST := docker compose -f compose.test.yaml
 
-.PHONY: test test-go test-frontend test-local test-e2e test-chaos benchmark test-env-up test-env-down up down verify-up verify-load verify-security verify-mutation verify-down
+.PHONY: test test-go test-frontend test-local test-e2e test-chaos benchmark test-env-up test-env-down up down verify-up verify-load verify-security verify-mutation verify-down scan scan-secrets scan-images
 
 ## test: run all tests in containers (needs only Docker, no API key)
 test: test-go test-frontend
@@ -63,3 +63,25 @@ up:
 
 down:
 	docker compose down
+
+## scan: look for secrets in the repository and known vulnerabilities in both images (needs only Docker)
+TRIVY_VERSION := 0.73.0
+# Trivy runs in its own container and reads its input from stdin, so it needs no Docker socket.
+TRIVY := docker run --rm -i -v scc-trivy-cache:/root/.cache/trivy --entrypoint sh aquasec/trivy:$(TRIVY_VERSION) -c
+
+scan: scan-secrets scan-images
+
+## scan-secrets: scan the files git tracks or would track, so .env and other ignored files stay out
+scan-secrets:
+	git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - | \
+		$(TRIVY) 'mkdir /src && tar -xf - -C /src && trivy fs --quiet --scanners secret --exit-code 1 /src'
+
+## scan-images: build the backend and frontend images and fail on fixable HIGH or CRITICAL vulnerabilities
+scan-images:
+	docker build -q -t scc-scan-backend .
+	docker build -q -t scc-scan-frontend frontend
+	for image in scc-scan-backend scc-scan-frontend; do \
+		echo "Scanning $$image"; \
+		docker save $$image | $(TRIVY) \
+			"cat > /tmp/image.tar && trivy image --quiet --input /tmp/image.tar --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1" || exit 1; \
+	done

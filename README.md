@@ -237,7 +237,7 @@ Deeper checks live in [tests/verify](tests/verify/README.md): [24 load scenarios
 make verify-up && make verify-security && make verify-load && make verify-down
 ```
 
-CI runs on every push to `main` and every pull request: formatting, vet and the Go tests with the race detector, the frontend tests, type check and build, then the acceptance and chaos tests against the full stack on the mock AI. It needs no API key. `make benchmark` and the verification suites stay manual.
+CI runs on every push to `main` and every pull request: formatting, vet and the Go tests with the race detector, the frontend tests, type check and build, the acceptance and chaos tests against the full stack on the mock AI, and Trivy scans for secrets in the repository and for known vulnerabilities in the backend and frontend images. It needs no API key. `make scan` runs the same scans locally with only Docker. `make benchmark` and the verification suites stay manual.
 
 ## Layout
 
