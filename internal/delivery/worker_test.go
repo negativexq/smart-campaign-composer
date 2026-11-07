@@ -49,6 +49,9 @@ func always(result delivery.Result, err error) func(int, delivery.Message) (deli
 	return func(int, delivery.Message) (delivery.Result, error) { return result, err }
 }
 
+// lockedRetry is how long the fake limiter has a locked channel wait.
+const lockedRetry = 20 * time.Millisecond
+
 type fakeLimiter struct {
 	mu sync.Mutex
 	// permits is how many were granted and not given back, per channel.
@@ -144,8 +147,12 @@ func (f *fakeLimiter) Reserve(_ context.Context, channel string, want int) (deli
 		answer = f.answer(channel, want)
 	}
 	if generation, locked := f.locks[channel]; locked {
+		// The real limiter answers with the time left until the next probe. Here a
+		// test makes the probe due with letProbe, so a fixed 30 s would leave the
+		// worker asleep through it; a short wait keeps it looking, as the real
+		// answer would wake it when the probe is due.
 		if !f.probeDue[channel] {
-			return delivery.Permits{Retry: 30 * time.Second, Paused: true}, nil
+			return delivery.Permits{Retry: lockedRetry, Paused: true}, nil
 		}
 		f.probeDue[channel] = false
 		answer = delivery.Permits{Granted: 1, Probe: generation}
