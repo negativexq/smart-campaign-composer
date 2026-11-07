@@ -53,6 +53,9 @@ const (
 	// sendingWait is how long a message waits for another one to the same person that
 	// is being sent: about as long as that call may take.
 	sendingWait = 5 * time.Second
+	// overlapMargin widens the time since which another run counts as overlapping,
+	// to cover clocks that differ between the API, the workers and PostgreSQL.
+	overlapMargin = time.Minute
 
 	recoverBatch       = 500
 	notSentPause       = 5 * time.Second
@@ -494,6 +497,13 @@ type claim struct {
 	consented                                  bool
 	// notMessagedWithinDays is the campaign's "not messaged recently" rule, if it has one.
 	notMessagedWithinDays *int
+	// overlapping says another run has been open since this run's queuing counted
+	// recent messages, so one of its messages may have reached the person since.
+	// Only then does a message with the rule check again before sending.
+	overlapping bool
+	// ruleOpen says another run with the rule is open, so a message without the
+	// rule must not slip in while one of its messages to the person is being sent.
+	ruleOpen bool
 	// probe marks a call testing whether a failing provider is back.
 	probe   bool
 	content content.Content
@@ -572,13 +582,20 @@ func (w *Worker) claim(ctx context.Context, channel string, limit int) ([]claim,
 		)
 		UPDATE campaign_deliveries d
 		SET status = 'SENDING', claim_token = gen_random_uuid(), lease_expires_at = now() + make_interval(secs => $2), updated_at = now()
-		FROM next, users u, campaign_versions v
-		WHERE d.id = next.id AND u.id = d.user_id AND v.id = d.campaign_version_id
+		FROM next, users u, campaign_versions v, campaign_runs r
+		WHERE d.id = next.id AND u.id = d.user_id AND v.id = d.campaign_version_id AND r.id = d.run_id
 		RETURNING d.id::text, d.claim_token::text, d.campaign_id::text, d.run_id::text, d.channel, d.idempotency_key, d.user_id, d.attempts, d.trace_context,
 		          GREATEST(EXTRACT(EPOCH FROM now() - d.next_attempt_at), 0)::float8,
 		          u.first_name, u.email, u.phone, u.language, COALESCE(d.variant, ''),
 		          COALESCE((SELECT allowed FROM consents WHERE user_id = d.user_id AND channel = d.channel), false),
-		          v.content, (v.segment #>> '{segment,not_messaged_within_days}')::int`, limit, w.config.Lease.Seconds(), channel)
+		          v.content, (v.segment #>> '{segment,not_messaged_within_days}')::int,
+		          r.rule_days IS NOT NULL AND EXISTS (
+		              SELECT 1 FROM campaign_runs o
+		              WHERE o.id <> r.id AND (o.finished_at IS NULL OR o.finished_at >= COALESCE(r.rule_as_of, '-infinity') - make_interval(secs => $4))),
+		          r.rule_days IS NULL AND EXISTS (
+		              SELECT 1 FROM campaign_runs o
+		              WHERE o.id <> r.id AND o.finished_at IS NULL AND o.rule_days IS NOT NULL)`,
+		limit, w.config.Lease.Seconds(), channel, overlapMargin.Seconds())
 	if err != nil {
 		return nil, timing, fmt.Errorf("claim deliveries: %w", err)
 	}
@@ -595,7 +612,8 @@ func (w *Worker) claim(ctx context.Context, channel string, limit int) ([]claim,
 			age      float64
 		)
 		if err := row.Scan(&item.id, &item.token, &item.campaignID, &item.runID, &item.channel, &item.key, &item.userID, &item.attempts, &item.traceContext,
-			&age, &item.firstName, &item.email, &item.phone, &language, &variant, &item.consented, &encoded, &item.notMessagedWithinDays); err != nil {
+			&age, &item.firstName, &item.email, &item.phone, &language, &variant, &item.consented, &encoded, &item.notMessagedWithinDays,
+			&item.overlapping, &item.ruleOpen); err != nil {
 			return claim{}, err
 		}
 		var stored content.Versions
@@ -654,7 +672,7 @@ func (w *Worker) handle(ctx context.Context, item claim) (err error) {
 		span.SetAttributes(attribute.String("delivery.outcome", "consent_withdrawn"))
 		return w.record(ctx, item, update{status: statusSkipped, attempts: item.attempts, reason: "consent_withdrawn"}, nil)
 	}
-	if item.notMessagedWithinDays != nil {
+	if (item.notMessagedWithinDays != nil && item.overlapping) || (item.notMessagedWithinDays == nil && item.ruleOpen) {
 		held, err := w.holdBack(ctx, item)
 		if err != nil {
 			slog.ErrorContext(ctx, "check recent messages", "delivery_id", item.id, "error", err)
@@ -1023,6 +1041,27 @@ const checkContact = `
 	)
 	SELECT found, EXISTS (SELECT 1 FROM held) FROM seen`
 
+// waitForRule holds back a message without a "not messaged recently" rule while
+// another run's message with the rule to the same person is being sent, in the same
+// statement, so that one is not sent after this one. It never skips: this campaign
+// asked for no rule. It gives what it found and whether it wrote, like checkContact,
+// and must also run after lockContact as a statement of its own.
+const waitForRule = `
+	WITH seen AS (
+		SELECT CASE WHEN EXISTS (
+			SELECT 1 FROM campaign_deliveries d JOIN campaign_runs r ON r.id = d.run_id
+			WHERE d.user_id = $1 AND d.run_id <> $2::uuid AND d.status = 'SENDING' AND r.rule_days IS NOT NULL)
+		THEN 'sending' ELSE '' END AS found
+	), held AS (
+		UPDATE campaign_deliveries d
+		SET status = 'RETRYING', last_error = $5, next_attempt_at = now() + make_interval(secs => $6),
+		    provider_message_id = NULL, sent_at = NULL, claim_token = NULL, lease_expires_at = NULL, updated_at = now()
+		FROM seen
+		WHERE seen.found <> '' AND d.id = $3 AND d.claim_token = $4 AND d.status = 'SENDING'
+		RETURNING d.id
+	)
+	SELECT found, EXISTS (SELECT 1 FROM held) FROM seen`
+
 // holdBack keeps a message with a "not messaged recently" rule from going out after
 // another send has reached the person, or while one is on its way. Checks for one
 // person take turns under a lock and write their outcome before letting go, so of
@@ -1031,7 +1070,10 @@ const checkContact = `
 // transaction PostgreSQL runs a batch as one implicit transaction, so the lock holds
 // until the batch ends, while each statement still takes its own snapshot. The lock
 // is not held while calling the provider: a message from a campaign without the
-// rule, sent between this check and that call, still goes. It reports true when the
+// rule waits instead, while a message with the rule to the same person is being sent
+// (waitForRule). A message with the rule checks only when another run has been open
+// since its queuing counted, and one without only when a run with the rule is open,
+// so a campaign sending on its own does no extra work. It reports true when the
 // message must not be sent now, including when its claim was lost.
 func (w *Worker) holdBack(ctx context.Context, item claim) (held bool, err error) {
 	started := time.Now()
@@ -1044,11 +1086,15 @@ func (w *Worker) holdBack(ctx context.Context, item claim) (held bool, err error
 	ctx, span := w.tracer.Start(ctx, "delivery.contact_check")
 	defer span.End()
 
-	cutoff := time.Now().AddDate(0, 0, -*item.notMessagedWithinDays)
 	batch := &pgx.Batch{}
 	batch.Queue(lockContact, contactLock(item.userID))
-	batch.Queue(checkContact, item.userID, item.runID, cutoff, outcomeTimeout, item.id, item.token,
-		reasonMessagedRecently, reasonAnotherSending, sendingWait.Seconds())
+	if item.notMessagedWithinDays != nil {
+		cutoff := time.Now().AddDate(0, 0, -*item.notMessagedWithinDays)
+		batch.Queue(checkContact, item.userID, item.runID, cutoff, outcomeTimeout, item.id, item.token,
+			reasonMessagedRecently, reasonAnotherSending, sendingWait.Seconds())
+	} else {
+		batch.Queue(waitForRule, item.userID, item.runID, item.id, item.token, reasonAnotherSending, sendingWait.Seconds())
+	}
 	results := w.db.SendBatch(ctx, batch)
 	defer results.Close() //nolint:errcheck // closed below; this covers the early returns
 	var waited float64

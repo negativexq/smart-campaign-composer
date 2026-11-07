@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/negativexq/smart-campaign-composer/internal/campaign"
 )
@@ -26,10 +27,17 @@ type contactRig struct {
 
 func newContactRig(t *testing.T) *contactRig {
 	t.Helper()
-	ctx := context.Background()
 	week := 7
-	chosen := campaign.NewCampaign{Brief: brief, Channels: []string{"email", "sms"}, NotMessagedWithinDays: &week}
+	return newContactRigWith(t, &week, &week)
+}
+
+// newContactRigWith is newContactRig with the rule, or none, for each campaign.
+func newContactRigWith(t *testing.T, mineRule, theirRule *int) *contactRig {
+	t.Helper()
+	ctx := context.Background()
+	chosen := campaign.NewCampaign{Brief: brief, Channels: []string{"email", "sms"}, NotMessagedWithinDays: mineRule}
 	r := newRigFor(t, chosen, always(accepted, nil))
+	chosen.NotMessagedWithinDays = theirRule
 	c := &contactRig{rig: r, other: dispatched(t, r.service, chosen)}
 	if err := r.pool.QueryRow(ctx, `
 		SELECT m.id::text, o.id::text, m.user_id, m.channel, m.run_id::text
@@ -106,6 +114,21 @@ func (c *contactRig) row(t *testing.T, id string) deliveryRow {
 		t.Fatal(err)
 	}
 	return row
+}
+
+// finishTheirs closes the other campaign's run at a time relative to when queuing
+// counted recent messages for mine.
+func (c *contactRig) finishTheirs(t *testing.T, sinceMine string) {
+	t.Helper()
+	c.exec(t, `
+		UPDATE campaign_runs SET finished_at = (SELECT rule_as_of FROM campaign_runs WHERE id = $2) + $3::interval,
+		       total = 0, counts = '[]', responses = '{}'
+		WHERE campaign_id = $1`, c.other, c.mineRun, sinceMine)
+}
+
+// checks counts the checks the worker made before sending.
+func (c *contactRig) checks() int {
+	return testutil.CollectAndCount(c.metrics.DeliveryContactCheck)
 }
 
 func (c *contactRig) calls() int {
@@ -309,7 +332,20 @@ func (c *contactRig) lockWaits(t *testing.T) []lockWait {
 // shows the order the lock gives.
 func TestTwoRulesClaimedTogetherSendOnce(t *testing.T) {
 	t.Parallel()
-	c := newContactRig(t)
+	claimedTogether(t, newContactRig(t))
+}
+
+// A message without the rule and one with it, claimed in the same round, take the
+// same turns: whichever looks first waits, so the one with the rule never goes after
+// the other.
+func TestARuleAndNoRuleClaimedTogetherSendOnce(t *testing.T) {
+	t.Parallel()
+	week := 7
+	claimedTogether(t, newContactRigWith(t, nil, &week))
+}
+
+func claimedTogether(t *testing.T, c *contactRig) {
+	t.Helper()
 	ctx := context.Background()
 	c.exec(t, `UPDATE campaign_deliveries SET status = 'QUEUED', next_attempt_at = now() WHERE id = $1`, c.theirs)
 
@@ -393,5 +429,81 @@ func TestTwoRulesClaimedTogetherSendOnce(t *testing.T) {
 	}
 	if held.reason != "another_message_sending" || held.attempts != 0 || held.tries != 0 || held.claimed {
 		t.Fatalf("held back: %+v", held)
+	}
+}
+
+// A campaign sending while no other run has been open since its queuing counted
+// checks nothing, with the rule or without it, even with another message to the
+// person on its way: queuing already left out what went before.
+func TestACampaignSendingAloneChecksNothing(t *testing.T) {
+	t.Parallel()
+	week := 7
+	for _, mineRule := range []*int{&week, nil} {
+		c := newContactRigWith(t, mineRule, &week)
+		c.setTheirs(t, "SENDING", "0 days")
+		c.finishTheirs(t, "-2 minutes")
+
+		c.process(t)
+
+		if row := c.row(t, c.mine); row.status != "SENT" || c.calls() != 1 || c.checks() != 0 {
+			t.Fatalf("rule %v: mine %+v, calls %d, checks %d", mineRule, row, c.calls(), c.checks())
+		}
+	}
+}
+
+// Two campaigns without the rule check nothing however they overlap.
+func TestTwoCampaignsWithoutTheRuleCheckNothing(t *testing.T) {
+	t.Parallel()
+	c := newContactRigWith(t, nil, nil)
+	c.setTheirs(t, "SENDING", "0 days")
+
+	c.process(t)
+
+	if row := c.row(t, c.mine); row.status != "SENT" || c.calls() != 1 || c.checks() != 0 {
+		t.Fatalf("mine %+v, calls %d, checks %d", row, c.calls(), c.checks())
+	}
+}
+
+// A run that has finished since queuing counted for mine may have reached the person
+// in between, so it still counts, and so does one that finished just before, within
+// the margin for clocks.
+func TestARunFinishedSinceMineWasQueuedStillCounts(t *testing.T) {
+	t.Parallel()
+	for _, since := range []string{"1 second", "-30 seconds"} {
+		c := newContactRig(t)
+		c.setTheirs(t, "SENT", "0 days")
+		c.finishTheirs(t, since)
+
+		c.process(t)
+
+		if row := c.row(t, c.mine); row.status != "SKIPPED" || row.reason != "messaged_recently" || c.calls() != 0 {
+			t.Fatalf("finished %s after: mine %+v, calls %d", since, row, c.calls())
+		}
+	}
+}
+
+// A message without the rule waits, without using an attempt, while a message with
+// the rule to the same person is being sent, and goes once that one has.
+func TestAMessageWithoutTheRuleWaitsForOneWithIt(t *testing.T) {
+	t.Parallel()
+	week := 7
+	c := newContactRigWith(t, nil, &week)
+	c.setTheirs(t, "SENDING", "0 days")
+
+	c.process(t)
+
+	row := c.row(t, c.mine)
+	if row.status != "RETRYING" || row.reason != "another_message_sending" || row.attempts != 0 || row.tries != 0 || row.claimed || !row.waits {
+		t.Fatalf("held back: %+v", row)
+	}
+	if c.calls() != 0 {
+		t.Fatalf("calls: %d", c.calls())
+	}
+
+	c.setTheirs(t, "SENT", "0 days")
+	c.exec(t, `UPDATE campaign_deliveries SET next_attempt_at = now() WHERE id = $1`, c.mine)
+	c.process(t)
+	if row := c.row(t, c.mine); row.status != "SENT" || c.calls() != 1 {
+		t.Fatalf("after the other one went: %+v, calls %d", row, c.calls())
 	}
 }
