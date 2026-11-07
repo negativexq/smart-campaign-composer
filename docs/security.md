@@ -48,7 +48,29 @@ The first pass caught 20 of the 23. The three misses were weak tests, not broken
 - **The alert lock** was tested by five checks racing each other, which usually passed without the lock too. The test now holds the lock itself, checks that the worker waits for it, and checks that the alert is written once.
 - **A 401 during a breaker probe** went through the test either way, because without its own handling it counted as a passed probe and closed the breaker. The test now checks that the breaker stays open after the 401 and closes only after an accepted call.
 
-After these changes all 23 faults are caught.
+After these changes all 23 faults are caught. A 24th was added with the 1.1 s limiter window: setting it back to 1 s must fail its test. The latest run catches all 24.
+
+### Probes from outside and full sends under faults
+
+The verification suites in [tests/verify](../tests/verify/README.md) run against a stack of their own and keep their results.
+
+**Security probes** ([2026-11-06-1939-security](../tests/verify/results/2026-11-06-1939-security.md)): 19 of 19 pass. Each probe has a control, a valid request that must work, so a refusal shows the check and not a malformed request.
+
+| Area | What was probed |
+|---|---|
+| Sessions | All 46 routes refuse four kinds of missing or bad cookie. |
+| Provider webhook | Missing, wrong, malformed and other-body signatures get 401; a replayed event changes nothing; unknown keys and events and a 70 KB body are refused. |
+| Unsubscribe links | Five altered links get 404, the real one works. |
+| Uploads | Non-images, SVG with script, HTML named `.png`, empty and 7 MB files are refused; decompression bombs are refused by their header size; file names cannot climb directories; uploaded images lose their metadata. |
+| Injection | SQL in 200 query strings and paths and in written names is stored as data, with the tables intact; markup in email content is escaped; a `javascript:` call-to-action link is refused. |
+| Exports | CSV cells that start a formula are escaped. |
+| Request size | 2 MB, deeply nested and broken bodies are refused. |
+| nginx | Six paths outside the app serve nothing. |
+| Logs and errors | 23,384 log lines held no email address, phone number or secret; error answers reveal no internals. |
+
+Two known items are recorded rather than failed: the frontend sends no security headers, and the API's `/metrics` answers without a session (see [Open items](#open-items)).
+
+**Full sends under faults** ([latest full run](../tests/verify/results/2026-11-06-2254-load.md)): each scenario sends the same campaign of 15,411 messages. In the latest runs of all 23 scenarios no message was lost or accepted twice, and outside the scenarios that go over on purpose no channel went over 100 calls a second at the provider. They cover provider faults and outages, refused credentials, crashed and restarted workers, PostgreSQL and Redis lost, Redis's clock stepped forward, and workers set above the provider's limit. Two problems they found were fixed: Redis came back from an old snapshot after a crash and let a channel reach 123 calls in a second, and a forward clock step let one reach 119. The details are in [FINDINGS.md](../tests/verify/FINDINGS.md).
 
 ### Findings fixed
 
@@ -89,10 +111,10 @@ trivy fs --scanners vuln,secret,misconfig --skip-dirs frontend/node_modules .
 make up && make test-e2e && make test-chaos
 ```
 
-The security probes and the mutation check are kept in [tests/verify](../tests/verify/README.md), with their results:
+The security probes, the load scenarios and the mutation check are kept in [tests/verify](../tests/verify/README.md), with their results:
 
 ```bash
-make verify-up && make verify-security && make verify-mutation && make verify-down
+make verify-up && make verify-security && make verify-load && make verify-mutation && make verify-down
 ```
 
 The chaos tests run their own `docker compose` commands. To run them against a stack under another project name, export `COMPOSE_PROJECT_NAME` for the whole run, not only for `make up`.
