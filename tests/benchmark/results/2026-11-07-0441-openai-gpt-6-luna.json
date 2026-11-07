@@ -1,0 +1,89 @@
+[
+ {
+  "id": "combined-02",
+  "category": "combined",
+  "holdout": false,
+  "brief": "Son 14 günde sepete ekleyip 30 gündür alışveriş yapmayan Ankara müşterileri",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son 14 günde sepete ekleyip 30 gündür alışveriş yapmayan Ankara müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara",
+    "cart_added_within_days": 14,
+    "not_purchased_within_days": 30
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 8.808896708
+ },
+ {
+  "id": "language-07",
+  "category": "language",
+  "holdout": false,
+  "brief": "Almanca konuşan Ankara kullanıcıları",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Almanca konuşan Ankara kullanıcıları",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara",
+    "language": "de"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.322107417
+ },
+ {
+  "id": "language-09",
+  "category": "language",
+  "holdout": false,
+  "brief": "Rusça konuşan Ankara kullanıcıları",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Rusça konuşan Ankara kullanıcıları",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [
+    "Rusça konuşan"
+   ],
+   "unsure": null
+  },
+  "seconds": 6.410348084
+ },
+ {
+  "id": "unsupported-15",
+  "category": "unsupported",
+  "holdout": false,
+  "brief": "Ayakkabı alan Ankara müşterileri",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Ayakkabı alan Ankara müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [
+    "Ayakkabı alan"
+   ],
+   "unsure": null
+  },
+  "seconds": 6.523477
+ }
+]
