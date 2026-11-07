@@ -111,6 +111,8 @@ A call that got no answer may still reach the provider later, so it counts for t
 
 ### When Redis's clock steps forward
 
+**In short:** a load run showed a channel going over 100 calls a second, and a clock watcher traced it to a forward step of Redis's wall clock. The limiter now counts each call for 1.1 s, a 100 ms margin, and stepping the clock on purpose confirmed it: steps of 70 and 100 ms stayed at 100. Larger steps let a few calls through for one second (up to 17 after a 500 ms step). The provider refuses those with 429s, the worker retries them, and the idempotency key keeps every message accepted exactly once. A hard bound under any clock step would need a single limiter that keeps time with a monotonic clock, at the cost of tying the limit to one process or host.
+
 The window is timed by Redis's wall clock (`TIME`), the one clock all workers share. If that clock steps forward, the calls of the last moments look older than they are and leave the window early, so new calls are let in early. Permits go out in batches, so the calls granted within the step's span can land in the same second as the next batch.
 
 The window is 1.1 s for this. A forward step of up to 100 ms still leaves each call counted for at least a full second after its answer, so it lets nothing in early. A larger step lets in only the calls of the part beyond 100 ms. The margin costs about 9% of the rate on every send: without faults the verification send takes 96 s instead of 87 s, about 85 messages a second per channel instead of 94 ([2026-11-06-2233-load](../tests/verify/results/2026-11-06-2233-load.md) against [2026-11-06-1942-load](../tests/verify/results/2026-11-06-1942-load.md)).
