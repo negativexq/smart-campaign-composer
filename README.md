@@ -8,6 +8,12 @@ The full path works with the mock AI or a real model: brief, validated audience,
 
 To run it yourself, follow [Install from scratch](#install-from-scratch). It needs only Docker and no API key.
 
+## Demo video
+
+[![The test inbox showing the sent email: "Your cart is still waiting" with a Go to my cart button](docs/media/demo-claude-poster.jpg)](docs/media/demo-claude.mp4)
+
+[Watch the 2:40 demo](docs/media/demo-claude.mp4) (MP4, 10 MB). It is one recorded run with Claude Haiku 5.5, sped up only while the model writes. An English brief asks to remind customers in İzmir who added to their cart in the last 14 days and did not buy, with 15% off and a link. The video shows the audience it found, the SMS and email written in each customer's language, the Cart Reminder template, approval, the send of 165 messages and the email in the mock provider's test inbox.
+
 ## Product tour
 
 Every screenshot below is a real run: an OpenAI model wrote the audiences and messages, the seeded fake customers received them, and the mock provider accepted them. Select one to open it at full size.

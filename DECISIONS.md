@@ -64,6 +64,8 @@ Invalid output gets up to two repair attempts, with the validation errors passed
 
 The adapter enables Anthropic's server-side fallback, so the API can retry a refused or overloaded request on another model. `llm_model` records the configured model, so a served fallback is not visible in that column.
 
+The Claude adapter rewrites the schema the same way as the OpenAI one: every property is required, and an optional one may be null. Claude takes the null branch as `anyOf`, because it refuses an enum under a type list that includes null. With optional properties, Claude lost filters it had decided on. On 2026-11-07 Haiku 5.5 and Sonnet 5.5 never wrote `cart_added_within_days`, dropped `not_messaged_within_days` and put zeros in filters the brief did not name, so 20 and 23 valid briefs were refused, mostly cart and combined ones. The model's own assumptions still named the 30-day cart window, so the choice was right and only the output lost it. With the rewrite, the 30 briefs that had failed on either model went from 6 to 24 as expected on Haiku.
+
 ## The audience is counted as of the proposal time
 
 Windows such as "last 30 days" are measured from `audience_as_of`, so the number under review does not shrink as time passes. Event data is still live: a purchase recorded after the proposal can change the count. Freezing recipients at approval is the job of the dispatch step.
@@ -140,7 +142,7 @@ Tone goes to the model separately and changes wording only. It has no validation
 
 ## Tried against a real model
 
-The example brief ran through the app with OpenAI's `gpt-6-luna`: the audience, streaming, validation, approval and sending all worked, and the first text arrived after about 4.5 seconds. It chose the same filters as the mock, wrote natural Turkish, followed a formal tone, used the discount from the form and left the button out when the brief had no link. It did not follow a brief telling it to forget its rules. Claude has not been tried with a real key.
+The example brief ran through the app with OpenAI's `gpt-6-luna`: the audience, streaming, validation, approval and sending all worked, and the first text arrived after about 4.5 seconds. It chose the same filters as the mock, wrote natural Turkish, followed a formal tone, used the discount from the form and left the button out when the brief had no link. It did not follow a brief telling it to forget its rules. On 2026-11-07 an English brief ran through the app with `claude-haiku-5-5`, after the schema change described above: "Remind customers in İzmir who added something to their cart in the last 14 days but didn't buy it. Give them 15% off." with a link. It chose the city, the 14-day cart window and no purchase since the cart, wrote SMS and email in all five languages of the audience with the 15% and the link, and the approved campaign sent 165 messages, all accepted by the mock provider, with the link on the email button.
 
 That run showed one limit. Every percentage in a brief must appear in every message, so a brief naming 10% and 90% cannot pass even when the model picks sensibly. Generation then stops with nothing stored, and an instruction naming the discount settles it, while the review page keeps pointing out the difference. A brief with two real offers has to be written as separate campaigns.
 
@@ -323,18 +325,21 @@ Generated messages get the same treatment: a city or number that is not in the b
 
 ## The benchmark draws the limits, it is not a target
 
-`tests/benchmark` holds 246 hard briefs, refinements and content instructions with their expected answers. `make test` runs the checks on them with no model, and `make benchmark` runs them through a real model and writes a report to `tests/benchmark/results`.
+`tests/benchmark` holds 247 hard briefs, refinements and content instructions with their expected answers. `make test` runs the checks on them with no model, and `make benchmark` runs them through a real model and writes a report to `tests/benchmark/results`.
 
 The first run changed a design rule. Three of its four silently wrong audiences came from our own check: the model read `alışverişi olmayan` correctly, our narrower reading called that a contradiction, and the model obeyed the correction. A wrong correction is worse than none, so the backend now refuses only a clear opposite. Where it is unsure it leaves the answer alone. Blocking rarely hurts, and the checks are not tightened further to chase the remaining cases.
 
-The latest report, one run of every case on `gpt-6-luna`:
+The latest reports, one run of every case on each model, with the same prompt and cases ([gpt-6-luna](tests/benchmark/results/2026-11-07-0447-openai-gpt-6-luna.md), [claude-haiku-5-5](tests/benchmark/results/2026-11-07-0451-anthropic-claude-haiku-5-5.md)):
 
-| Result | Runs |
-|---|---|
-| As expected | 241 |
-| Blocked without need | 5 |
-| Silently wrong audience | 0 |
-| Message with forbidden text | 0 |
+| Result | gpt-6-luna | claude-haiku-5-5 |
+|---|---|---|
+| As expected | 242 | 241 |
+| Blocked without need | 5 | 5 |
+| Shown as unsure, not blocked | 0 | 1 |
+| Silently wrong audience | 0 | 0 |
+| Message with forbidden text | 0 | 0 |
+
+Before the schema rewrite above, Haiku had 222 as expected, 20 blocked without need and 2 silently wrong ([2026-11-07-0417](tests/benchmark/results/2026-11-07-0417-anthropic-claude-haiku-5-5.md)); Sonnet 5.5 had 220, 23 and 2 ([2026-11-07-0424](tests/benchmark/results/2026-11-07-0424-anthropic-claude-sonnet-5-5.md)). Sonnet has not been run since. After the rewrite, a full Haiku run had three silently wrong audiences, and the prompt gained two rules for them: not buying is tied to the cart only when the brief ties it there, and choosing people by what they bought is a condition no filter covers. The third was the case itself: it still expected German to have no users after German became a language. It now expects the German filter, and a new case asks for Russian, which the platform does not have.
 
 One clean run says little about the next one: the run before these changes had one silently wrong audience in 738. These numbers describe one model on cases we wrote ourselves, not real traffic, and they do not carry over to another model. The held-out cases have been read since, so they no longer count as unseen.
 
