@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -200,7 +201,11 @@ type GenerationEvent struct {
 
 // Generation is a claimed generation, ready to run.
 type Generation struct {
-	service     *Service
+	service *Service
+	// claim is this run's token on the campaign's GENERATING status. Every write the
+	// run makes to the campaign requires it, so one whose claim was taken over after
+	// five minutes changes nothing.
+	claim       string
 	view        View
 	instruction string
 	channel     string
@@ -269,12 +274,16 @@ func (s *Service) StartGeneration(ctx context.Context, id string, input Generate
 	if channel != "" && len(view.Channels) > 1 && content.NewDiscount(instruction, view.writingBrief()) {
 		return nil, ErrChannelDiscount
 	}
-	result, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1 AND `+freeToDraft, id, statusGenerating)
+	var claim string
+	err = tx.QueryRow(ctx, `
+		UPDATE campaigns SET status = $2, generation_claim = gen_random_uuid(), updated_at = now()
+		WHERE id = $1 AND `+freeToDraft+`
+		RETURNING generation_claim::text`, id, statusGenerating).Scan(&claim)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrGenerationRunning
+	}
 	if err != nil {
 		return nil, fmt.Errorf("claim generation: %w", err)
-	}
-	if result.RowsAffected() == 0 {
-		return nil, ErrGenerationRunning
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit generation claim: %w", err)
@@ -289,7 +298,7 @@ func (s *Service) StartGeneration(ctx context.Context, id string, input Generate
 	if onlyMissing {
 		channel, instruction = "", ""
 	}
-	return &Generation{service: s, view: view, instruction: instruction, channel: channel, cities: cities, languages: languages, onlyMissing: onlyMissing}, nil
+	return &Generation{service: s, claim: claim, view: view, instruction: instruction, channel: channel, cities: cities, languages: languages, onlyMissing: onlyMissing}, nil
 }
 
 // Run writes the messages, repairing invalid output a bounded number of times.
@@ -489,7 +498,7 @@ func (g *Generation) writeTranslation(ctx context.Context, main StoredContent, l
 // stillRunning keeps a long generation from looking abandoned. If it fails the worst
 // case is the takeover this exists to make unlikely, so it does not stop the writing.
 func (g *Generation) stillRunning(ctx context.Context) {
-	if _, err := g.service.db.Exec(ctx, `UPDATE campaigns SET updated_at = now() WHERE id = $1 AND status = $2`, g.view.ID, statusGenerating); err != nil {
+	if _, err := g.service.db.Exec(ctx, `UPDATE campaigns SET updated_at = now() WHERE id = $1 AND generation_claim = $2`, g.view.ID, g.claim); err != nil {
 		slog.WarnContext(ctx, "mark generation alive", "error", err)
 	}
 }
@@ -795,7 +804,7 @@ func (g *Generation) save(ctx context.Context, stored StoredContent, attempts in
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
-	result, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`, g.view.ID, statusReady, statusGenerating)
+	result, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, generation_claim = NULL, updated_at = now() WHERE id = $1 AND generation_claim = $3`, g.view.ID, statusReady, g.claim)
 	if err != nil {
 		return fmt.Errorf("finish generation: %w", err)
 	}
@@ -836,8 +845,13 @@ func (g *Generation) recordFailure(ctx context.Context, failure error, cancelled
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
-	if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1 AND status = $3`, g.view.ID, status, statusGenerating); err != nil {
+	result, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, generation_claim = NULL, updated_at = now() WHERE id = $1 AND generation_claim = $3`, g.view.ID, status, g.claim)
+	if err != nil {
 		return fmt.Errorf("release generation: %w", err)
+	}
+	// A run whose claim was taken over has nothing to release or report.
+	if result.RowsAffected() == 0 {
+		return nil
 	}
 	if !cancelled {
 		reason := providerOutcome(failure)

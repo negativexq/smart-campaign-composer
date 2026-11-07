@@ -1522,3 +1522,86 @@ func TestACampaignDeletedBeforeTheClaimIsNotGenerated(t *testing.T) {
 		t.Fatalf("deleted campaign: status %s, model calls %d", status, len(provider.contentCalls))
 	}
 }
+
+// takeOver starts a generation, leaves its claim untouched past five minutes and
+// starts a second one, which takes the claim over while the first is still alive.
+func takeOver(t *testing.T, h *harness, id string) (first, second *campaign.Generation) {
+	t.Helper()
+	ctx := context.Background()
+	first, err := h.service.StartGeneration(ctx, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE campaigns SET updated_at = now() - interval '10 minutes' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	second, err = h.service.StartGeneration(ctx, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatalf("take over: %v", err)
+	}
+	return first, second
+}
+
+func claimState(t *testing.T, h *harness, id string) (status, claim string, touched time.Time) {
+	t.Helper()
+	if err := h.pool.QueryRow(context.Background(), `SELECT status, COALESCE(generation_claim::text, ''), updated_at FROM campaigns WHERE id = $1`, id).Scan(&status, &claim, &touched); err != nil {
+		t.Fatal(err)
+	}
+	return status, claim, touched
+}
+
+// Issue #10: a run whose claim was taken over can neither save its output nor keep
+// the newer claim alive, and the run holding the claim finishes as usual.
+func TestARunThatLostItsClaimCannotSaveOrTouchIt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	stale := strings.Replace(validContent, "Hi {{first_name}}", "Hey {{first_name}}", 1)
+	h, _, id := newContentHarness(t, step{output: stale}, step{output: validContent})
+	first, second := takeOver(t, h, id)
+	_, held, touched := claimState(t, h, id)
+
+	if _, err := first.Run(ctx, func(campaign.GenerationEvent) {}); !errors.Is(err, campaign.ErrGenerationRunning) {
+		t.Fatalf("the first run saved after losing its claim: %v", err)
+	}
+	status, claim, after := claimState(t, h, id)
+	if status != "GENERATING" || claim != held || !after.Equal(touched) {
+		t.Fatalf("after the first run: %s, claim kept %v, touched %v", status, claim == held, !after.Equal(touched))
+	}
+
+	view, err := second.Run(ctx, func(campaign.GenerationEvent) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Status != "READY_FOR_REVIEW" || view.Content.SMS != "Hi {{first_name}}" {
+		t.Fatalf("second run: %s %q", view.Status, view.Content.SMS)
+	}
+	if _, claim, _ := claimState(t, h, id); claim != "" {
+		t.Fatal("the claim outlived the run that saved")
+	}
+}
+
+// Issue #10: a run that fails after losing its claim does not release the newer one,
+// so a third run cannot start beside it, and its failure is not reported.
+func TestARunThatLostItsClaimCannotReleaseIt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, _, id := newContentHarness(t, step{err: ai.ErrUnavailable}, step{output: validContent})
+	first, second := takeOver(t, h, id)
+	_, held, _ := claimState(t, h, id)
+
+	if _, err := first.Run(ctx, func(campaign.GenerationEvent) {}); err == nil {
+		t.Fatal("the failing run succeeded")
+	}
+	if status, claim, _ := claimState(t, h, id); status != "GENERATING" || claim != held {
+		t.Fatalf("the failed run released the newer claim: %s", status)
+	}
+	if _, err := h.service.StartGeneration(ctx, id, campaign.GenerateInput{}); !errors.Is(err, campaign.ErrGenerationRunning) {
+		t.Fatalf("a third run started beside the second: %v", err)
+	}
+	if slices.Contains(h.auditEvents(t, id), "content.generation_failed") {
+		t.Fatal("the lost run's failure was reported")
+	}
+	if view, err := second.Run(ctx, func(campaign.GenerationEvent) {}); err != nil || view.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("second run: %v %s", err, view.Status)
+	}
+}
