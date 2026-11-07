@@ -175,3 +175,26 @@ func TestAnthropicErrorsDoNotLeakTheKey(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestAnthropicSendsEveryFilterAsRequiredButNullable(t *testing.T) {
+	t.Parallel()
+	provider, got := anthropicAgainst(t, 200, messageResponse("end_turn", proposalJSON))
+	if _, err := provider.ProposeSegment(context.Background(), segmentRequest()); err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	schema := got.body["output_config"].(map[string]any)["format"].(map[string]any)["schema"].(map[string]any)
+	segmentSchema := schema["properties"].(map[string]any)["segment"].(map[string]any)
+	required := segmentSchema["required"].([]any)
+	properties := segmentSchema["properties"].(map[string]any)
+	if len(required) != len(properties) {
+		t.Fatalf("every filter must be required, got %v of %d", required, len(properties))
+	}
+	cart, _ := json.Marshal(properties["cart_added_within_days"])
+	if !strings.Contains(string(cart), `"anyOf"`) || !strings.Contains(string(cart), `{"type":"null"}`) {
+		t.Fatalf("an optional filter must allow null: %s", cart)
+	}
+	language, _ := json.Marshal(properties["language"])
+	if strings.Contains(string(language), `[`+`"string","null"]`) {
+		t.Fatalf("Claude refuses an enum under a type list with null: %s", language)
+	}
+}

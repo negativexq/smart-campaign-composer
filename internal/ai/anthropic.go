@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -43,7 +44,7 @@ func (a *Anthropic) params(system, user string, schema map[string]any) anthropic
 			anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(user)),
 		},
 		OutputConfig: anthropic.BetaOutputConfigParam{
-			Format: anthropic.BetaJSONOutputFormatParam{Schema: schema},
+			Format: anthropic.BetaJSONOutputFormatParam{Schema: requiredSchema(schema)},
 		},
 		Fallbacks: anthropic.BetaFallbacksParamOfDefault(),
 		Betas:     []anthropic.AnthropicBeta{anthropic.AnthropicBetaServerSideFallback2026_07_01},
@@ -139,4 +140,40 @@ func mapAnthropicError(err error) error {
 		}
 	}
 	return fmt.Errorf("%w: could not reach anthropic", ErrUnavailable)
+}
+
+// requiredSchema lists every property as required and lets an optional one be
+// null, as strictSchema does for OpenAI. With optional properties Claude lost
+// filters it had decided on: the benchmark run of 2026-11-07 showed
+// cart_added_within_days never written and zeros in fields the brief did not
+// name, so valid audiences were refused. Claude takes the null branch as anyOf,
+// because it refuses an enum under a type list that includes null. The
+// backend's validation reads null the same as a missing filter.
+func requiredSchema(schema map[string]any) map[string]any {
+	out := make(map[string]any, len(schema))
+	for key, value := range schema {
+		out[key] = value
+	}
+	if items, ok := schema["items"].(map[string]any); ok {
+		out["items"] = requiredSchema(items)
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return out
+	}
+	required, _ := schema["required"].([]string)
+	names := make([]string, 0, len(properties))
+	outProperties := make(map[string]any, len(properties))
+	for name, value := range properties {
+		names = append(names, name)
+		property := requiredSchema(value.(map[string]any))
+		if !slices.Contains(required, name) {
+			property = map[string]any{"anyOf": []any{property, map[string]any{"type": "null"}}}
+		}
+		outProperties[name] = property
+	}
+	slices.Sort(names)
+	out["properties"] = outProperties
+	out["required"] = names
+	return out
 }
