@@ -212,7 +212,10 @@ func (s *Service) CreateWith(ctx context.Context, campaign NewCampaign) (string,
 	if err := campaign.validate(); err != nil {
 		return "", err
 	}
-	var design []byte
+	var (
+		design       []byte
+		designAssets []string
+	)
 	if content.IsCustomTemplate(campaign.EmailTemplate) {
 		chosen, err := s.designForTemplate(ctx, campaign.EmailTemplate)
 		if errors.Is(err, ErrDesignNotFound) {
@@ -221,6 +224,7 @@ func (s *Service) CreateWith(ctx context.Context, campaign NewCampaign) (string,
 		if err != nil {
 			return "", err
 		}
+		designAssets = chosen.AssetIDs()
 		if design, err = json.Marshal(chosen); err != nil {
 			return "", fmt.Errorf("encode design: %w", err)
 		}
@@ -242,6 +246,10 @@ func (s *Service) CreateWith(ctx context.Context, campaign NewCampaign) (string,
 		return "", fmt.Errorf("begin create: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+	// The copy was read from the library before this; its images must still be there.
+	if err := lockAssets(ctx, tx, designAssets); err != nil {
+		return "", err
+	}
 
 	var id string
 	if err := tx.QueryRow(ctx, `
