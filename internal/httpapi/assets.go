@@ -23,6 +23,10 @@ const (
 // RegisterAssets adds image upload and serving. Serving needs no session, because the
 // people who receive an email have to be able to load its images.
 func RegisterAssets(mux *http.ServeMux, campaigns *campaign.Service, store asset.Store) {
+	registerAssets(mux, campaigns, store, newImageTurns(imagesAtOnce, imageTurnWait))
+}
+
+func registerAssets(mux *http.ServeMux, campaigns *campaign.Service, store asset.Store, turns *imageTurns) {
 	mux.HandleFunc("GET /api/assets", signedIn(func(w http.ResponseWriter, r *http.Request) {
 		found, err := campaigns.Assets(r.Context())
 		if err != nil {
@@ -32,7 +36,7 @@ func RegisterAssets(mux *http.ServeMux, campaigns *campaign.Service, store asset
 		writeJSON(w, http.StatusOK, map[string]any{"assets": found})
 	}))
 	mux.HandleFunc("POST /api/assets", signedIn(func(w http.ResponseWriter, r *http.Request) {
-		uploadAsset(w, r, campaigns, store)
+		uploadAsset(w, r, campaigns, store, turns)
 	}))
 	mux.HandleFunc("DELETE /api/assets/{id}", signedIn(func(w http.ResponseWriter, r *http.Request) {
 		fileName, err := campaigns.DeleteAsset(r.Context(), r.PathValue("id"))
@@ -66,7 +70,7 @@ func RegisterAssets(mux *http.ServeMux, campaigns *campaign.Service, store asset
 	})
 }
 
-func uploadAsset(w http.ResponseWriter, r *http.Request, campaigns *campaign.Service, store asset.Store) {
+func uploadAsset(w http.ResponseWriter, r *http.Request, campaigns *campaign.Service, store asset.Store, turns *imageTurns) {
 	r.Body = http.MaxBytesReader(w, r.Body, asset.MaxBytes+formOverhead)
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -79,17 +83,21 @@ func uploadAsset(w http.ResponseWriter, r *http.Request, campaigns *campaign.Ser
 		return
 	}
 	defer file.Close() //nolint:errcheck // read only
-	raw, err := io.ReadAll(io.LimitReader(file, asset.MaxBytes+1))
-	if err != nil {
-		writeError(w, r, err)
+	// Reading and drawing the image is what costs memory, so both wait for a turn.
+	if !turns.take(r.Context()) {
+		w.Header().Set("Retry-After", imageRetryAfter)
+		writeJSON(w, http.StatusServiceUnavailable, errorBody("Too many images are being uploaded right now. Try again in a few seconds."))
 		return
 	}
-	if len(raw) > asset.MaxBytes {
+	image, err := func() (asset.Image, error) {
+		// Given back even if drawing panics, so a bad file cannot use up the turns.
+		defer turns.give()
+		return drawUpload(file)
+	}()
+	switch {
+	case errors.Is(err, errUploadTooBig):
 		writeError(w, r, &campaign.DesignError{Message: "Choose an image of up to 5 MB."})
 		return
-	}
-	image, err := asset.Process(raw)
-	switch {
 	case errors.Is(err, asset.ErrNotAnImage):
 		writeError(w, r, &campaign.DesignError{Message: "Only PNG and JPEG images can be used in emails here."})
 		return
@@ -111,6 +119,21 @@ func uploadAsset(w http.ResponseWriter, r *http.Request, campaigns *campaign.Ser
 		return
 	}
 	writeJSON(w, http.StatusCreated, saved)
+}
+
+// errUploadTooBig means the file is over asset.MaxBytes.
+var errUploadTooBig = errors.New("upload too big")
+
+// drawUpload reads an upload and draws it again. It is the part that costs memory.
+func drawUpload(file io.Reader) (asset.Image, error) {
+	raw, err := io.ReadAll(io.LimitReader(file, asset.MaxBytes+1))
+	if err != nil {
+		return asset.Image{}, err
+	}
+	if len(raw) > asset.MaxBytes {
+		return asset.Image{}, errUploadTooBig
+	}
+	return asset.Process(raw)
 }
 
 func assetName(uploaded string) string {
