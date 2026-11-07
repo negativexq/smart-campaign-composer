@@ -166,7 +166,7 @@ stateDiagram-v2
 | `SENDING` | Any outcome | `record` | `WHERE claim_token = $2 AND status = 'SENDING'`; the attempt row commits with it |
 | `SENDING` with an expired lease | `RETRYING`, or `UNKNOWN` at the last attempt | `RecoverExpired` | `FOR UPDATE SKIP LOCKED`; the attempt row commits with it |
 | `SENDING`, not confirmed by the limiter | `RETRYING`, no attempt used | `settle` | Same as `record` |
-| `SENDING`, while another run overlaps (see below) | `SKIPPED` (`messaged_recently`) or `RETRYING` (`another_message_sending`), no attempt used | `holdBack` | One batch, run as one implicit transaction: the person's advisory lock, then the check and its write in a statement of its own, so the check reads after the lock is granted and the lock holds until the write commits |
+| `SENDING`, while another run overlaps (see below) | `SKIPPED` (`messaged_recently`) or `RETRYING` (`another_message_sending`), no attempt used. Never `SKIPPED` after its own call got no answer: it may have arrived, so it is retried with the same key | `holdBack` | One batch, run as one implicit transaction: the person's advisory lock, then the check and its write in a statement of its own, so the check reads after the lock is granted and the lock holds until the write commits |
 
 ### Invariants
 

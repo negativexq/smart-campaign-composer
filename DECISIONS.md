@@ -173,6 +173,7 @@ A run keeps its rule and the time queuing counted recent messages up to (`campai
 - A message with the rule is skipped (`messaged_recently`) when another run's message reached the person within the rule's days: `SENT` and `UNKNOWN` by their last change, because an `UNKNOWN` message may have arrived, and a retry waiting after a call that got no answer by when that call was made, since the provider may have accepted it. Failures, refusals and skipped messages reached nobody and do not count.
 - A message with the rule waits (`another_message_sending`, `RETRYING` in 5 seconds) while another run's message to the person is being sent, and decides again when it is claimed next.
 - A message without the rule waits the same way while another run's message with the rule to the person is being sent. It is never skipped, and once that message has gone it goes too.
+- A message whose own earlier call got no answer is never skipped. The provider may already have it, and only a retry with the same key tells, so it may wait but then goes and ends as the provider says. A one-hour soak found this: 57 messages with the rule were recorded as skipped after a lost answer while the provider had accepted them ([#25](https://github.com/negativexq/smart-campaign-composer/issues/25)).
 - The message's own run is left out: its other channel is part of the same send.
 - Neither the skip nor the wait uses an attempt or records a call. A message whose claim moved on while it was being checked is neither sent nor changed.
 - An error in the check returns the message to the queue (`contact_check_failed`) rather than sending it.
@@ -213,7 +214,7 @@ The interleaved runs force both campaigns to reach each of the same people withi
 
 ### Tests that hold it
 
-`internal/delivery/contact_test.go` covers the cases above with one person and one channel. They cover what counts as a recent message, the wait for a message being sent, the same run being left out, a lost claim, no check for a campaign sending on its own, no check between campaigns without the rule, a run that finished since still counting, and the wait for a message without the rule. Two tests claim two messages together and assert, through `pg_locks`, that one check waits on the other's lock. Mutations that remove the lock, merge it into the check, run it in a transaction of its own, drop the overlap gate, its clock margin or the stored queuing time, or ignore finished runs each fail at least one test.
+`internal/delivery/contact_test.go` covers the cases above with one person and one channel. They cover what counts as a recent message, the wait for a message being sent, the same run being left out, a lost claim, no check for a campaign sending on its own, no check between campaigns without the rule, a run that finished since still counting, and the wait for a message without the rule. Two tests claim two messages together and assert, through `pg_locks`, that one check waits on the other's lock. A message whose own call got no answer is sent with the same key, and one whose call failed is still skipped. Mutations that remove the lock, merge it into the check, run it in a transaction of its own, drop the overlap gate, its clock margin or the stored queuing time, ignore finished runs, or skip a message whose own call got no answer each fail at least one test.
 
 ## Tried against a real model
 

@@ -1009,19 +1009,22 @@ const lockContact = `
 // one that may have arrived, or waiting as "another_message_sending" for one on its
 // way now. A send that timed out may have got through, so a retry waiting after one
 // counts from when that call was made. The message's own run is left out: its other
-// channel is part of the same send. Nothing changes when its claim has moved on. It
+// channel is part of the same send. A message whose own earlier call got no answer is
+// never skipped: the provider may have it, and only a retry with the same key tells,
+// so it may wait but then goes. Nothing changes when its claim has moved on. It
 // gives what it found and whether it wrote. It must run after lockContact, as a
 // statement of its own, so that it sees what the last holder of the turn wrote.
 const checkContact = `
 	WITH seen AS (
 		SELECT CASE
-			WHEN EXISTS (
+			WHEN NOT EXISTS (SELECT 1 FROM delivery_attempts mine WHERE mine.delivery_id = $5 AND mine.outcome = $4)
+			 AND (EXISTS (
 				SELECT 1 FROM campaign_deliveries d
 				WHERE d.user_id = $1 AND d.run_id <> $2::uuid AND d.status IN ('SENT', 'UNKNOWN') AND d.updated_at >= $3)
 			  OR EXISTS (
 				SELECT 1 FROM campaign_deliveries d
 				WHERE d.user_id = $1 AND d.run_id <> $2::uuid AND d.status = 'RETRYING'
-				  AND EXISTS (SELECT 1 FROM delivery_attempts a WHERE a.delivery_id = d.id AND a.outcome = $4 AND a.occurred_at >= $3))
+				  AND EXISTS (SELECT 1 FROM delivery_attempts a WHERE a.delivery_id = d.id AND a.outcome = $4 AND a.occurred_at >= $3)))
 			THEN 'messaged'
 			WHEN EXISTS (
 				SELECT 1 FROM campaign_deliveries d
