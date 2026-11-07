@@ -76,7 +76,7 @@ stateDiagram-v2
 | `GENERATING` | `READY_FOR_REVIEW`, `DRAFT` or `GENERATION_FAILED` | Failure or stop | `Generation.recordFailure` | `WHERE status = 'GENERATING'` |
 | Same set as `GENERATING`'s sources | `DRAFT` | New audience | `saveProposal` in [service.go](../internal/campaign/service.go) | `UPDATE … WHERE freeToDraft` |
 | `DRAFT`, `READY_FOR_REVIEW`, `GENERATION_FAILED` | `DRAFT` | The last language with messages left out | `SetExcludedLanguages` | Row lock |
-| `READY_FOR_REVIEW` | `APPROVED` | Approve | `Approve` in [dispatch.go](../internal/campaign/dispatch.go) | Row lock, no blockers, every version complete |
+| `READY_FOR_REVIEW` | `APPROVED` | Approve | `ApproveAt` in [dispatch.go](../internal/campaign/dispatch.go) | Row lock, the review revision the page showed, no blockers, every version complete |
 | `APPROVED` | `DISPATCHING` | Send now | `Dispatch` | Row lock, not archived |
 | `APPROVED`, `SCHEDULED`, `COMPLETED`, `COMPLETED_WITH_FAILURES` | `SCHEDULED` | Schedule | `Schedule` in [schedule.go](../internal/campaign/schedule.go) | Row lock, not archived |
 | `SCHEDULED`, `DISPATCHING` | `DISPATCHING`, or stays `SCHEDULED` | A run is due | `Scheduler.runOne` | `FOR UPDATE OF s, c SKIP LOCKED` |
@@ -127,6 +127,7 @@ The messages live as one JSON document per campaign version: every language, and
 
 - **Empty:** a campaign with no messages stores `{}`, never `NULL`. This holds both after a new audience and after the last language is left out.
 - **Revision:** `ContentRevision`, sent with the campaign as `content_revision`, is a short hash of the stored document. A save sends back the revision it was made to, and one made to an older revision is refused with `409`. That covers another tab, or a regeneration that finished in between, which would otherwise be undone without a word. Inside the save, the document is read again under the campaign's row lock and compared to the one the edit was made to, so a change between the read and the write is refused even without a revision.
+- **Review:** `ReviewRevision`, sent as `review_revision`, covers the messages and the audience they go to. Approval compares it under the row lock, so only what the review page showed is frozen.
 - **Edits:** edits are allowed only in `READY_FOR_REVIEW`. After approval the version is frozen by the trigger above.
 - **Name:** `name_source` moves from the brief to `ai` to `user`, and `user` stays: a model's suggestion never replaces a name someone typed.
 
@@ -259,7 +260,7 @@ An alert has no table: whether it is open is read from the latest `campaign.aler
 
 The frontend keeps some state that the server does not enforce.
 
-- **Approval reading:** the approve button stays closed until every language and test version has been opened. This lives only in the page's memory ([ReviewView.vue](../frontend/src/views/ReviewView.vue)), since opening a version is not proof of reading it ([DECISIONS.md](../DECISIONS.md#approval-is-slower-on-purpose)).
+- **Approval reading:** the approve button stays closed until every language and test version has been opened. This lives only in the page's memory ([ReviewView.vue](../frontend/src/views/ReviewView.vue)), since opening a version is not proof of reading it ([DECISIONS.md](../DECISIONS.md#approval-is-slower-on-purpose)). What the server does hold to is that the page approves what it showed: it sends back `review_revision`, a hash of the messages, the audience rule and its date, the brief and the languages left out. A campaign changed since, in another tab or by a colleague, is refused with `409`.
 - **Status rules shown as buttons:** archive, delete and schedule-again are offered for the statuses the backend accepts ([CampaignDetailView.vue](../frontend/src/views/CampaignDetailView.vue)). The backend checks again, so a stale page gets an error, not a wrong change.
 - **Derived row labels:** "Waiting for next run" and "Sending run #n" are read from `SCHEDULED` or `DISPATCHING` plus the schedule ([campaignStatus.ts](../frontend/src/lib/campaignStatus.ts)).
 - **Live updates:** the SSE connection reconnects by itself, and the page says when its numbers may be out of date.
@@ -283,5 +284,13 @@ A review of these machines found four bugs. Each was reproduced against the test
 | Two saves of the messages made from the same page state: the second undid the first without an error | Each save replaces the whole document and nothing checked what it was made to | `content_revision`, and a check under the row lock |
 | Leaving out the only language with messages failed with a database error | The empty document was written as `NULL` | It is written as `{}` |
 | Renaming or tagging a stuck campaign kept it from pausing | The stall clock and the alerts read `updated_at` | They read `status_since`, which only a change of status or a new run moves |
+
+## Found and fixed later
+
+Each fix has its own issue and pull request, and a test that fails without it.
+
+| Issue | Bug | Cause | Fix |
+|---|---|---|---|
+| [#2](https://github.com/negativexq/smart-campaign-composer/issues/2) | Approving froze whatever was stored at that moment. Messages edited in another tab, rewritten or written for a new audience after the review page loaded were approved unseen | The approval request carried nothing about what the page showed | `review_revision`, compared under the row lock; an older one gets `409` |
 
 The `CANCELLED` status is allowed by the constraint and shown by the frontend, but nothing sets it. Cancelling a schedule moves a campaign to one of the statuses above instead.

@@ -128,6 +128,10 @@ type View struct {
 	// ContentRevision names the stored messages as they are now. A save sends back
 	// the one it was made to, so it cannot undo a newer change.
 	ContentRevision string `json:"content_revision,omitempty"`
+	// ReviewRevision names everything an approval freezes: the messages, the audience
+	// rule and the time it was counted at, the brief and the languages left out. The
+	// review page sends back the one it showed, so nobody approves what they did not see.
+	ReviewRevision string `json:"review_revision,omitempty"`
 }
 
 // Service runs campaign operations.
@@ -1097,6 +1101,7 @@ func (s *Service) loadFrom(ctx context.Context, q segment.Querier, id string) (V
 	if stored.Content != (content.Content{}) {
 		view.Content = &stored
 		view.ContentRevision = contentRevision(storedText)
+		view.ReviewRevision = reviewRevision(storedText, encoded, view.AudienceAsOf, view.Brief, view.ExcludedLanguages)
 	}
 	return view, nil
 }
@@ -1106,6 +1111,17 @@ func (s *Service) loadFrom(ctx context.Context, q segment.Querier, id string) (V
 func contentRevision(stored []byte) string {
 	sum := sha256.Sum256(stored)
 	return hex.EncodeToString(sum[:8])
+}
+
+// reviewRevision is a short hash of what an approval freezes. Each part is written
+// with its length first, so two different sets of parts cannot run together.
+func reviewRevision(content, segment []byte, asOf time.Time, brief string, excluded []string) string {
+	hash := sha256.New()
+	for _, part := range [][]byte{content, segment, []byte(asOf.UTC().Format(time.RFC3339Nano)), []byte(brief), []byte(strings.Join(excluded, ","))} {
+		fmt.Fprintf(hash, "%d:", len(part))
+		hash.Write(part)
+	}
+	return hex.EncodeToString(hash.Sum(nil)[:8])
 }
 
 // AudienceSnapshot is the audience as a person approved it.

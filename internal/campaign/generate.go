@@ -69,6 +69,7 @@ var (
 	ErrMissingVariant     = errors.New("a test needs its second version written")
 	ErrMissingLanguage    = errors.New("part of the audience reads a language with no messages")
 	ErrContentChanged     = errors.New("the messages changed since they were read")
+	ErrReviewChanged      = errors.New("the campaign changed since it was reviewed")
 )
 
 // freeToDraft is the SQL condition for a campaign nothing else is generating

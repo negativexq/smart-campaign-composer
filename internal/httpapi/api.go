@@ -629,7 +629,14 @@ func (a *api) sampleRecipients(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) approve(w http.ResponseWriter, r *http.Request) {
-	view, err := a.campaigns.Approve(r.Context(), r.PathValue("id"))
+	var body struct {
+		// Revision is the review_revision the review page showed.
+		Revision string `json:"revision"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	view, err := a.campaigns.ApproveAt(r.Context(), r.PathValue("id"), body.Revision)
 	var invalid *content.ValidationError
 	if errors.As(err, &invalid) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "These messages no longer fit the limits. Edit them before approving.", "issues": invalid.Issues})
@@ -936,6 +943,8 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusConflict, "This test needs its second version. Write the messages again to add it."
 	case errors.Is(err, campaign.ErrMissingLanguage):
 		status, message = http.StatusConflict, "Part of this audience reads a language with no messages yet. Write the messages again to add it."
+	case errors.Is(err, campaign.ErrReviewChanged):
+		status, message = http.StatusConflict, "This campaign changed after you opened the review: its messages, audience or languages. Reload to see what will go out, then approve again."
 	case errors.Is(err, campaign.ErrContentChanged):
 		status, message = http.StatusConflict, "These messages changed after you opened them, in another tab or by a new draft. Reload to see them, then make your change again."
 	case errors.Is(err, campaign.ErrOfferConflict):

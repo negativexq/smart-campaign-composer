@@ -127,6 +127,8 @@ export type Campaign = {
   updated_at: string;
   /** Names the stored messages; a save sends it back so it cannot undo a newer change. */
   content_revision?: string;
+  /** Names what an approval freezes; the review page sends back the one it showed. */
+  review_revision?: string;
 };
 
 export type CampaignSummary = {
@@ -504,8 +506,9 @@ export async function getSampleRecipients(id: string): Promise<SampleRecipient[]
   return (await request<{ recipients: SampleRecipient[] }>(`/api/campaigns/${encodeURIComponent(id)}/sample-recipients`)).recipients;
 }
 
-export function approveCampaign(id: string): Promise<Campaign> {
-  return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/approve`, {});
+/** Approves the campaign as the review page showed it, at revision. */
+export function approveCampaign(id: string, revision?: string): Promise<Campaign> {
+  return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/approve`, revision ? { revision } : {});
 }
 
 export function resumeCampaign(id: string): Promise<Campaign> {

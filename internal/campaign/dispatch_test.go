@@ -1247,3 +1247,68 @@ func TestPagesWatchingACampaignShareOneReadingForHalfASecond(t *testing.T) {
 		t.Fatalf("after half a second: %+v %v %v", state, changing, err)
 	}
 }
+
+// Issue #2: an approval names the review it was given on, so messages rewritten or
+// edited, or languages changed, after the review page loaded are not frozen unseen.
+func TestAnApprovalOfAnOlderReviewIsRefused(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	rewritten := strings.Replace(validContent, "Hi {{first_name}}", "Hey {{first_name}}", 1)
+	h, _, id := newContentHarness(t, step{output: validContent}, step{output: rewritten})
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err != nil {
+		t.Fatal(err)
+	}
+	refused := func(revision, what string) {
+		t.Helper()
+		if _, err := h.service.ApproveAt(ctx, id, revision); !errors.Is(err, campaign.ErrReviewChanged) {
+			t.Fatalf("approval after %s: %v", what, err)
+		}
+		if status := statusOf(t, h, id); status != "READY_FOR_REVIEW" {
+			t.Fatalf("status after the refused approval: %s", status)
+		}
+	}
+	reviewed := func() campaign.View {
+		t.Helper()
+		view, err := h.service.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if view.ReviewRevision == "" {
+			t.Fatal("no review revision")
+		}
+		return view
+	}
+
+	opened := reviewed()
+	edited := opened.Content.Content
+	edited.SMS = "Changed in another tab. Reply STOP to opt out"
+	if _, err := h.service.SaveContent(ctx, id, edited); err != nil {
+		t.Fatal(err)
+	}
+	refused(opened.ReviewRevision, "an edit")
+
+	opened = reviewed()
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err != nil {
+		t.Fatal(err)
+	}
+	refused(opened.ReviewRevision, "a regeneration")
+
+	opened = reviewed()
+	if _, err := h.service.SetExcludedLanguages(ctx, id, []string{"fr"}); err != nil {
+		t.Fatal(err)
+	}
+	refused(opened.ReviewRevision, "a change of languages")
+
+	current := reviewed()
+	approved, err := h.service.ApproveAt(ctx, id, current.ReviewRevision)
+	if err != nil {
+		t.Fatalf("approval of the current review: %v", err)
+	}
+	if approved.Status != "APPROVED" || approved.Content.SMS != current.Content.SMS {
+		t.Fatalf("approved: %s %q", approved.Status, approved.Content.SMS)
+	}
+	// Repeating it, as a retry does, changes nothing even with the older revision.
+	if _, err := h.service.ApproveAt(ctx, id, opened.ReviewRevision); err != nil {
+		t.Fatalf("repeated approval: %v", err)
+	}
+}

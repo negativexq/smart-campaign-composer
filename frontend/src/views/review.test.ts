@@ -14,6 +14,7 @@ const ready: Campaign = {
   name_source: "ai",
   brief: "Reminder",
   status: "READY_FOR_REVIEW",
+  review_revision: "r1",
   channels: ["sms", "email"],
   version: 1,
   proposal: { assumptions: [], unsupported_conditions: [] },
@@ -203,6 +204,19 @@ describe("review", () => {
     expect(called(fetchMock, "POST", "/api/campaigns/c1/dispatch")).toHaveLength(1);
     expect(called(fetchMock, "POST", "/api/campaigns/c1/schedule")).toHaveLength(0);
     expect(currentPath.value).toBe("/campaigns/c1");
+  });
+
+  it("approves the revision it showed and says when the campaign changed since", async () => {
+    const { wrapper, fetchMock } = await open(ready, {
+      "POST /api/campaigns/c1/approve": { status: 409, body: { error: "This campaign changed after you opened the review." } },
+    });
+    await wrapper.find("[data-testid=approve]").trigger("click");
+    await flushPromises();
+    const [[, init]] = called(fetchMock, "POST", "/api/campaigns/c1/approve");
+    expect(JSON.parse(String(init?.body))).toEqual({ revision: "r1" });
+    expect(wrapper.text()).toContain("This campaign changed after you opened the review.");
+    expect(called(fetchMock, "POST", "/api/campaigns/c1/dispatch")).toHaveLength(0);
+    expect(currentPath.value).not.toBe("/campaigns/c1");
   });
 
   it("does not send when a schedule is chosen", async () => {
