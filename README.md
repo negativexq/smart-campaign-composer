@@ -10,9 +10,9 @@ To run it yourself, follow [Install from scratch](#install-from-scratch). It nee
 
 ## Demo video
 
-https://github.com/user-attachments/assets/f4526dd4-2bdd-44ba-b3f0-b46f961950ae
+https://github.com/user-attachments/assets/b764606d-e77b-471d-9ab7-775d9a6d0f0f
 
-The 2:40 video is also in the repository as [docs/media/demo-claude.mp4](docs/media/demo-claude.mp4). It is one recorded run with Claude Haiku 5.5, sped up only while the model writes. An English brief asks to remind customers in İzmir who added to their cart in the last 14 days and did not buy, with 15% off and a link. The video shows the audience it found, the SMS and email written in each customer's language, the Cart Reminder template, approval, the send of 165 messages and the email in the mock provider's test inbox.
+The 2:42 video is also in the repository as [docs/media/demo-claude.mp4](docs/media/demo-claude.mp4). It is one recorded run with Claude Haiku 5.5, sped up only while the model writes. An English brief asks to remind customers in İzmir who added to their cart in the last 14 days and did not buy, with 15% off and a link. The video shows the audience it found, the SMS and email written in each customer's language, the Cart Reminder template, approval, the send of 165 messages and the email in the mock provider's test inbox.
 
 ## Product tour
 
