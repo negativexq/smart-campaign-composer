@@ -12,9 +12,20 @@ Three load scenarios were added and run once each ([2026-11-06-2212-load](result
 - **The worker stopped as a deploy does, then the API restarted** (`graceful-restart`). On SIGTERM the worker exited by itself with code 0 in 0.4 s, well inside its 30 s grace period, and left no message mid-send. The send took 89 s.
 - **3% of calls answered after 3 to 8 s** (`slow-3pct`). The worker stops waiting at 5 s, so 287 calls timed out while the provider still accepted them. Each was retried with its key, and the provider answered all 287 retries as duplicates, so every message was accepted once. The send took 112 s.
 
-### Changed, not yet measured against a clock step
+### Fixed: a forward step of Redis's clock up to 100 ms
 
-- **The limiter's window is 1.1 s again, for forward steps of Redis's clock.** A call now counts until 1.1 s after its answer instead of 1 s. A step of up to 100 ms, such as the 70.7 ms one measured on 2026-11-06, should then let nothing in early; a larger step only the calls of the part beyond 100 ms. No step happened during the runs below, so this is reasoned, not measured: a run that steps the clock on purpose would show it. A unit test checks that a call still counts a second after its answer and is free 1.2 s after it.
+- **The limiter's window is 1.1 s again, for forward steps of Redis's clock.** A call now counts until 1.1 s after its answer instead of 1 s. A unit test checks that a call still counts a second after its answer and is free 1.2 s after it.
+
+  Measured by stepping the clock on purpose ([2026-11-07-0001-load](results/2026-11-07-0001-load.md)). `tests/verify/clockstep` moved the Docker VM's wall clock forward, which every container shares, Redis's included, five times 10 s apart during a send:
+
+  | Step | Peak email / sms | Refused by the provider's limit | Send time |
+  |---|---|---|---|
+  | +70 ms, 5 times | 100 / 100 | 0 | 96.0 s |
+  | +100 ms, 5 times | 100 / 100 | 0 | 97.0 s |
+  | +150 ms, 5 times | 104 / 103 | 9 | 99.3 s |
+  | +500 ms, 5 times | 110 / 117 | 37 | 99.1 s |
+
+  Steps within the 100 ms margin let nothing in early. Larger steps did, by a few calls for one second each, fewer than the part of the step beyond the margin would allow at the full rate. The provider refused those calls with 429s, and in all four runs every message was accepted once. The 70 ms and 100 ms runs are now in the suite and fail if a channel goes over 100; the 150 ms and 500 ms runs report their peak without failing.
 
   It costs about 9% of the rate. Five scenarios rerun with the 1.1 s window ([2026-11-06-2233-load](results/2026-11-06-2233-load.md)) all passed at 100 calls a second or below:
 
@@ -64,7 +75,7 @@ A full run of all 18 scenarios with the 1.1 s window and the provider's limit on
 
 ### Behaviour worth knowing, not a bug
 
-- **A forward step of Redis's clock lets a channel go over 100 calls a second.** Narrowed on 2026-11-07 by a 1.1 s window, see above. What follows was measured with the 1 s window. The full load run failed one scenario: email reached 102 calls in one second at the provider. Rerunning the Redis scenarios three times gave 109 and 107 in a plain run, 15 s before Redis was touched, on both channels at the same moment. The worker's own record showed 100 each time.
+- **A forward step of Redis's clock lets a channel go over 100 calls a second.** Fixed on 2026-11-07 for steps up to 100 ms by a 1.1 s window, see above. What follows was measured with the 1 s window. The full load run failed one scenario: email reached 102 calls in one second at the provider. Rerunning the Redis scenarios three times gave 109 and 107 in a plain run, 15 s before Redis was touched, on both channels at the same moment. The worker's own record showed 100 each time.
 
   The limiter counts the last second by Redis's wall clock (`TIME`). Docker Desktop corrects the VM's clock against the Mac's from time to time. A watcher in the VM compared the wall clock with the monotonic clock every 10 ms during eight healthy runs. It saw one step, 70.7 ms forward at 21:04:39.75 UTC. The one run that went over, to 119 on both channels, had its busiest second end at 21:04:40.47, the window containing that step. The other seven runs stayed at 100. A step forward makes the calls of the last moments look older than they are, so the window lets new calls in early. Permits go out in batches, so more calls can fall in those 70 ms than an even rate would put there. A real server stepping its clock would do the same.
 

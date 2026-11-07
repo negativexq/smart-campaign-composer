@@ -4,7 +4,7 @@ These suites check the system as a whole, beyond `make test`. Run them before a 
 
 | Suite | What it checks | Needs | Time |
 |---|---|---|---|
-| `load` | Performance, retries and idempotency. It sends a full campaign of about 15,400 messages under provider faults (429s, 5xx, lost answers, slow answers that outlast the worker's wait, an outage, refused credentials), a crashed worker, a worker stopped as a deploy does, PostgreSQL killed for 20 s, lost Redis data, two workers, and workers set above the provider's limit. The mock provider enforces 100 calls a second per channel itself, as a real one does, and refuses calls over it with a 429; outside the over-limit scenario any such refusal fails the run. In every scenario: each message ends in a final state, none is accepted twice, the provider counts each sent message once, no channel goes over 100 calls a second, and the expected alerts, pauses and resumes appear. | The verification stack | About 80 minutes for all 18 scenarios |
+| `load` | Performance, retries and idempotency. It sends a full campaign of about 15,400 messages under provider faults (429s, 5xx, lost answers, slow answers that outlast the worker's wait, an outage, refused credentials), a crashed worker, a worker stopped as a deploy does, PostgreSQL killed for 20 s, lost Redis data, two workers, the wall clock stepped forward, and workers set above the provider's limit. The mock provider enforces 100 calls a second per channel itself, as a real one does, and refuses calls over it with a 429; outside the over-limit scenario any such refusal fails the run. In every scenario: each message ends in a final state, none is accepted twice, the provider counts each sent message once, no channel goes over 100 calls a second, and the expected alerts, pauses and resumes appear. | The verification stack | About 90 minutes for all 22 scenarios |
 | `security` | 19 probes from outside: sessions on every route, webhook signatures and replay, unsubscribe link tampering, hostile uploads, SQL and markup in every field, CSV formulas, oversized bodies, nginx paths, logs and error answers. Known open items are recorded, not failed. | The verification stack | About 3 minutes |
 | `mutation` | Whether the tests catch broken code. Each case first runs the tests written for that code on the clean source, where they must run and pass. Then it puts one deliberate fault into the source, expects those tests to fail, and restores the file. | `make test-env-up` and the frontend's `node_modules` | About 2 minutes |
 
@@ -16,9 +16,11 @@ Every scenario sends the same campaign, 8,198 emails and 7,213 SMS on the defaul
 - **No message is accepted twice.** No delivery has two accepted attempts, and the provider accepted exactly as many messages as the campaign counts as sent, or fewer across a provider restart, never more.
 - **No channel goes over 100 calls a second.** No one-second span holds more than 100 requests at the provider. This counts what the workers sent, not what the provider let through: its own 429 only keeps extra messages from being accepted. Across provider restarts, the counters from before each stop are kept and checked too.
 - **The provider refuses nothing for its limit.** Outside `workers-at-120`, a single call refused for the limit fails the run.
+
+The two clock scenarios beyond the margin are the exception to the last two checks: they measure how far a channel goes over.
 - **The scenario faced its event.** A campaign that finishes before its event, or an event that fails, fails the run.
 
-What each scenario does and what it adds to those checks. Times are from the full run of 2026-11-06 22:54 UTC ([results](results/2026-11-06-2254-load.md)).
+What each scenario does and what it adds to those checks. Times are from the full run of 2026-11-06 22:54 UTC ([results](results/2026-11-06-2254-load.md)), and for the clock scenarios from [2026-11-07 00:01 UTC](results/2026-11-07-0001-load.md).
 
 | Scenario | What happens | What it measures | Time |
 |---|---|---|---|
@@ -39,6 +41,8 @@ What each scenario does and what it adds to those checks. Times are from the ful
 | `redis-flushed-10x` | Redis is flushed 10 times, 2 s apart, from 20 s. | The same hold, again and again. | 128 s |
 | `redis-flushed-10x-2workers` | The same with two workers. | The hold holds across workers. | 128 s |
 | `sms401-redis-lost` | SMS credentials refused, Redis lost at 60 s, the provider fixed at 150 s. | The credential lock is lost with Redis and set again, and the limit holds. | 277 s |
+| `clock-forward-70ms`, `clock-forward-100ms` | The wall clock of Docker's VM, which Redis reads, is stepped forward by 70 or 100 ms five times, 10 s apart, from 20 s. | Steps within the limiter's 100 ms margin let nothing in early. | 96 s, 97 s |
+| `clock-forward-150ms`, `clock-forward-500ms` | The same with steps of 150 and 500 ms. | How far a step beyond the margin goes over. The peak is reported, not failed: 104 and 117 in the first run. | 99 s each |
 | `workers-at-120` | The workers' limit is set to 120, above the provider's. | The provider's own limit as the last check: it must refuse some calls, and every message must still be accepted once. Calls over 100 a second are expected here. | 98 s |
 
 ## Running
@@ -72,6 +76,8 @@ To run some load scenarios only, name them:
 ```bash
 VERIFY_ONLY=healthy,5xx70-then-ok make verify-load
 ```
+
+The clock scenarios step the wall clock of Docker's VM with a privileged container. On Docker Desktop every container shares that clock, so a demo stack running at the same time sees the steps too. Docker Desktop sets the clock back later on its own.
 
 `make verify-mutation` changes source files while it runs and puts each one back afterwards, including on Ctrl-C. Don't edit the code while it runs. If a run is killed hard, the next run refuses to start until the file is restored, and `git diff` shows which one.
 

@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -113,6 +115,10 @@ type scenario struct {
 	// limit is what holds: it must refuse some calls, and every message must still be
 	// sent once. Calls over 100 a second at the provider are then expected.
 	overLimit bool
+	// beyondMargin marks a scenario that steps Redis's clock by more than the
+	// limiter's 100 ms margin. Going over 100 a second is then measured and
+	// reported, not failed: the docs say such a step can let calls in early.
+	beyondMargin bool
 	// wantLate needs slow calls that outlasted the worker's wait, or the scenario
 	// tested nothing.
 	wantLate bool
@@ -147,6 +153,10 @@ func scenarios() []scenario {
 			wantEvents: []string{"campaign.alert_opened sms credentials_refused", "campaign.alert_closed sms credentials_refused"},
 		},
 		{name: "workers-at-120", faults: with("RATE_LIMIT_PER_SECOND", "120"), overLimit: true},
+		{name: "clock-forward-70ms", faults: healthy(), event: stepClock(70 * time.Millisecond)},
+		{name: "clock-forward-100ms", faults: healthy(), event: stepClock(100 * time.Millisecond)},
+		{name: "clock-forward-150ms", faults: healthy(), event: stepClock(150 * time.Millisecond), beyondMargin: true},
+		{name: "clock-forward-500ms", faults: healthy(), event: stepClock(500 * time.Millisecond), beyondMargin: true},
 		{name: "postgres-down-20s", faults: healthy(), event: postgresDown(25*time.Second, 20*time.Second)},
 		{name: "graceful-restart", faults: healthy(), event: restartGracefully(20 * time.Second)},
 		{
@@ -299,14 +309,14 @@ func check(s scenario, res result) []string {
 	switch {
 	case s.overLimit && throttled == 0:
 		add("the workers sent over the provider's limit, but it refused nothing")
-	case !s.overLimit && throttled > 0:
+	case !s.overLimit && !s.beyondMargin && throttled > 0:
 		add("the provider refused %d calls for going over its limit", throttled)
 	}
 	if s.wantLate && late(res) == 0 {
 		add("no slow call outlasted the worker's wait")
 	}
 	for channel, statuses := range res.Final {
-		if peak[channel].calls > rateLimit && !s.overLimit {
+		if peak[channel].calls > rateLimit && !s.overLimit && !s.beyondMargin {
 			add("%s reached %d calls in one second at the provider, over %d, %s into the run", channel, peak[channel].calls, rateLimit, peak[channel].into(res.Started))
 		}
 		// Each message the campaign counts as sent was accepted by the provider once.
@@ -535,6 +545,47 @@ func restartGracefully(offset time.Duration) event {
 			return fmt.Errorf("the worker exited with %s instead of stopping by itself", code)
 		case midSend != "0":
 			return fmt.Errorf("the worker stopped with %s messages mid-send", midSend)
+		}
+		return nil
+	}
+}
+
+// stepClock moves the wall clock of Docker's VM forward by the given amount five
+// times, 10 s apart from 20 s, as a time service that steps instead of slewing
+// would. Every container shares that clock, Redis's included. Each step is made by
+// tests/verify/clockstep in a privileged container on the stack's Redis image.
+func stepClock(by time.Duration) event {
+	return func(ctx context.Context, r *run) error {
+		arch, err := stack.DockerErr("version", "-f", "{{.Server.Arch}}")
+		if err != nil {
+			return err
+		}
+		dir, err := os.MkdirTemp("", "clockstep")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(dir)
+		build := exec.Command("go", "build", "-o", filepath.Join(dir, "clockstep"), "./tests/verify/clockstep")
+		build.Dir = stack.Root()
+		build.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+arch, "CGO_ENABLED=0")
+		if out, err := build.CombinedOutput(); err != nil {
+			return fmt.Errorf("build clockstep: %v: %s", err, out)
+		}
+		image, err := stack.DockerErr("inspect", "-f", "{{.Config.Image}}", stack.Container("redis"))
+		if err != nil {
+			return err
+		}
+		var steps []string
+		defer func() { r.note("clock_steps", steps) }()
+		for i := range 5 {
+			if err := r.sleepUntil(ctx, 20*time.Second+time.Duration(i)*10*time.Second); err != nil {
+				return err
+			}
+			moved, err := stack.DockerErr("run", "--rm", "--privileged", "-v", dir+":/tool:ro", image, "/tool/clockstep", by.String())
+			if err != nil {
+				return err
+			}
+			steps = append(steps, fmt.Sprintf("%s at %.1f s", moved, r.at()))
 		}
 		return nil
 	}

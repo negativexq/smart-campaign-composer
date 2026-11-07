@@ -121,9 +121,16 @@ The window is 1.1 s for this. A forward step of up to 100 ms still leaves each c
 - Of about 26 measured sends, three went over 100: 102, 109 and 119 calls in one second. The 119 fell in the second that held the 70.7 ms step. The other two were not watched, but looked the same: both channels went over at the same moment while the worker's own record showed 100.
 - Every other second of those sends stayed at or below 100.
 
-The 70.7 ms step is inside the margin. Steps above 100 ms were not seen and have not been measured against the 1.1 s window.
+The 70.7 ms step is inside the margin. With the 1.1 s window, the verification suite stepped the clock on purpose, five times during a send ([2026-11-07-0001-load](../tests/verify/results/2026-11-07-0001-load.md)):
 
-**How small an overrun is.** The extra calls are the ones granted within the part of the step beyond the margin, and they spread over one second only. The window then counts them like any other call, so the second after is back within the limit. The largest measured with the 1 s window was 19 extra calls, once. When the provider counts more than its limit, it answers 429 to the extra calls. The worker retries those, and a retry counts against the limit like any other call. No message is lost and none is sent twice, because each call carries its idempotency key. The verification suite checks this on purpose: its mock provider enforces 100 a second per channel itself, and one scenario sets the workers' limit to 120. The provider refused 1,060 calls in that send, and every message was still accepted once, in 98 s ([2026-11-06-2254-load](../tests/verify/results/2026-11-06-2254-load.md)).
+| Step | Most calls in one second at the provider, email / SMS |
+|---|---|
+| +70 ms | 100 / 100 |
+| +100 ms | 100 / 100 |
+| +150 ms | 104 / 103 |
+| +500 ms | 110 / 117 |
+
+**How small an overrun is.** The extra calls are the ones granted within the part of the step beyond the margin, and they spread over one second only. The window then counts them like any other call, so the second after is back within the limit. The largest measured was 19 extra calls, once, after a 70.7 ms step with the 1 s window; with the 1.1 s window, 17 after a 500 ms step. When the provider counts more than its limit, it answers 429 to the extra calls. The worker retries those, and a retry counts against the limit like any other call. No message is lost and none is sent twice, because each call carries its idempotency key. The verification suite checks this on purpose: its mock provider enforces 100 a second per channel itself, and one scenario sets the workers' limit to 120. The provider refused 1,060 calls in that send, and every message was still accepted once, in 98 s ([2026-11-06-2254-load](../tests/verify/results/2026-11-06-2254-load.md)).
 
 The provider's 429 only keeps extra messages from being accepted. It does not show that the workers kept to the limit. That is shown by counting every request that reaches the provider, refused ones included, and in every other scenario of the suite that count stayed at or below 100 in any second, with no call refused for the limit.
 
