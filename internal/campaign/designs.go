@@ -109,21 +109,28 @@ func (s *Service) SaveEmailDesign(ctx context.Context, id string, design content
 	if problem := design.Check(); problem != "" {
 		return SavedDesign{}, &DesignError{problem}
 	}
-	if err := s.checkAssetsExist(ctx, design.AssetIDs()); err != nil {
-		return SavedDesign{}, err
-	}
 	spec, err := json.Marshal(design)
 	if err != nil {
 		return SavedDesign{}, fmt.Errorf("encode design: %w", err)
 	}
-	if id == "" {
-		err = s.db.QueryRow(ctx, `INSERT INTO email_designs (name, spec, created_by) VALUES ($1, $2, $3) RETURNING id::text`,
-			design.Name, spec, personFrom(ctx)).Scan(&id)
-	} else {
-		if _, err = s.emailDesign(ctx, id); err != nil {
+	if id != "" {
+		if _, err := s.emailDesign(ctx, id); err != nil {
 			return SavedDesign{}, err
 		}
-		_, err = s.db.Exec(ctx, `UPDATE email_designs SET name = $2, spec = $3, updated_at = now() WHERE id = $1`, id, design.Name, spec)
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return SavedDesign{}, fmt.Errorf("begin save design: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+	if err := lockAssets(ctx, tx, design.AssetIDs()); err != nil {
+		return SavedDesign{}, err
+	}
+	if id == "" {
+		err = tx.QueryRow(ctx, `INSERT INTO email_designs (name, spec, created_by) VALUES ($1, $2, $3) RETURNING id::text`,
+			design.Name, spec, personFrom(ctx)).Scan(&id)
+	} else {
+		_, err = tx.Exec(ctx, `UPDATE email_designs SET name = $2, spec = $3, updated_at = now() WHERE id = $1`, id, design.Name, spec)
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -131,6 +138,9 @@ func (s *Service) SaveEmailDesign(ctx context.Context, id string, design content
 	}
 	if err != nil {
 		return SavedDesign{}, fmt.Errorf("save design: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return SavedDesign{}, fmt.Errorf("commit design: %w", err)
 	}
 	return s.emailDesign(ctx, id)
 }
