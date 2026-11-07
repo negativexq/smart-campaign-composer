@@ -80,7 +80,7 @@ func TestABusyUploadIsAnsweredWith503AndRetryAfter(t *testing.T) {
 		t.Fatal(err)
 	}
 	part.Write([]byte("\x89PNG not drawn, since it never gets a turn")) //nolint:errcheck // in memory
-	form.Close()                                                       //nolint:errcheck // in memory
+	form.Close()                                                        //nolint:errcheck // in memory
 	request := httptest.NewRequest(http.MethodPost, "/api/assets", &body)
 	request.Header.Set("Content-Type", form.FormDataContentType())
 	recorder := httptest.NewRecorder()
