@@ -187,6 +187,7 @@ sequenceDiagram
     W->>R: Settle: return unused permits, count the rest as in flight
     par For each claimed message
         W->>W: Consent is still given? Otherwise SKIPPED
+        W->>D: With a "not messaged recently" rule, under the person's lock:<br/>another send reached them? SKIPPED. One is being sent? RETRYING
         W->>W: Render the message for this person's language and version
         W->>P: POST /v1/messages with Idempotency-Key
         P-->>W: Response, or no answer

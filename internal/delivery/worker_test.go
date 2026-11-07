@@ -70,6 +70,9 @@ type fakeLimiter struct {
 	locks      map[string]int64
 	probeDue   map[string]bool
 	generation int64
+	// onSettle, when set, runs as a round settles, after its claim has committed and
+	// before its messages are handled.
+	onSettle func(channel string, used int)
 }
 
 func (f *fakeLimiter) LockCredentials(_ context.Context, channel string) (bool, error) {
@@ -167,6 +170,9 @@ func (f *fakeLimiter) Reserve(_ context.Context, channel string, want int) (deli
 func (f *fakeLimiter) Answered(string, delivery.Permits, time.Time) {}
 
 func (f *fakeLimiter) Settle(_ context.Context, channel string, permits delivery.Permits, used int, _ time.Duration) (int, error) {
+	if f.onSettle != nil {
+		f.onSettle(channel, used)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.settleErr != nil {
@@ -208,6 +214,17 @@ func newRigFor(t *testing.T, chosen campaign.NewCampaign, respond func(int, deli
 	mock.StreamDelay = 0
 	service := campaign.NewService(pool, mock, metrics, noop.NewTracerProvider().Tracer("test"), time.Now)
 
+	id := dispatched(t, service, chosen)
+
+	r := &rig{pool: pool, service: service, id: id, sender: &fakeSender{respond: respond}, limiter: &fakeLimiter{}, metrics: metrics, maxTries: 3}
+	r.worker = r.newWorker()
+	return r
+}
+
+// dispatched creates a campaign and takes it through to sending.
+func dispatched(t *testing.T, service *campaign.Service, chosen campaign.NewCampaign) string {
+	t.Helper()
+	ctx := context.Background()
 	id, err := service.CreateWith(ctx, chosen)
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -230,10 +247,7 @@ func newRigFor(t *testing.T, chosen campaign.NewCampaign, respond func(int, deli
 	if _, err := service.Dispatch(ctx, id); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
-
-	r := &rig{pool: pool, service: service, id: id, sender: &fakeSender{respond: respond}, limiter: &fakeLimiter{}, metrics: metrics, maxTries: 3}
-	r.worker = r.newWorker()
-	return r
+	return id
 }
 
 func (r *rig) newWorker() *delivery.Worker {
