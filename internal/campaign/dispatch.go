@@ -295,13 +295,15 @@ func testShare(abTest bool, percent int) int {
 	return 0
 }
 
-// openRun starts the next send of a campaign, whose row the caller holds locked.
-func openRun(ctx context.Context, tx pgx.Tx, id string, startedAt time.Time) (string, error) {
+// openRun starts the next send of a campaign, whose row the caller holds locked. It
+// keeps the run's "not messaged recently" rule, if any, and asOf, the time queuing
+// counts messages up to, so the worker knows which other runs may have sent since.
+func openRun(ctx context.Context, tx pgx.Tx, id string, startedAt time.Time, ruleDays *int, asOf time.Time) (string, error) {
 	var runID string
 	err := tx.QueryRow(ctx, `
-		INSERT INTO campaign_runs (campaign_id, number, started_at)
-		SELECT $1, COALESCE(max(number), 0) + 1, $2 FROM campaign_runs WHERE campaign_id = $1
-		RETURNING id::text`, id, startedAt).Scan(&runID)
+		INSERT INTO campaign_runs (campaign_id, number, started_at, rule_days, rule_as_of)
+		SELECT $1, COALESCE(max(number), 0) + 1, $2, $3, $4 FROM campaign_runs WHERE campaign_id = $1
+		RETURNING id::text`, id, startedAt, ruleDays, asOf).Scan(&runID)
 	if err != nil {
 		return "", fmt.Errorf("open run: %w", err)
 	}
@@ -310,7 +312,7 @@ func openRun(ctx context.Context, tx pgx.Tx, id string, startedAt time.Time) (st
 
 // queueRun opens a run and queues its deliveries.
 func queueRun(ctx context.Context, tx pgx.Tx, id string, startedAt time.Time, rule schedule.Spec, version int, channels []string, variantAPercent int, spec segment.Spec, kept bool, asOf time.Time, parent string) (queued, skipped int, err error) {
-	runID, err := openRun(ctx, tx, id, startedAt)
+	runID, err := openRun(ctx, tx, id, startedAt, spec.NotMessagedWithinDays, asOf)
 	if err != nil {
 		return 0, 0, err
 	}
