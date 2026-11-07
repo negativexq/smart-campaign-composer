@@ -71,7 +71,7 @@ make verify-down
 
 The verification stack runs under its own compose project (`scc-verify`), image and ports (API 18081, provider 18083, web 18080), so it can run next to the demo stack. `verify-down` removes only its own containers and volumes. It seeds 116,000 users (set `VERIFY_USERS` to change that) and always uses the mock model, so a run costs nothing whatever `.env` holds.
 
-`make verify-load` also runs `TestTheChecks`, which needs no stack: it feeds the load checks a bad result for each rule and expects each one to be reported.
+`make verify-load` also runs `TestTheChecks`, which needs no stack: it feeds the load checks a bad result for each rule and expects each one to be reported. Every run also compares how many messages each channel ended with against the audience the review counted, so a message lost before it was queued is reported.
 
 To run some load scenarios only, name them:
 
