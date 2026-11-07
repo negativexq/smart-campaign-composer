@@ -62,6 +62,16 @@ func Designs() []content.Design {
 			},
 		},
 		{
+			Name: "Cart Reminder", Accent: "#E8590C", Page: "#FFF7F0", Button: "pill", Corners: 16, Font: "sans", Footer: footer,
+			Blocks: []content.Block{
+				logo(alignCenter, 30),
+				picture("cart-reminder.png", "A shopping cart with items waiting in it"),
+				slot(content.SlotHeadline, blockHeading, alignCenter, styleDisplay),
+				slot(content.SlotBody, blockText, alignLeft, ""),
+				slot(content.SlotCTA, blockButton, alignCenter, ""),
+			},
+		},
+		{
 			Name: "New Arrival", Accent: "#111827", Page: "#F4EFE6", Button: "square", Corners: 0, Font: "sans", Footer: footer,
 			Blocks: []content.Block{
 				picture("new-arrival.png", "Bold geometric shapes in black, orange, teal and yellow"),

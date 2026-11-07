@@ -20,9 +20,9 @@ Every screenshot below is a real run: an OpenAI model wrote the audiences and me
 
 ### 1. Set up how your email looks
 
-A new installation opens with seven ready templates, their images and an example brand kit. You can use them as they are, change them or delete them.
+A new installation opens with eight ready templates, their images and an example brand kit. You can use them as they are, change them or delete them.
 
-![Templates page: seven ready templates with their images, each with its version and how many campaigns use it](docs/screenshots/templates.png)
+![Templates page: eight ready templates with their images, each with its version and how many campaigns use it](docs/screenshots/templates.png)
 
 Templates are built from blocks in a three-panel editor: logo, image, heading, text, button and divider, with a live preview the backend draws for computer and phone. Select a block to change it. The AI fills the headline, message and button for each campaign; layout, images and links stay as you set them. A template stores no markup, so it cannot add a script or remove the unsubscribe link.
 
@@ -130,7 +130,7 @@ The command returns when every service is ready. The first run downloads the bas
 On first start, setup applies migrations and loads:
 
 - 6,000 fake customers reading Turkish, English, German, French or Spanish, with event times relative to that moment
-- seven ready email templates with their images, and an example brand kit. They are ordinary templates you can edit or delete, and a deleted one stays deleted.
+- eight ready email templates with their images, and an example brand kit. They are ordinary templates you can edit or delete, and a deleted one stays deleted.
 
 ### 4. Check that it runs
 

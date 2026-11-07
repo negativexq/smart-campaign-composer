@@ -478,7 +478,7 @@ We left the rest out for now. The API binary is 78 MB and the worker 51 MB, and 
 
 ## Starter templates load once and never overwrite
 
-Setup adds seven templates, their images and an example brand kit, so a new installation can show the Template Studio without anyone uploading first. The images are embedded in the setup binary and go through the same processing and store as an upload.
+Setup adds eight templates, their images and an example brand kit, so a new installation can show the Template Studio without anyone uploading first. The images are embedded in the setup binary and go through the same processing and store as an upload.
 
 A row in `starter_content` records that this happened. Without it, every restart would either bring back a template someone deleted or need to tell "deleted" from "never added". A template with the same name or an existing brand kit is kept as it is, which also makes the load safe on an installation that already has its own.
 
