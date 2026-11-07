@@ -896,7 +896,7 @@ func (s *Service) saveProposal(ctx context.Context, id, brief string, briefChang
 	// name follows the brief it came from. Content was written for the previous
 	// audience, so the campaign goes back to a draft without any.
 	result, err := tx.Exec(ctx, `
-		UPDATE campaigns SET brief = $2, status = 'DRAFT', updated_at = now(),
+		UPDATE campaigns SET brief = $2, status = 'DRAFT', generation_claim = NULL, updated_at = now(),
 			name = CASE WHEN name_source = 'user' THEN name
 			            WHEN $3::text <> '' THEN $3::text
 			            WHEN name_source = 'brief' THEN $4::text

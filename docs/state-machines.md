@@ -21,7 +21,7 @@ Several parts of the system move through fixed states, but only a few of them ha
 | Machine | Where its state lives | Moved by |
 |---|---|---|
 | [Campaign](#campaign) | `campaigns.status`, `status_since` | API requests, the scheduler, the worker |
-| [Writing claim](#writing-claim) | `campaigns.status = 'GENERATING'` and `updated_at` | `POST /generate` |
+| [Writing claim](#writing-claim) | `campaigns.status = 'GENERATING'`, `generation_claim` and `updated_at` | `POST /generate` |
 | [Messages document](#messages-document) | `campaign_versions.content`, `ContentRevision` | Generation, edits, language choices |
 | [Delivery](#delivery) | `campaign_deliveries.status`, `claim_token`, `lease_expires_at`, `attempts` | The worker |
 | [Run](#run) | `campaign_runs.finished_at` and its counts | Sending, the worker |
@@ -113,13 +113,15 @@ Kept by the code under the row lock:
 
 `GENERATING` is also a lock held by one model run.
 
-- **Taking it:** `StartGeneration` locks the campaign row, reads the campaign and takes the claim with a guarded `UPDATE`, all in one transaction. The generation works from that copy until it saves, so it must be the state it claimed: a copy read before the lock would let a new audience, a change of languages or an edit that committed in between be saved over.
-- **Keeping it:** while writing, `stillRunning` touches `updated_at` before each version.
+- **Taking it:** `StartGeneration` locks the campaign row, reads the campaign and takes the claim with a guarded `UPDATE`, all in one transaction. The claim gets a new token in `generation_claim`, and the run keeps it. The generation works from that copy until it saves, so it must be the state it claimed: a copy read before the lock would let a new audience, a change of languages or an edit that committed in between be saved over.
+- **Keeping it:** while writing, `stillRunning` touches `updated_at` before each version, only while its token is the campaign's.
 - **Taking it over:** a claim untouched for five minutes counts as left by a dead process, and `freeToDraft` lets a new request take it.
-- **Releasing it:** the claim ends when `save` or `recordFailure` moves the status on, both guarded by `status = 'GENERATING'`.
+- **Releasing it:** the claim ends when `save` or `recordFailure` moves the status on and clears the token. Both write only while the run's token is the campaign's, so a run whose claim was taken over saves nothing, releases nothing and reports no failure. A new audience on an abandoned claim clears the token too.
 - **Stopping:** stopping cancels the model calls and is not recorded as a failure.
 
-Known limit: the claim stores no owner. One version can take at most 3 attempts of 90 seconds, which leaves 30 seconds of margin under the five minutes. If a run still went past that, a second run could take over while the first is alive. Whichever saves first would win. The other's `save` would then find the status moved and drop its output, and its `recordFailure` could release the newer run's claim. A rename while writing also moves `updated_at` and so delays a takeover.
+A database constraint holds the token to the status: `generation_claim` is set exactly while the status is `GENERATING`.
+
+One version can take at most 3 attempts of 90 seconds, which leaves 30 seconds of margin under the five minutes, so a takeover of a live run needs one stalled for minutes. If it happens, the run that took over owns the result, and the older run's output is dropped. A rename while writing also moves `updated_at` and so delays a takeover.
 
 ## Messages document
 
@@ -295,5 +297,6 @@ Each fix has its own issue and pull request, and a test that fails without it.
 | [#3](https://github.com/negativexq/smart-campaign-composer/issues/3) | A regeneration undid an edit made just before it started, and messages written for a replaced audience were saved as ready for review. A campaign deleted at that moment started generating and called the model | `StartGeneration` read the campaign, then claimed it in a separate statement, and worked from the earlier copy | Lock, read and claim in one transaction |
 | [#4](https://github.com/negativexq/smart-campaign-composer/issues/4) | An archived campaign could start writing messages, which archiving itself refuses, and could take edits and a new audience out of sight | Only sending, scheduling, approving and languages checked for an archived campaign | Generation, audience proposals and edits refuse it under the row lock, including when it is archived while the model answers |
 | [#9](https://github.com/negativexq/smart-campaign-composer/issues/9) | A direct API call with no revision still approved what was stored, as before #2 | The revision was optional, so older callers kept working | The revision is required; there is no approval without one |
+| [#10](https://github.com/negativexq/smart-campaign-composer/issues/10) | A run still alive after its claim was taken over could save over the newer run, release its claim on failure so a third could start, and keep it alive | The claim stored no owner; its writes checked only `status = 'GENERATING'` | A token per claim, required by every write the run makes, and a constraint tying it to the status |
 
 The `CANCELLED` status is allowed by the constraint and shown by the frontend, but nothing sets it. Cancelling a schedule moves a campaign to one of the statuses above instead.
