@@ -110,15 +110,17 @@ func (s *Service) CancelSchedule(ctx context.Context, id string) (View, error) {
 	if status != statusScheduled && status != statusDispatching && status != statusPaused {
 		return View{}, ErrNoSchedule
 	}
-	var pending, sentBefore bool
-	err = tx.QueryRow(ctx, `
-		SELECT next_run_at IS NOT NULL, EXISTS (SELECT 1 FROM campaign_runs r WHERE r.campaign_id = $1)
-		FROM campaign_schedules WHERE campaign_id = $1`, id).Scan(&pending, &sentBefore)
+	var pending bool
+	err = tx.QueryRow(ctx, `SELECT next_run_at IS NOT NULL FROM campaign_schedules WHERE campaign_id = $1`, id).Scan(&pending)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !pending) {
 		return View{}, ErrNoSchedule
 	}
 	if err != nil {
 		return View{}, fmt.Errorf("read schedule: %w", err)
+	}
+	sentBefore, err := hasSent(ctx, tx, id)
+	if err != nil {
+		return View{}, err
 	}
 	next := statusDispatching // the worker closes it once its deliveries are done
 	if status == statusPaused {
@@ -143,6 +145,17 @@ func (s *Service) CancelSchedule(ctx context.Context, id string) (View, error) {
 		return View{}, fmt.Errorf("commit cancel: %w", err)
 	}
 	return s.Get(ctx, id)
+}
+
+// hasSent says whether any run of the campaign went out, whether a schedule or "send
+// now" started it. A schedule's own count of runs misses the second kind, so a
+// campaign sent at once and then scheduled would read as never sent.
+func hasSent(ctx context.Context, tx pgx.Tx, id string) (bool, error) {
+	var sent bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM campaign_runs WHERE campaign_id = $1)`, id).Scan(&sent); err != nil {
+		return false, fmt.Errorf("read runs: %w", err)
+	}
+	return sent, nil
 }
 
 func (s *Service) loadSchedule(ctx context.Context, q segment.Querier, id string) (*ScheduleView, error) {
@@ -288,7 +301,8 @@ func (s *Scheduler) runOne(ctx context.Context) (bool, error) {
 	if queued > 0 || nextRun == nil {
 		status = statusDispatching
 	}
-	if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1`, id, status); err != nil {
+	// A new run starts the stall clock again even when the campaign is still sending.
+	if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, status_since = now(), updated_at = now() WHERE id = $1`, id, status); err != nil {
 		return false, fmt.Errorf("start run: %w", err)
 	}
 	if err := recordAudit(ctx, tx, id, eventRun, map[string]any{"scheduled_for": scheduledFor, "scheduled_by": scheduledBy, "queued": queued, "skipped": skipped}); err != nil {

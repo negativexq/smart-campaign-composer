@@ -125,6 +125,8 @@ export type Campaign = {
   archived_at?: string | null;
   created_at: string;
   updated_at: string;
+  /** Names the stored messages; a save sends it back so it cannot undo a newer change. */
+  content_revision?: string;
 };
 
 export type CampaignSummary = {
@@ -485,7 +487,8 @@ export function previewEmail(message: Partial<Messages> & { email_design?: Email
   });
 }
 
-export function saveContent(id: string, messages: Messages & { language?: string; variant?: string }): Promise<Campaign> {
+/** Saves an edit made to the messages at revision; a newer change is answered with 409 rather than undone. */
+export function saveContent(id: string, messages: Messages & { language?: string; variant?: string; revision?: string }): Promise<Campaign> {
   return request<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/content`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },

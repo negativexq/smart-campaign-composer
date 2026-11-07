@@ -598,11 +598,15 @@ func (s *eventStream) comment(text string) {
 }
 
 func (a *api) saveContent(w http.ResponseWriter, r *http.Request) {
-	var body content.Content
+	var body struct {
+		content.Content
+		// Revision is the content_revision the edit was made to.
+		Revision string `json:"revision"`
+	}
 	if !decode(w, r, &body) {
 		return
 	}
-	view, err := a.campaigns.SaveContent(r.Context(), r.PathValue("id"), body)
+	view, err := a.campaigns.SaveContentAt(r.Context(), r.PathValue("id"), body.Revision, body.Content)
 	var invalid *content.ValidationError
 	if errors.As(err, &invalid) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "Fix the highlighted messages before saving.", "issues": invalid.Issues})
@@ -932,6 +936,8 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusConflict, "This test needs its second version. Write the messages again to add it."
 	case errors.Is(err, campaign.ErrMissingLanguage):
 		status, message = http.StatusConflict, "Part of this audience reads a language with no messages yet. Write the messages again to add it."
+	case errors.Is(err, campaign.ErrContentChanged):
+		status, message = http.StatusConflict, "These messages changed after you opened them, in another tab or by a new draft. Reload to see them, then make your change again."
 	case errors.Is(err, campaign.ErrOfferConflict):
 		status, message = http.StatusBadRequest, "The brief mentions a different discount than the one you entered. Change one of them."
 	case errors.Is(err, campaign.ErrInvalidName):

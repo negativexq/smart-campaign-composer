@@ -1344,3 +1344,44 @@ func TestAShareMustLeaveSomeoneOnBothSides(t *testing.T) {
 		t.Fatalf("a share without a test: %v", err)
 	}
 }
+
+func TestAnEditMadeToOlderMessagesIsRefused(t *testing.T) {
+	t.Parallel()
+	h, id := readyCampaign(t)
+	ctx := context.Background()
+	opened, err := h.service.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.ContentRevision == "" {
+		t.Fatal("no revision for stored messages")
+	}
+	first := opened.Content.Content
+	first.SMS += " A"
+	saved, err := h.service.SaveContentAt(ctx, id, opened.ContentRevision, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.ContentRevision == opened.ContentRevision {
+		t.Fatal("the revision did not change")
+	}
+	// A second tab still showing the first version would undo the SMS edit.
+	stale := opened.Content.Content
+	stale.EmailSubject = "Edited in another tab"
+	if _, err := h.service.SaveContentAt(ctx, id, opened.ContentRevision, stale); !errors.Is(err, campaign.ErrContentChanged) {
+		t.Fatalf("stale edit: %v", err)
+	}
+	after, err := h.service.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Content.SMS != first.SMS || after.Content.EmailSubject == stale.EmailSubject {
+		t.Fatalf("messages after the refused edit: %+v", after.Content.Content)
+	}
+	// Made to the current revision, the same change goes through.
+	fresh := after.Content.Content
+	fresh.EmailSubject = "Edited in another tab"
+	if _, err := h.service.SaveContentAt(ctx, id, after.ContentRevision, fresh); err != nil {
+		t.Fatal(err)
+	}
+}

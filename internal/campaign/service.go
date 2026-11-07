@@ -4,6 +4,8 @@ package campaign
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -123,6 +125,9 @@ type View struct {
 	Schedule        *ScheduleView     `json:"schedule,omitempty"`
 	CreatedAt       time.Time         `json:"created_at"`
 	UpdatedAt       time.Time         `json:"updated_at"`
+	// ContentRevision names the stored messages as they are now. A save sends back
+	// the one it was made to, so it cannot undo a newer change.
+	ContentRevision string `json:"content_revision,omitempty"`
 }
 
 // Service runs campaign operations.
@@ -471,7 +476,9 @@ func (s *Service) SetExcludedLanguages(ctx context.Context, id string, excluded 
 	// A draft from before languages were kept has one version nobody can tell apart.
 	if stored.Content != nil && stored.Content.Language != "" {
 		kept := stored.Content.without(chosen)
-		var encoded []byte
+		// With no version left the campaign has no messages, stored the way a new
+		// audience leaves it, since the column cannot be empty.
+		encoded := []byte("{}")
 		if kept != nil {
 			if encoded, err = json.Marshal(kept); err != nil {
 				return View{}, fmt.Errorf("encode content: %w", err)
@@ -1089,8 +1096,16 @@ func (s *Service) loadFrom(ctx context.Context, q segment.Querier, id string) (V
 	}
 	if stored.Content != (content.Content{}) {
 		view.Content = &stored
+		view.ContentRevision = contentRevision(storedText)
 	}
 	return view, nil
+}
+
+// contentRevision is a short hash of the stored messages. PostgreSQL writes jsonb out
+// the same way every time, so equal documents give equal revisions.
+func contentRevision(stored []byte) string {
+	sum := sha256.Sum256(stored)
+	return hex.EncodeToString(sum[:8])
 }
 
 // AudienceSnapshot is the audience as a person approved it.

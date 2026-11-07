@@ -274,6 +274,7 @@ async function save() {
       ...messages,
       ...(selectedLanguage.value ? { language: selectedLanguage.value } : {}),
       ...(selectedVariant.value === "B" ? { variant: "B" } : {}),
+      ...(campaign.value?.content_revision ? { revision: campaign.value.content_revision } : {}),
     });
     fill(stored.value);
     return true;

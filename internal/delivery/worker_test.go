@@ -495,7 +495,7 @@ func (r *rig) rests(t *testing.T, length time.Duration) {
 	t.Helper()
 	ctx := context.Background()
 	for _, query := range []string{
-		`UPDATE campaigns SET updated_at = now() - make_interval(secs => $2) WHERE id = $1`,
+		`UPDATE campaigns SET status_since = now() - make_interval(secs => $2) WHERE id = $1`,
 		`UPDATE campaign_deliveries SET updated_at = now() - make_interval(secs => $2) WHERE campaign_id = $1`,
 	} {
 		if _, err := r.pool.Exec(ctx, query, r.id, length.Seconds()); err != nil {
@@ -571,6 +571,30 @@ func TestACampaignGettingNowhereInAnOutageStopsAndCanResume(t *testing.T) {
 	r.drain(t)
 	if status := r.campaignStatus(t); status != "COMPLETED" {
 		t.Fatalf("status after resuming: %s, %v", status, r.statuses(t))
+	}
+}
+
+func TestRenamingAStalledCampaignDoesNotPutOffItsPause(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	r := newRig(t, always(delivery.Result{StatusCode: http.StatusTooManyRequests}, nil))
+	worker := r.stallingWorker()
+	if _, err := worker.ProcessBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.rests(t, 11*time.Minute)
+	// A rename or a tag moves updated_at, which used to be the stall clock.
+	if _, err := r.service.Rename(ctx, r.id, "Renamed while stuck"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.service.SetTags(ctx, r.id, []string{"stuck"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.PauseStalled(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if status := r.campaignStatus(t); status != "PAUSED" {
+		t.Fatalf("a rename put off the pause: %s", status)
 	}
 }
 

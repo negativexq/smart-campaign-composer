@@ -162,9 +162,9 @@ func (s *Service) Archive(ctx context.Context, id string) (View, error) {
 	}
 	details := map[string]any{}
 	if status == statusScheduled {
-		var sentBefore bool
-		if err := tx.QueryRow(ctx, `SELECT runs > 0 FROM campaign_schedules WHERE campaign_id = $1`, id).Scan(&sentBefore); err != nil {
-			return View{}, fmt.Errorf("read schedule: %w", err)
+		sentBefore, err := hasSent(ctx, tx, id)
+		if err != nil {
+			return View{}, err
 		}
 		// As cancelling does: one that sent is closed by the worker with what it sent,
 		// one that never did goes back to approved.
