@@ -56,7 +56,7 @@ func TestApprovalFreezesTheVersion(t *testing.T) {
 	h, id := readyCampaign(t)
 	ctx := context.Background()
 
-	view, err := h.service.Approve(ctx, id)
+	view, err := approveReviewed(ctx, h.service, id)
 	if err != nil {
 		t.Fatalf("approve: %v", err)
 	}
@@ -85,11 +85,11 @@ func TestApprovingTwiceIsHarmless(t *testing.T) {
 	t.Parallel()
 	h, id := readyCampaign(t)
 	ctx := context.Background()
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	before := len(h.auditEvents(t, id))
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatalf("second approve: %v", err)
 	}
 	if len(h.auditEvents(t, id)) != before {
@@ -104,14 +104,14 @@ func TestOnlyAReviewedCampaignCanBeApproved(t *testing.T) {
 	t.Run("draft without content", func(t *testing.T) {
 		t.Parallel()
 		h, _, id := newContentHarness(t, step{output: validContent})
-		if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrNotReviewable) {
+		if _, err := approveReviewed(ctx, h.service, id); !errors.Is(err, campaign.ErrNotReviewable) {
 			t.Fatalf("got %v", err)
 		}
 	})
 	t.Run("unknown", func(t *testing.T) {
 		t.Parallel()
 		h, _, _ := newContentHarness(t, step{output: validContent})
-		if _, err := h.service.Approve(ctx, "nope"); !errors.Is(err, campaign.ErrNotFound) {
+		if _, err := approveReviewed(ctx, h.service, "nope"); !errors.Is(err, campaign.ErrNotFound) {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -121,7 +121,7 @@ func TestOnlyAReviewedCampaignCanBeApproved(t *testing.T) {
 		if _, err := h.pool.Exec(ctx, `UPDATE consents SET allowed = false`); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrAudienceBlocked) {
+		if _, err := approveReviewed(ctx, h.service, id); !errors.Is(err, campaign.ErrAudienceBlocked) {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -136,7 +136,7 @@ func TestOnlyAReviewedCampaignCanBeApproved(t *testing.T) {
 			t.Fatal(err)
 		}
 		var invalid *content.ValidationError
-		if _, err := h.service.Approve(ctx, id); !errors.As(err, &invalid) {
+		if _, err := approveReviewed(ctx, h.service, id); !errors.As(err, &invalid) {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -157,7 +157,7 @@ func TestDispatchQueuesConsentedPeopleAndRecordsTheRest(t *testing.T) {
 	t.Parallel()
 	h, id := readyCampaign(t)
 	ctx := context.Background()
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	view, err := h.service.Dispatch(ctx, id)
@@ -204,7 +204,7 @@ func TestDispatchingAgainCreatesNothingNew(t *testing.T) {
 	t.Parallel()
 	h, id := readyCampaign(t)
 	ctx := context.Background()
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if _, err := h.service.Dispatch(ctx, id); err != nil {
@@ -227,7 +227,7 @@ func TestConcurrentDispatchesCreateOneSet(t *testing.T) {
 	t.Parallel()
 	h, id := readyCampaign(t)
 	ctx := context.Background()
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	errs := make(chan error, 5)
@@ -255,7 +255,7 @@ func TestProgressAndDeliveriesAreReadable(t *testing.T) {
 	t.Parallel()
 	h, id := readyCampaign(t)
 	ctx := context.Background()
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if _, err := h.service.Dispatch(ctx, id); err != nil {
@@ -305,7 +305,7 @@ func nextHour() *time.Time {
 func approvedCampaign(t *testing.T) (*harness, string) {
 	t.Helper()
 	h, id := readyCampaign(t)
-	if _, err := h.service.Approve(context.Background(), id); err != nil {
+	if _, err := approveReviewed(context.Background(), h.service, id); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	return h, id
@@ -361,7 +361,7 @@ func TestSchedulingNeedsApprovalAndAValidRule(t *testing.T) {
 	if _, err := h.service.Schedule(ctx, id, spec); !errors.Is(err, campaign.ErrNotApproved) {
 		t.Fatalf("before approval: %v", err)
 	}
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatal(err)
 	}
 	past := referenceTime.Add(-time.Hour)
@@ -832,7 +832,7 @@ func TestARecentMessageSinceApprovalStillHoldsBackACampaignThatAsked(t *testing.
 	if _, err := h.pool.Exec(ctx, `UPDATE campaign_versions SET segment = jsonb_set(segment, '{segment,not_messaged_within_days}', '7') WHERE campaign_id = $1`, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatal(err)
 	}
 	var other, version string
@@ -1194,14 +1194,14 @@ func TestApprovalNeedsAVersionForEveryLanguage(t *testing.T) {
 	if _, err := h.pool.Exec(ctx, `UPDATE campaign_versions SET content = content - 'translations' WHERE campaign_id = $1`, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrMissingLanguage) {
+	if _, err := approveReviewed(ctx, h.service, id); !errors.Is(err, campaign.ErrMissingLanguage) {
 		t.Fatalf("approve: %v", err)
 	}
 	// A draft from before languages were kept says nothing about who it was for.
 	if _, err := h.pool.Exec(ctx, `UPDATE campaign_versions SET content = content - 'language' WHERE campaign_id = $1`, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrMissingLanguage) {
+	if _, err := approveReviewed(ctx, h.service, id); !errors.Is(err, campaign.ErrMissingLanguage) {
 		t.Fatalf("approve an old draft: %v", err)
 	}
 }
@@ -1220,7 +1220,7 @@ func TestLanguagesMustPromiseTheSameDiscount(t *testing.T) {
 	if _, err := h.service.SaveContent(ctx, id, english); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrLanguageDiscount) {
+	if _, err := approveReviewed(ctx, h.service, id); !errors.Is(err, campaign.ErrLanguageDiscount) {
 		t.Fatalf("approve: %v", err)
 	}
 }
@@ -1310,5 +1310,31 @@ func TestAnApprovalOfAnOlderReviewIsRefused(t *testing.T) {
 	// Repeating it, as a retry does, changes nothing even with the older revision.
 	if _, err := h.service.ApproveAt(ctx, id, opened.ReviewRevision); err != nil {
 		t.Fatalf("repeated approval: %v", err)
+	}
+}
+
+// approveReviewed approves the campaign as a review page loaded just now would.
+func approveReviewed(ctx context.Context, s *campaign.Service, id string) (campaign.View, error) {
+	reviewed, err := s.Get(ctx, id)
+	if err != nil {
+		return campaign.View{}, err
+	}
+	return s.ApproveAt(ctx, id, reviewed.ReviewRevision)
+}
+
+// Issue #9: there is no approval without a revision, so no client can freeze what
+// nobody reviewed.
+func TestAnApprovalWithoutARevisionIsRefused(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, id := readyCampaign(t)
+	if _, err := h.service.ApproveAt(ctx, id, ""); !errors.Is(err, campaign.ErrReviewRequired) {
+		t.Fatalf("approval without a revision: %v", err)
+	}
+	if status := statusOf(t, h, id); status != "READY_FOR_REVIEW" {
+		t.Fatalf("status: %s", status)
+	}
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
+		t.Fatal(err)
 	}
 }

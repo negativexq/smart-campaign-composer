@@ -148,8 +148,9 @@ sequenceDiagram
     participant A as API
     participant D as PostgreSQL
 
-    M->>A: POST /approve
+    M->>A: POST /approve with the review revision shown
     A->>D: Lock the campaign
+    A->>A: The revision is the campaign's current one
     A->>A: No blockers, and all languages and versions are complete and agree on the offer
     A->>D: Store the recipients and audience counts
     A->>D: Set approved_at, which the trigger then protects

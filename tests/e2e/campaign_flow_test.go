@@ -80,7 +80,11 @@ func TestBriefToDeliveredCampaign(t *testing.T) {
 	}
 
 	call(t, http.MethodPost, campaign+"/generate", nil, http.StatusOK)
-	call(t, http.MethodPost, campaign+"/approve", nil, http.StatusOK)
+	reviewed := decode[struct {
+		ReviewRevision string `json:"review_revision"`
+	}](t, call(t, http.MethodGet, campaign, nil, http.StatusOK))
+	call(t, http.MethodPost, campaign+"/approve", map[string]string{"revision": ""}, http.StatusBadRequest)
+	call(t, http.MethodPost, campaign+"/approve", map[string]string{"revision": reviewed.ReviewRevision}, http.StatusOK)
 	call(t, http.MethodPost, campaign+"/dispatch", nil, http.StatusAccepted)
 	// Repeating dispatch must not create a second set of deliveries.
 	call(t, http.MethodPost, campaign+"/dispatch", nil, http.StatusAccepted)

@@ -943,6 +943,8 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusConflict, "This test needs its second version. Write the messages again to add it."
 	case errors.Is(err, campaign.ErrMissingLanguage):
 		status, message = http.StatusConflict, "Part of this audience reads a language with no messages yet. Write the messages again to add it."
+	case errors.Is(err, campaign.ErrReviewRequired):
+		status, message = http.StatusBadRequest, "An approval has to say which review it was given on. Open the review page and approve there."
 	case errors.Is(err, campaign.ErrReviewChanged):
 		status, message = http.StatusConflict, "This campaign changed after you opened the review: its messages, audience or languages. Reload to see what will go out, then approve again."
 	case errors.Is(err, campaign.ErrContentChanged):

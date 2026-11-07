@@ -222,14 +222,23 @@ func TestApproveAndDispatch(t *testing.T) {
 	id := campaignWithAudience(t, api)
 	base := "/api/campaigns/" + id
 
-	if status, _ := call(t, api, http.MethodPost, base+"/approve", ""); status != http.StatusConflict {
+	if status, _ := call(t, api, http.MethodPost, base+"/approve", reviewedBody(t, api, base)); status != http.StatusConflict {
 		t.Fatalf("approve without content: %d", status)
 	}
 	generate(t, api, id, "")
 	if status, _ := call(t, api, http.MethodPost, base+"/dispatch", ""); status != http.StatusConflict {
 		t.Fatalf("dispatch before approval: %d", status)
 	}
-	status, view := call(t, api, http.MethodPost, base+"/approve", "")
+	// Issue #9: a request that does not name the review it was given on is refused.
+	for _, body := range []string{"", "{}", `{"revision":""}`} {
+		if status, _ := call(t, api, http.MethodPost, base+"/approve", body); status != http.StatusBadRequest {
+			t.Fatalf("approve with %q: %d", body, status)
+		}
+	}
+	if status, _ := call(t, api, http.MethodPost, base+"/approve", `{"revision":"0000000000000000"}`); status != http.StatusConflict {
+		t.Fatalf("approve with a revision never shown: %d", status)
+	}
+	status, view := call(t, api, http.MethodPost, base+"/approve", reviewedBody(t, api, base))
 	if status != http.StatusOK || view["status"] != "APPROVED" || view["approved_at"] == nil {
 		t.Fatalf("approve: %d %+v", status, view)
 	}
@@ -269,7 +278,7 @@ func TestScheduling(t *testing.T) {
 	api := newAPI(t, fastMock())
 	id := campaignWithAudience(t, api)
 	generate(t, api, id, "")
-	call(t, api, http.MethodPost, "/api/campaigns/"+id+"/approve", "")
+	call(t, api, http.MethodPost, "/api/campaigns/"+id+"/approve", reviewedBody(t, api, "/api/campaigns/"+id))
 	path := "/api/campaigns/" + id + "/schedule"
 
 	status, body := call(t, api, http.MethodPost, path, `{"kind":"weekly","days":[],"time":"09:00","timezone":"Europe/Istanbul"}`)
@@ -324,7 +333,7 @@ func TestEventsFollowACampaignWhileItCanChange(t *testing.T) {
 	api := newAPI(t, fastMock())
 	id := campaignWithAudience(t, api)
 	generate(t, api, id, "")
-	call(t, api, http.MethodPost, "/api/campaigns/"+id+"/approve", "")
+	call(t, api, http.MethodPost, "/api/campaigns/"+id+"/approve", reviewedBody(t, api, "/api/campaigns/"+id))
 	base := "/api/campaigns/" + id
 	if status, body := call(t, api, http.MethodPost, base+"/schedule", `{"kind":"weekly","days":["mon"],"time":"09:30","timezone":"UTC"}`); status != http.StatusOK {
 		t.Fatalf("schedule: %d %+v", status, body)

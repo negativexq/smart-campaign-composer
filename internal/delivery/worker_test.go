@@ -215,7 +215,9 @@ func newRigFor(t *testing.T, chosen campaign.NewCampaign, respond func(int, deli
 	if _, err := generation.Run(ctx, func(campaign.GenerationEvent) {}); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	if _, err := service.Approve(ctx, id); err != nil {
+	if reviewed, err := service.Get(ctx, id); err != nil {
+		t.Fatalf("read for review: %v", err)
+	} else if _, err := service.ApproveAt(ctx, id, reviewed.ReviewRevision); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if _, err := service.Dispatch(ctx, id); err != nil {

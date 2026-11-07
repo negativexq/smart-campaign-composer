@@ -506,9 +506,9 @@ export async function getSampleRecipients(id: string): Promise<SampleRecipient[]
   return (await request<{ recipients: SampleRecipient[] }>(`/api/campaigns/${encodeURIComponent(id)}/sample-recipients`)).recipients;
 }
 
-/** Approves the campaign as the review page showed it, at revision. */
-export function approveCampaign(id: string, revision?: string): Promise<Campaign> {
-  return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/approve`, revision ? { revision } : {});
+/** Approves the campaign as the review page showed it, at revision; the API refuses an approval without one. */
+export function approveCampaign(id: string, revision: string): Promise<Campaign> {
+  return post<Campaign>(`/api/campaigns/${encodeURIComponent(id)}/approve`, { revision });
 }
 
 export function resumeCampaign(id: string): Promise<Campaign> {

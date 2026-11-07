@@ -62,7 +62,7 @@ func TestACampaignOnOneChannelStaysOnThatChannel(t *testing.T) {
 				}
 			}
 
-			if status, body := call(t, api, http.MethodPost, base+"/approve", ""); status != http.StatusOK {
+			if status, body := call(t, api, http.MethodPost, base+"/approve", reviewedBody(t, api, base)); status != http.StatusOK {
 				t.Fatalf("approve: %d %v", status, body)
 			}
 			if status, body := call(t, api, http.MethodPost, base+"/dispatch", ""); status != http.StatusAccepted {

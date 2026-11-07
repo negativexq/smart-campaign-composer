@@ -62,6 +62,26 @@ func post(t *testing.T, path string, want int) []byte {
 	return data
 }
 
+// approve approves the campaign at base with the review revision it has now, as the
+// review page does.
+func approve(t *testing.T, base string) {
+	t.Helper()
+	status, data, err := request(http.MethodGet, apiURL+base, nil)
+	if err != nil || status != http.StatusOK {
+		t.Fatalf("GET %s: %d %s %v", base, status, data, err)
+	}
+	var reviewed struct {
+		ReviewRevision string `json:"review_revision"`
+	}
+	if err := json.Unmarshal(data, &reviewed); err != nil {
+		t.Fatal(err)
+	}
+	status, data, err = request(http.MethodPost, apiURL+base+"/approve", map[string]string{"revision": reviewed.ReviewRevision})
+	if err != nil || status != http.StatusOK {
+		t.Fatalf("POST %s/approve: %d %s %v", base, status, data, err)
+	}
+}
+
 func compose(t *testing.T, args ...string) {
 	t.Helper()
 	command := exec.Command("docker", append([]string{"compose"}, args...)...)
@@ -97,7 +117,7 @@ func startSending(t *testing.T) string {
 	base := "/api/campaigns/" + created.ID
 	post(t, base+"/segment", http.StatusOK)
 	post(t, base+"/generate", http.StatusOK)
-	post(t, base+"/approve", http.StatusOK)
+	approve(t, base)
 	post(t, base+"/dispatch", http.StatusAccepted)
 	// Runs after the test has brought back what it stopped. A test that failed halfway
 	// must not leave messages going out during the next one, which counts them.

@@ -106,7 +106,7 @@ func TestLeavingOutALanguageRemovesItsVersion(t *testing.T) {
 	if view.Status != "READY_FOR_REVIEW" {
 		t.Fatalf("status: %s", view.Status)
 	}
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if _, err := h.service.SetExcludedLanguages(ctx, id, nil); !errors.Is(err, campaign.ErrNotEditable) {
@@ -128,7 +128,7 @@ func TestOnlyMissingLanguagesAreWrittenWhenOneIsAdded(t *testing.T) {
 	if _, err := h.service.SetExcludedLanguages(ctx, id, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.service.Approve(ctx, id); !errors.Is(err, campaign.ErrMissingLanguage) {
+	if _, err := approveReviewed(ctx, h.service, id); !errors.Is(err, campaign.ErrMissingLanguage) {
 		t.Fatalf("approved without a version: %v", err)
 	}
 	mainCalls := len(provider.contentCalls)
@@ -143,7 +143,7 @@ func TestOnlyMissingLanguagesAreWrittenWhenOneIsAdded(t *testing.T) {
 	if !slices.Contains(versionLanguages(view), "de") || view.Content.SMS != "Hi {{first_name}}" {
 		t.Fatalf("versions: %v, main: %q", versionLanguages(view), view.Content.SMS)
 	}
-	if _, err := h.service.Approve(ctx, id); err != nil {
+	if _, err := approveReviewed(ctx, h.service, id); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 }
