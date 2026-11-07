@@ -248,7 +248,7 @@ CI runs on every push to `main` and every pull request: formatting, vet and the 
 | `migrations/` | SQL schema |
 | `frontend/` | Vue 3 and TypeScript UI |
 | `tests/` | Acceptance, chaos, benchmark and verification tests |
-| `docs/` | [Architecture](docs/architecture.md), [flows](docs/flows.md), [errors and retries](docs/errors-and-retries.md), the [performance profile](docs/performance.md) and the images in this file |
+| `docs/` | [Architecture](docs/architecture.md), [flows](docs/flows.md), [state machines](docs/state-machines.md), [errors and retries](docs/errors-and-retries.md), the [performance profile](docs/performance.md) and the images in this file |
 | `ai-sessions/` | Exported AI working sessions |
 
-See [docs/architecture.md](docs/architecture.md) for how the system is put together, [docs/flows.md](docs/flows.md) for how a campaign moves through it, [DECISIONS.md](DECISIONS.md) for the reasoning behind it, [docs/security.md](docs/security.md) for what protects it and how it was checked, and [DESIGN.md](DESIGN.md) for the Signal design language.
+See [docs/architecture.md](docs/architecture.md) for how the system is put together, [docs/flows.md](docs/flows.md) for how a campaign moves through it, [docs/state-machines.md](docs/state-machines.md) for every state it can be in and what guards each change, [DECISIONS.md](DECISIONS.md) for the reasoning behind it, [docs/security.md](docs/security.md) for what protects it and how it was checked, and [DESIGN.md](DESIGN.md) for the Signal design language.
