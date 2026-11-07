@@ -147,6 +147,8 @@ export type CampaignSummary = {
   last_run?: RunSummary | null;
   tags?: string[];
   archived_at?: string | null;
+  /** The start of the messages, when the campaign has them. */
+  preview?: { sms: string; email_subject: string } | null;
 };
 
 /** One send of a campaign and how its messages ended. */
@@ -445,6 +447,23 @@ export function listCampaigns(filter: CampaignListFilter, offset = 0): Promise<C
 export type TagUse = { tag: string; campaigns: number };
 
 /** Tags on campaigns that are not archived, with how many carry each. */
+export type CalendarEntryKind = "draft" | "scheduled" | "sending" | "sent";
+
+/** One thing on the calendar: a run, a send to come, or a draft on the day it last changed. */
+export type CalendarEntry = { campaign_id: string; kind: CalendarEntryKind; at: string; run?: RunSummary };
+
+export type CampaignCalendar = { entries: CalendarEntry[]; campaigns: CampaignSummary[]; truncated: boolean };
+
+/** What the list's filters keep, placed in time between from and to. */
+export function getCalendar(filter: Pick<CampaignListFilter, "group" | "query" | "channel" | "tag">, from: Date, to: Date): Promise<CampaignCalendar> {
+  const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
+  if (filter.group) params.set("group", filter.group);
+  if (filter.query.trim()) params.set("q", filter.query.trim());
+  if (filter.channel) params.set("channel", filter.channel);
+  if (filter.tag) params.set("tag", filter.tag);
+  return request(`/api/campaign-calendar?${params}`);
+}
+
 export async function getTags(): Promise<TagUse[]> {
   return (await request<{ tags: TagUse[] }>("/api/campaign-tags")).tags ?? [];
 }

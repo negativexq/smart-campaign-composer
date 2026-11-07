@@ -1,39 +1,13 @@
 <script setup lang="ts">
-import type { CampaignSummary, RunSummary } from "../api/campaigns";
-import { formatChannel, formatDateTime } from "../lib/format";
+import type { CampaignSummary } from "../api/campaigns";
+import { kindOf, previewOf, runDetail, runResult } from "../lib/campaignRow";
+import { formatDateTime } from "../lib/format";
 import CampaignStatusBadge from "./CampaignStatusBadge.vue";
+import ChannelIcons from "./ChannelIcons.vue";
 
 defineProps<{ campaigns: CampaignSummary[]; tag?: string }>();
 // Picking a tag on a row filters the list by it.
 const emit = defineEmits<{ tag: [string] }>();
-
-const count = (value: number) => value.toLocaleString("en-US");
-
-// What kind of campaign it is, in the words of its rule, and the channels it uses.
-function kindOf(campaign: CampaignSummary) {
-  const channels = campaign.channels.map(formatChannel).join(", ");
-  const kind = campaign.schedule?.stopped
-    ? "Schedule stopped"
-    : campaign.schedule?.repeats
-      ? campaign.schedule.description
-      : campaign.schedule
-        ? "One time, at a set time"
-        : "One time";
-  return channels ? `${kind} · ${channels}` : kind;
-}
-
-function lastResult(run: RunSummary) {
-  if (!run.finished_at) return run.total ? `${Math.floor((run.processed / run.total) * 100)}% done` : "Starting";
-  return `${count(run.sent)} sent`;
-}
-
-function lastDetail(campaign: CampaignSummary, run: RunSummary) {
-  const parts = [];
-  if (campaign.schedule?.repeats || run.number > 1) parts.push(`Run #${run.number}`);
-  parts.push(run.finished_at ? formatDateTime(run.started_at) : `${count(run.processed)} of ${count(run.total)}`);
-  if (run.failed) parts.push(`${count(run.failed)} failed`);
-  return parts.join(" · ");
-}
 </script>
 
 <template>
@@ -42,6 +16,7 @@ function lastDetail(campaign: CampaignSummary, run: RunSummary) {
       <thead>
         <tr>
           <th scope="col">Campaign</th>
+          <th scope="col" class="optional">Channel</th>
           <th scope="col">Status</th>
           <th scope="col" class="optional">Next send</th>
           <th scope="col">Last send</th>
@@ -51,6 +26,9 @@ function lastDetail(campaign: CampaignSummary, run: RunSummary) {
         <tr v-for="campaign in campaigns" :key="campaign.id" data-testid="campaign-row">
           <td class="name">
             <a :href="`/campaigns/${campaign.id}`" :title="campaign.brief">{{ campaign.name }}</a>
+            <span v-if="previewOf(campaign)" class="sub preview small" data-testid="campaign-preview">
+              <span class="preview-label">{{ previewOf(campaign)?.label }}</span>{{ previewOf(campaign)?.text }}
+            </span>
             <span class="sub small muted" data-testid="campaign-kind">{{ kindOf(campaign) }}</span>
             <span v-if="campaign.tags?.length" class="row-tags">
               <button
@@ -67,6 +45,7 @@ function lastDetail(campaign: CampaignSummary, run: RunSummary) {
               </button>
             </span>
           </td>
+          <td class="optional" data-testid="campaign-channels"><ChannelIcons :channels="campaign.channels" labels /></td>
           <td><CampaignStatusBadge :status="campaign.status" :schedule="campaign.schedule ?? null" :last-run="campaign.last_run ?? null" /></td>
           <td class="optional" data-testid="campaign-next">
             <template v-if="campaign.schedule?.next_run_at">{{ formatDateTime(campaign.schedule.next_run_at) }}</template>
@@ -74,8 +53,8 @@ function lastDetail(campaign: CampaignSummary, run: RunSummary) {
           </td>
           <td data-testid="campaign-last">
             <template v-if="campaign.last_run">
-              {{ lastResult(campaign.last_run) }}
-              <span class="sub small muted">{{ lastDetail(campaign, campaign.last_run) }}</span>
+              {{ runResult(campaign.last_run) }}
+              <span class="sub small muted">{{ runDetail(campaign, campaign.last_run) }}</span>
             </template>
             <span v-else class="muted">Not sent yet</span>
           </td>
@@ -169,6 +148,19 @@ tbody tr:last-child td {
 
 .sub {
   margin-top: 2px;
+}
+
+.preview {
+  color: var(--color-text);
+}
+
+.preview-label {
+  margin-right: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 @media (max-width: 760px) {

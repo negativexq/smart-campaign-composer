@@ -561,7 +561,13 @@ describe("campaign list", () => {
       "/api/campaigns": {
         campaigns: [
           summary(),
-          summary({ id: "c2", status: "DISPATCHING", channels: ["email", "sms"], last_run: run({ finished_at: null, total: 200, processed: 137 }) }),
+          summary({
+            id: "c2",
+            status: "DISPATCHING",
+            channels: ["email", "sms"],
+            last_run: run({ finished_at: null, total: 200, processed: 137 }),
+            preview: { sms: "Hi {{first_name}}, your cart is waiting", email_subject: "Your cart is waiting" },
+          }),
           summary({
             id: "c3",
             status: "SCHEDULED",
@@ -586,7 +592,12 @@ describe("campaign list", () => {
     expect(rows[0].text()).toContain("Draft");
     expect(rows[0].text()).toContain("Not sent yet");
     expect(rows[1].text()).toContain("Sending");
-    expect(rows[1].text()).toContain("One time · Email, SMS");
+    expect(rows[1].find("[data-testid=campaign-kind]").text()).toBe("One time");
+    expect(rows[1].find("[data-testid=campaign-channels]").text()).toContain("Email");
+    expect(rows[1].find("[data-testid=campaign-channels]").text()).toContain("SMS");
+    // A campaign that texts shows its SMS, the whole message; one without messages shows none.
+    expect(rows[1].find("[data-testid=campaign-preview]").text()).toContain("Hi {{first_name}}, your cart is waiting");
+    expect(rows[0].find("[data-testid=campaign-preview]").exists()).toBe(false);
     expect(rows[1].text()).toContain("68% done");
     expect(rows[1].find("a").attributes("href")).toBe("/campaigns/c2");
     expect(rows[2].text()).toContain("Waiting for next run");
@@ -602,6 +613,67 @@ describe("campaign list", () => {
     expect(wrapper.find("[data-testid=upcoming]").text()).toContain("Next sends");
     expect(wrapper.find("[data-testid=upcoming] time").attributes("datetime")).toBe("2026-11-06T18:00:00Z");
     expect(wrapper.find("[data-testid=upcoming] [aria-label=Repeats]").exists()).toBe(true);
+  });
+
+  it("switches to a calendar of the same campaigns and opens one beside it", async () => {
+    window.history.replaceState({}, "", "/campaigns?view=calendar&calendar=month&date=2026-11-09&tag=Q4");
+    const sent = summary({ id: "c2", name: "Weekend sale", status: "COMPLETED_WITH_FAILURES", channels: ["sms", "email"], preview: { sms: "Sale ends Sunday", email_subject: "Our weekend sale" } });
+    const planned = summary({ id: "c3", name: "Weekly digest", status: "SCHEDULED", channels: ["email"], schedule: { description: "Every Monday at 15:00", repeats: true, next_run_at: "2026-11-09T12:00:00Z" } });
+    const calendar = {
+      entries: [
+        { campaign_id: "c2", kind: "sent", at: "2026-11-04T12:00:00Z", run: { number: 1, started_at: "2026-11-04T12:00:00Z", finished_at: "2026-11-04T12:10:00Z", total: 50, processed: 50, sent: 47, failed: 3, skipped: 0, unknown: 0 } },
+        { campaign_id: "c3", kind: "scheduled", at: "2026-11-09T12:00:00Z" },
+        { campaign_id: "c3", kind: "scheduled", at: "2026-11-16T12:00:00Z" },
+      ],
+      campaigns: [sent, planned],
+      truncated: false,
+    };
+    const fetchMock = vi.fn(async (url: string) => {
+      const body = url.startsWith("/api/campaign-calendar") ? calendar : url.startsWith("/api/campaign-tags") ? { tags: [] } : { campaigns: [sent, planned], total: 2 };
+      return { ok: true, status: 200, json: async () => body } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(CampaignsView, { attachTo: document.body });
+    await settle();
+
+    const asked = new URL(String(fetchMock.mock.calls.find(([url]) => String(url).startsWith("/api/campaign-calendar"))?.[0]), "http://test");
+    // A month is whole weeks, Monday first, and the list's filters go along.
+    expect(new Date(asked.searchParams.get("from") ?? "").getDate()).toBe(26);
+    expect(asked.searchParams.get("tag")).toBe("Q4");
+    expect(wrapper.find("[data-testid=calendar-title]").text()).toBe("November 2026");
+    expect(wrapper.findAll("[data-testid=calendar-day]")).toHaveLength(42);
+    expect(wrapper.find("[data-testid=campaign-row]").exists()).toBe(false);
+
+    const entries = wrapper.findAll("[data-testid=calendar-entry]");
+    expect(entries).toHaveLength(3);
+    expect(entries[0].attributes("aria-label")).toContain("Completed with failures");
+    expect(entries[1].attributes("aria-label")).toContain("Scheduled");
+
+    await entries[0].trigger("click");
+    const panel = wrapper.find("[data-testid=campaign-panel]");
+    expect(panel.text()).toContain("Weekend sale");
+    expect(panel.find("[data-testid=panel-moment]").text()).toContain("Run #1");
+    expect(panel.text()).toContain("Failed");
+    expect(panel.find("[data-testid=panel-sms]").text()).toContain("Sale ends Sunday");
+    expect(panel.find("[data-testid=panel-subject]").text()).toContain("Our weekend sale");
+    expect(panel.find("[data-testid=panel-open]").attributes("href")).toBe("/campaigns/c2");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await flushPromises();
+    expect(wrapper.find("[data-testid=campaign-panel]").exists()).toBe(false);
+
+    await wrapper.find("[data-testid=calendar-view-week]").trigger("click");
+    await settle();
+    expect(window.location.search).toContain("calendar=week");
+    expect(wrapper.findAll("[data-testid=calendar-day]")).toHaveLength(7);
+    await wrapper.find("[data-testid=calendar-next]").trigger("click");
+    await settle();
+    expect(window.location.search).toContain("date=2026-11-16");
+
+    await wrapper.find("[data-testid=mode-list]").trigger("click");
+    await settle();
+    expect(window.location.search).not.toContain("view=calendar");
+    expect(wrapper.findAll("[data-testid=campaign-row]")).toHaveLength(2);
+    wrapper.unmount();
   });
 
   it("filters by tag from the menu or a row, and keeps the archive apart", async () => {

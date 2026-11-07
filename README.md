@@ -80,9 +80,11 @@ The test inbox shows each message the mock provider accepted, as the customer wo
 
 ### 8. See the whole workspace
 
-The overview shows campaign counts, recent activity and system health. Analytics compares results across campaigns.
+The overview shows campaign counts, recent activity and system health. The campaign list shows each campaign's channels, next send, last result and the start of its message, and switches to a day, week or month calendar of drafts, scheduled sends and finished runs. Analytics compares results across campaigns.
 
 ![Overview: campaign counts, recent campaigns and activity](docs/screenshots/overview.png)
+
+![Campaign calendar: a month of completed runs, drafts and scheduled sends, with repeating campaigns on every day they send](docs/screenshots/campaign-calendar.png)
 
 ![Analytics: messages by channel and result, provider calls by day and campaigns by failure rate](docs/screenshots/analytics.png)
 

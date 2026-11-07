@@ -66,6 +66,7 @@ func Register(mux *http.ServeMux, campaigns *campaign.Service, provider ai.Provi
 		"POST /api/audiences/{id}/recount":                       a.recountAudience,
 		"DELETE /api/audiences/{id}":                             a.deleteAudience,
 		"GET /api/campaigns":                                     a.list,
+		"GET /api/campaign-calendar":                             a.calendar,
 		"POST /api/campaigns":                                    a.create,
 		"GET /api/campaigns/{id}":                                a.get,
 		"PATCH /api/campaigns/{id}":                              a.rename,
@@ -237,6 +238,25 @@ func (a *api) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"campaigns": campaigns, "total": total, "groups": groups, "upcoming": upcoming})
+}
+
+// calendar places the list's campaigns in time: from and to are RFC 3339 times,
+// chosen by the browser so days follow its time zone.
+func (a *api) calendar(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	from, fromErr := time.Parse(time.RFC3339, query.Get("from"))
+	to, toErr := time.Parse(time.RFC3339, query.Get("to"))
+	if fromErr != nil || toErr != nil {
+		writeError(w, r, campaign.ErrCalendarRange)
+		return
+	}
+	filter := campaign.ListFilter{Group: query.Get("group"), Query: query.Get("q"), Channel: query.Get("channel"), Tag: query.Get("tag")}
+	calendar, err := a.campaigns.Calendar(r.Context(), filter, from, to)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, calendar)
 }
 
 func (a *api) emailTemplates(w http.ResponseWriter, r *http.Request) {
@@ -1001,6 +1021,8 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusConflict, "This campaign has no schedule to cancel."
 	case errors.Is(err, campaign.ErrUnknownFilter):
 		status, message = http.StatusBadRequest, "This filter does not exist."
+	case errors.Is(err, campaign.ErrCalendarRange):
+		status, message = http.StatusBadRequest, "Ask for a calendar range with a start before its end, at most 43 days long."
 	case errors.Is(err, campaign.ErrInvalidInstruction):
 		status, message = http.StatusBadRequest, "Write an instruction of up to 500 characters."
 	case errors.Is(err, campaign.ErrNoAudience):

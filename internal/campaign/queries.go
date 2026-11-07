@@ -124,7 +124,18 @@ type Summary struct {
 	// LastRun is the latest send, so a repeating campaign shows its last result rather
 	// than every run added up.
 	LastRun *RunSummary `json:"last_run"`
+	// Preview is the start of the messages, when the campaign has them.
+	Preview *Preview `json:"preview"`
 }
+
+// Preview is the start of a campaign's messages, for a row to show what it says.
+type Preview struct {
+	SMS          string `json:"sms"`
+	EmailSubject string `json:"email_subject"`
+}
+
+// previewLength is how much of each message a row is given.
+const previewLength = 160
 
 // ListSchedule is what a list row says about when a campaign sends.
 type ListSchedule struct {
@@ -289,15 +300,22 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 			strings.Replace(matching, "FROM campaigns c", "FROM campaigns c"+sortJoins, 1)
 	}
 
+	return s.summaries(ctx, page, order, append(args, limit, max(filter.Offset, 0)), `
+			LIMIT `+fmt.Sprintf("$%d OFFSET $%d", len(args)+1, len(args)+2))
+}
+
+// summaries reads the rows of the campaigns page selects, in order. tail ends the
+// page's query, such as its limit, and args fill both.
+func (s *Service) summaries(ctx context.Context, page, order string, args []any, tail string) ([]Summary, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT c.id::text, c.name, c.brief, c.status,
 		       c.channels, COALESCE(d.total, 0), COALESCE(d.processed, 0),
 		       c.created_at, c.updated_at, c.tags, c.archived_at, sch.spec, sch.next_run_at, sch.last_run_at,
-		       last.number, last.started_at, last.finished_at, last.total, last.processed, last.sent, last.failed, last.skipped, last.unknown
+		       last.number, last.started_at, last.finished_at, last.total, last.processed, last.sent, last.failed, last.skipped, last.unknown,
+		       preview.sms, preview.email_subject
 		-- Choosing the page first means only its campaigns get counted.
 		FROM (`+page+`
-			ORDER BY `+order+`
-			LIMIT `+fmt.Sprintf("$%d OFFSET $%d", len(args)+1, len(args)+2)+`
+			ORDER BY `+order+tail+`
 		) c
 		LEFT JOIN campaign_schedules sch ON sch.campaign_id = c.id
 		LEFT JOIN LATERAL (
@@ -318,7 +336,13 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 			) live ON true
 			WHERE r.campaign_id = c.id
 		) d ON true
-		ORDER BY `+order, append(args, limit, max(filter.Offset, 0))...)
+		LEFT JOIN LATERAL (
+			SELECT left(COALESCE(v.content->>'sms', ''), `+fmt.Sprint(previewLength)+`) AS sms,
+			       left(COALESCE(v.content->>'email_subject', ''), `+fmt.Sprint(previewLength)+`) AS email_subject
+			FROM campaign_versions v WHERE v.campaign_id = c.id
+			ORDER BY v.version DESC LIMIT 1
+		) preview ON true
+		ORDER BY `+order, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list campaigns: %w", err)
 	}
@@ -332,10 +356,12 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 			started  *time.Time
 			finished *time.Time
 			counts   [6]*int
+			sms      *string
+			subject  *string
 		)
 		err := row.Scan(&summary.ID, &summary.Name, &summary.Brief, &summary.Status, &summary.Channels,
 			&summary.Total, &summary.Processed, &summary.CreatedAt, &summary.UpdatedAt, &summary.Tags, &summary.ArchivedAt, &spec, &next, &lastRun,
-			&number, &started, &finished, &counts[0], &counts[1], &counts[2], &counts[3], &counts[4], &counts[5])
+			&number, &started, &finished, &counts[0], &counts[1], &counts[2], &counts[3], &counts[4], &counts[5], &sms, &subject)
 		if err != nil {
 			return summary, err
 		}
@@ -349,6 +375,9 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]Summary, error
 		if number != nil {
 			summary.LastRun = &RunSummary{Number: *number, StartedAt: *started, FinishedAt: finished,
 				Total: *counts[0], Processed: *counts[1], Sent: *counts[2], Failed: *counts[3], Skipped: *counts[4], Unknown: *counts[5]}
+		}
+		if sms != nil && (*sms != "" || *subject != "") {
+			summary.Preview = &Preview{SMS: *sms, EmailSubject: *subject}
 		}
 		return summary, nil
 	})

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
 )
@@ -251,5 +252,33 @@ func TestCampaignsCanBeTaggedArchivedAndDeletedThroughTheAPI(t *testing.T) {
 	}
 	if status, _ := call(t, api, http.MethodGet, "/api/campaigns/"+draft, ""); status != http.StatusNotFound {
 		t.Fatalf("get a deleted draft: %d", status)
+	}
+}
+
+func TestTheCalendarPlacesASentCampaignAndRefusesABadRange(t *testing.T) {
+	t.Parallel()
+	api := newAPI(t, ai.NewMock())
+	id := sentCampaign(t, api)
+	now := time.Now().UTC()
+	from, to := now.Add(-24*time.Hour).Format(time.RFC3339), now.Add(24*time.Hour).Format(time.RFC3339)
+
+	status, body := call(t, api, http.MethodGet, "/api/campaign-calendar?from="+from+"&to="+to, "")
+	entries, _ := body["entries"].([]any)
+	campaigns, _ := body["campaigns"].([]any)
+	if status != http.StatusOK || len(entries) != 1 || len(campaigns) != 1 {
+		t.Fatalf("calendar: %d %v", status, body)
+	}
+	entry := entries[0].(map[string]any)
+	if entry["campaign_id"] != id || entry["run"] == nil || (entry["kind"] != "sending" && entry["kind"] != "sent") {
+		t.Fatalf("entry: %v", entry)
+	}
+	if preview, _ := campaigns[0].(map[string]any)["preview"].(map[string]any); preview == nil || preview["sms"] == "" {
+		t.Fatalf("campaign: %v", campaigns[0])
+	}
+
+	for _, query := range []string{"", "from=" + from, "from=yesterday&to=" + to, "from=" + to + "&to=" + from, "from=" + from + "&to=" + to + "&group=nope"} {
+		if status, _ := call(t, api, http.MethodGet, "/api/campaign-calendar?"+query, ""); status != http.StatusBadRequest {
+			t.Fatalf("%q: %d", query, status)
+		}
 	}
 }
