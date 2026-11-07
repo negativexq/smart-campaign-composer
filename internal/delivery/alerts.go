@@ -86,7 +86,7 @@ func (w *Worker) checkAlerts(ctx context.Context, onChannels []string) error {
 		withOpen = append(withOpen, key.campaign)
 	}
 	rows, err := w.db.Query(ctx, `
-		SELECT c.id::text, ch.channel, c.status = 'DISPATCHING', c.updated_at < now() - make_interval(secs => $1),
+		SELECT c.id::text, ch.channel, c.status = 'DISPATCHING', c.status_since < now() - make_interval(secs => $1),
 		       EXISTS (SELECT 1 FROM campaign_deliveries d WHERE d.campaign_id = c.id AND d.channel = ch.channel AND d.status IN ('QUEUED', 'RETRYING', 'SENDING')),
 		       EXISTS (SELECT 1 FROM campaign_deliveries d WHERE d.campaign_id = c.id AND d.channel = ch.channel AND d.status = 'RETRYING')
 		FROM campaigns c CROSS JOIN unnest($2::text[]) AS ch(channel)

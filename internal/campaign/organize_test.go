@@ -215,3 +215,31 @@ func TestTheListPutsWhatSendsNextFirstThenWhatSentLast(t *testing.T) {
 		t.Fatalf("groups %v %v", groups, err)
 	}
 }
+
+func TestArchivingACampaignSentAtOnceAndScheduledAgainKeepsItSent(t *testing.T) {
+	t.Parallel()
+	h, id := approvedCampaign(t)
+	ctx := context.Background()
+	if _, err := h.service.Dispatch(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	// What the worker leaves once every message is accepted.
+	if _, err := h.pool.Exec(ctx, `UPDATE campaign_deliveries SET status = 'SENT' WHERE campaign_id = $1 AND status = 'QUEUED'`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE campaigns SET status = 'COMPLETED' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Schedule(ctx, id, schedule.Spec{Kind: schedule.KindOnce, At: nextHour()}); err != nil {
+		t.Fatal(err)
+	}
+	// The schedule has not run, but the campaign sent: it is closed with what it
+	// sent, as cancelling does, and never goes back to approved.
+	view, err := h.service.Archive(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Status != "DISPATCHING" {
+		t.Fatalf("status after archiving: %s", view.Status)
+	}
+}

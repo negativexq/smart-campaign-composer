@@ -1141,7 +1141,7 @@ func (w *Worker) finishCampaign(ctx context.Context, id string) error {
 // seconds. Messages that are only queued do not count: they may simply be behind
 // another campaign's. Time starts over when a campaign starts or resumes.
 const stalledCondition = `
-	c.status = 'DISPATCHING' AND c.updated_at < now() - make_interval(secs => $1)
+	c.status = 'DISPATCHING' AND c.status_since < now() - make_interval(secs => $1)
 	AND EXISTS (SELECT 1 FROM campaign_deliveries d WHERE d.campaign_id = c.id AND d.status = 'RETRYING')
 	AND NOT EXISTS (
 		SELECT 1 FROM campaign_deliveries d

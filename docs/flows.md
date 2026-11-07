@@ -1,6 +1,6 @@
 # Flows
 
-How a campaign moves through the system, from a brief to a report. For the parts these flows run on, see [architecture.md](architecture.md).
+How a campaign moves through the system, from a brief to a report. For the parts these flows run on, see [architecture.md](architecture.md). Every state, guard and invariant behind these diagrams is listed in [state-machines.md](state-machines.md).
 
 ## The whole journey
 
@@ -40,7 +40,7 @@ stateDiagram-v2
     READY_FOR_REVIEW --> APPROVED: approve
     APPROVED --> DISPATCHING: send now
     APPROVED --> SCHEDULED: schedule
-    SCHEDULED --> APPROVED: cancel before any run
+    SCHEDULED --> APPROVED: cancel or archive before any run
     SCHEDULED --> DISPATCHING: run is due
     DISPATCHING --> SCHEDULED: run finished, more to come
     DISPATCHING --> PAUSED: 10 minutes with no progress
@@ -57,6 +57,7 @@ stateDiagram-v2
 - A claim on `GENERATING` older than five minutes counts as left behind by a dead process, so a new generation can take it over.
 - Leaving out every language that has messages also returns the campaign to `DRAFT`.
 - A repeating run with nobody new to queue stays in `SCHEDULED`.
+- Archiving a scheduled campaign drops its later sends, like cancelling the schedule.
 - Cancelling a schedule after the campaign has sent, by that schedule or before it, lets the campaign finish with what it has sent. The campaign page then shows the rule as stopped.
 - A finished campaign can be scheduled again with its approved messages. Each send is a new run, and the schedule says whom earlier sends leave out, a one-time send included.
 
@@ -213,7 +214,6 @@ When attempts run out, a delivery with any timeout behind it ends as `UNKNOWN`, 
 stateDiagram-v2
     [*] --> QUEUED: has consent
     [*] --> SKIPPED: no consent
-    SKIPPED --> QUEUED: consent given, later run
     QUEUED --> SENDING: claimed
     RETRYING --> SENDING: claimed when due
     SENDING --> SENT: accepted
@@ -226,6 +226,8 @@ stateDiagram-v2
     FAILED --> [*]
     UNKNOWN --> [*]
 ```
+
+`SENT`, `FAILED`, `UNKNOWN` and `SKIPPED` are final. Someone skipped for lack of consent who gives it later is queued in a later run, as a new delivery.
 
 `SENT` means the provider accepted the message, not that a person received it. What became of it afterwards is recorded separately: see [Provider reports](#provider-reports).
 

@@ -283,3 +283,23 @@ func TestADuplicatePreviewCountsWhoTheCampaignAlreadyReached(t *testing.T) {
 		t.Fatalf("the copy's audience is not the one previewed: %+v", copied.Audience)
 	}
 }
+
+func TestLeavingOutTheOnlyLanguageWrittenLeavesADraft(t *testing.T) {
+	t.Parallel()
+	h, _, id := newContentHarness(t, step{output: validContent})
+	ctx := context.Background()
+	// Nobody falls back to English, so only Turkish is written.
+	if _, err := h.pool.Exec(ctx, `UPDATE users SET language = 'tr'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err != nil {
+		t.Fatal(err)
+	}
+	view, err := h.service.SetExcludedLanguages(ctx, id, []string{"tr"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Status != "DRAFT" || view.Content != nil {
+		t.Fatalf("status %s, content %v", view.Status, versionLanguages(view))
+	}
+}

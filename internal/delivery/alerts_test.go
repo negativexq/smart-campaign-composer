@@ -397,7 +397,7 @@ func TestAChannelThatAcceptsNothingIsReportedWhileTheOtherMoves(t *testing.T) {
 		t.Fatalf("a campaign that just started was reported: %v", got)
 	}
 
-	if _, err := r.pool.Exec(ctx, `UPDATE campaigns SET updated_at = now() - interval '11 minutes' WHERE id = $1`, r.id); err != nil {
+	if _, err := r.pool.Exec(ctx, `UPDATE campaigns SET status_since = now() - interval '11 minutes' WHERE id = $1`, r.id); err != nil {
 		t.Fatal(err)
 	}
 	r.checkAlerts(t)

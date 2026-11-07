@@ -68,6 +68,8 @@ var (
 	ErrLanguageDiscount   = errors.New("languages or versions would promise different discounts")
 	ErrMissingVariant     = errors.New("a test needs its second version written")
 	ErrMissingLanguage    = errors.New("part of the audience reads a language with no messages")
+	ErrContentChanged     = errors.New("the messages changed since they were read")
+	ErrReviewChanged      = errors.New("the campaign changed since it was reviewed")
 )
 
 // freeToDraft is the SQL condition for a campaign nothing else is generating
@@ -835,12 +837,24 @@ func (g *Generation) recordFailure(ctx context.Context, failure error, cancelled
 // generated text, but a discount that differs from the brief is only pointed out:
 // the marketer may change the offer, the model may not.
 func (s *Service) SaveContent(ctx context.Context, id string, edited content.Content) (View, error) {
+	return s.SaveContentAt(ctx, id, "", edited)
+}
+
+// SaveContentAt saves a person's edit made to the messages at revision, the
+// ContentRevision they were shown. Every save replaces the whole document, so an edit
+// made to an older revision, in another tab or before a regeneration finished, would
+// silently undo the newer text; it is refused instead. An empty revision skips that
+// check, but a change between this read and the write is still refused.
+func (s *Service) SaveContentAt(ctx context.Context, id, revision string, edited content.Content) (View, error) {
 	view, err := s.Get(ctx, id)
 	if err != nil {
 		return View{}, err
 	}
 	if view.Status != statusReady || view.Content == nil {
 		return View{}, ErrNotEditable
+	}
+	if revision != "" && revision != view.ContentRevision {
+		return View{}, ErrContentChanged
 	}
 	target := view.Content.forVariant(edited.Variant)
 	if target != nil && edited.Language != "" {
@@ -903,6 +917,15 @@ func (s *Service) SaveContent(ctx context.Context, id string, edited content.Con
 	}
 	if result.RowsAffected() == 0 {
 		return View{}, ErrNotEditable
+	}
+	// The row lock above waits for any other save or generation, so this reads what
+	// they left. The edit was made to the document read before, which must still stand.
+	var current []byte
+	if err := tx.QueryRow(ctx, `SELECT content FROM campaign_versions WHERE campaign_id = $1 AND version = $2`, id, view.Version).Scan(&current); err != nil {
+		return View{}, fmt.Errorf("read content: %w", err)
+	}
+	if contentRevision(current) != view.ContentRevision {
+		return View{}, ErrContentChanged
 	}
 	if _, err := tx.Exec(ctx, `UPDATE campaign_versions SET content = $3 WHERE campaign_id = $1 AND version = $2`, id, view.Version, encoded); err != nil {
 		return View{}, fmt.Errorf("save edited content: %w", err)

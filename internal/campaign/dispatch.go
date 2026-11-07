@@ -87,6 +87,14 @@ func lockStatus(ctx context.Context, tx pgx.Tx, id string) (string, error) {
 // Approve is the human decision that freezes what will be sent. Everything is
 // checked again here, because users and consents may have changed during review.
 func (s *Service) Approve(ctx context.Context, id string) (View, error) {
+	return s.ApproveAt(ctx, id, "")
+}
+
+// ApproveAt approves the campaign as it was shown at revision, its ReviewRevision.
+// Messages edited or rewritten, or an audience changed, after the review page loaded
+// are refused, since the person approving never saw them. An empty revision skips
+// that check. Repeating an approval that took effect changes nothing.
+func (s *Service) ApproveAt(ctx context.Context, id, revision string) (View, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return View{}, fmt.Errorf("begin approve: %w", err)
@@ -110,6 +118,9 @@ func (s *Service) Approve(ctx context.Context, id string) (View, error) {
 	}
 	if view.Content == nil {
 		return View{}, ErrNotReviewable
+	}
+	if revision != "" && revision != view.ReviewRevision {
+		return View{}, ErrReviewChanged
 	}
 	if len(view.Blockers) > 0 {
 		return View{}, ErrAudienceBlocked

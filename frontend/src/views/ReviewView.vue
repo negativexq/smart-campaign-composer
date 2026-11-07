@@ -170,11 +170,12 @@ const actionLabel = computed(() => {
 });
 
 // Approving twice is harmless, so trying again after a failed second step is safe.
+// The approval names what this page showed, so a change made since is refused.
 async function confirm() {
   submitting.value = true;
   actionError.value = "";
   try {
-    await approveCampaign(props.campaignId);
+    await approveCampaign(props.campaignId, campaign.value?.review_revision);
     const spec = buildSchedule(form.value);
     if (spec) await scheduleCampaign(props.campaignId, spec);
     else await dispatchCampaign(props.campaignId);
