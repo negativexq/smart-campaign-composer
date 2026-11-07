@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/negativexq/smart-campaign-composer/internal/ai"
 	"github.com/negativexq/smart-campaign-composer/internal/campaign"
 	"github.com/negativexq/smart-campaign-composer/internal/schedule"
 )
@@ -241,5 +242,89 @@ func TestArchivingACampaignSentAtOnceAndScheduledAgainKeepsItSent(t *testing.T) 
 	}
 	if view.Status != "DISPATCHING" {
 		t.Fatalf("status after archiving: %s", view.Status)
+	}
+}
+
+// Issue #4: archiving refuses a campaign that is writing, so an archived one does not
+// start writing, change its audience or take an edit until it is restored.
+func TestAnArchivedCampaignIsNotChanged(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, provider, id := newContentHarness(t, step{output: validContent})
+	opened, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Archive(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	contentCalls, segmentCalls := len(provider.contentCalls), len(provider.requests)
+
+	if _, err := h.service.StartGeneration(ctx, id, campaign.GenerateInput{}); !errors.Is(err, campaign.ErrArchived) {
+		t.Errorf("generation: %v", err)
+	}
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{Refinement: "Only Ankara"}); !errors.Is(err, campaign.ErrArchived) {
+		t.Errorf("new audience: %v", err)
+	}
+	edited := opened.Content.Content
+	edited.SMS = "Edited while archived. Reply STOP to opt out"
+	if _, err := h.service.SaveContentAt(ctx, id, opened.ContentRevision, edited); !errors.Is(err, campaign.ErrArchived) {
+		t.Errorf("edit: %v", err)
+	}
+
+	after, err := h.service.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != "READY_FOR_REVIEW" || after.ContentRevision != opened.ContentRevision {
+		t.Fatalf("archived campaign changed: %s, revision %s", after.Status, after.ContentRevision)
+	}
+	if len(provider.contentCalls) != contentCalls || len(provider.requests) != segmentCalls {
+		t.Fatal("the model was asked for an archived campaign")
+	}
+
+	// Restored, it can be worked on again.
+	if _, err := h.service.Unarchive(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.SaveContentAt(ctx, id, opened.ContentRevision, edited); err != nil {
+		t.Fatalf("edit after restoring: %v", err)
+	}
+}
+
+// archivingProvider archives the campaign while the model works on an audience.
+type archivingProvider struct {
+	ai.Provider
+	before func()
+}
+
+func (p archivingProvider) ProposeSegment(ctx context.Context, request ai.SegmentRequest) (ai.Response, error) {
+	p.before()
+	return p.Provider.ProposeSegment(ctx, request)
+}
+
+// Issue #4: an audience the model returns after the campaign was archived is not saved.
+func TestAnAudienceArchivedWhileTheModelAnswersIsNotSaved(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, provider, id := newContentHarness(t, step{output: validContent})
+	opened, _, err := run(t, h, id, campaign.GenerateInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.service = h.serviceWith(archivingProvider{Provider: provider, before: func() {
+		if _, err := h.service.Archive(ctx, id); err != nil {
+			t.Error(err)
+		}
+	}})
+	if _, err := h.service.ProposeSegment(ctx, id, campaign.ProposeInput{Refinement: "Only Ankara"}); !errors.Is(err, campaign.ErrArchived) {
+		t.Fatalf("audience saved on an archived campaign: %v", err)
+	}
+	after, err := h.service.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != "READY_FOR_REVIEW" || after.ContentRevision != opened.ContentRevision || after.ArchivedAt == nil {
+		t.Fatalf("after: %s, revision %s, archived %v", after.Status, after.ContentRevision, after.ArchivedAt != nil)
 	}
 }

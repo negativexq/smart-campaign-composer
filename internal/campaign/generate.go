@@ -238,7 +238,8 @@ func (s *Service) StartGeneration(ctx context.Context, id string, input Generate
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
-	if _, _, err := lockForArchive(ctx, tx, id); err != nil {
+	// An archived campaign does not write: archiving refuses one that is writing.
+	if _, err := lockStatus(ctx, tx, id); err != nil {
 		return nil, err
 	}
 	view, err := s.get(ctx, tx, id)
@@ -866,6 +867,9 @@ func (s *Service) SaveContentAt(ctx context.Context, id, revision string, edited
 	if err != nil {
 		return View{}, err
 	}
+	if view.ArchivedAt != nil {
+		return View{}, ErrArchived
+	}
 	if view.Status != statusReady || view.Content == nil {
 		return View{}, ErrNotEditable
 	}
@@ -927,6 +931,10 @@ func (s *Service) SaveContentAt(ctx context.Context, id, revision string, edited
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
+	// Archived or deleted since it was read, it is refused like any other action.
+	if _, err := lockStatus(ctx, tx, id); err != nil {
+		return View{}, err
+	}
 	result, err := tx.Exec(ctx, `UPDATE campaigns SET updated_at = now() WHERE id = $1 AND status = $2`, id, statusReady)
 	if err != nil {
 		return View{}, fmt.Errorf("touch campaign: %w", err)

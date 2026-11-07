@@ -972,7 +972,7 @@ func describeError(r *http.Request, err error) (int, string) {
 	case errors.Is(err, campaign.ErrInvalidTags):
 		status, message = http.StatusBadRequest, "Use up to 10 tags of up to 30 characters each."
 	case errors.Is(err, campaign.ErrArchived):
-		status, message = http.StatusConflict, "This campaign is archived. Restore it before sending or scheduling it."
+		status, message = http.StatusConflict, "This campaign is archived. Restore it before changing, sending or scheduling it."
 	case errors.Is(err, campaign.ErrNotArchived):
 		status, message = http.StatusConflict, "This campaign is not archived."
 	case errors.Is(err, campaign.ErrStillSending):
