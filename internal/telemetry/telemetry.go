@@ -55,15 +55,19 @@ type Metrics struct {
 	DeliveryLoopSeconds    *prometheus.CounterVec
 	DeliveryClaimDuration  *prometheus.HistogramVec
 	DeliveryRecordDuration *prometheus.HistogramVec
-	DeliveryQueueAge       *prometheus.HistogramVec
-	DeliveryGrantToSend    *prometheus.HistogramVec
-	DeliveryInflight       *prometheus.GaugeVec
-	LimiterReserveDuration *prometheus.HistogramVec
-	LimiterSettleDuration  *prometheus.HistogramVec
-	LimiterGranted         *prometheus.CounterVec
-	LimiterUnused          *prometheus.CounterVec
-	LimiterActualWait      *prometheus.HistogramVec
-	LimiterPause           *prometheus.HistogramVec
+	// DeliveryContactCheck times the "not messaged recently" check before a send, by
+	// what it found, and DeliveryContactLockWait the part spent waiting for the person.
+	DeliveryContactCheck    *prometheus.HistogramVec
+	DeliveryContactLockWait *prometheus.HistogramVec
+	DeliveryQueueAge        *prometheus.HistogramVec
+	DeliveryGrantToSend     *prometheus.HistogramVec
+	DeliveryInflight        *prometheus.GaugeVec
+	LimiterReserveDuration  *prometheus.HistogramVec
+	LimiterSettleDuration   *prometheus.HistogramVec
+	LimiterGranted          *prometheus.CounterVec
+	LimiterUnused           *prometheus.CounterVec
+	LimiterActualWait       *prometheus.HistogramVec
+	LimiterPause            *prometheus.HistogramVec
 }
 
 // quickBuckets suit calls that normally take milliseconds: Redis, the queue, a commit.
@@ -162,6 +166,16 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 		DeliveryRecordDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "campaign_delivery_record_duration_seconds",
 			Help:    "Time storing an outcome, from taking a connection to the commit.",
+			Buckets: quickBuckets,
+		}, []string{"channel"}),
+		DeliveryContactCheck: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "campaign_delivery_contact_check_seconds",
+			Help:    "Time checking a \"not messaged recently\" rule before a send, from taking a connection to the end, by what it found.",
+			Buckets: quickBuckets,
+		}, []string{"channel", "found"}),
+		DeliveryContactLockWait: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "campaign_delivery_contact_lock_wait_seconds",
+			Help:    "Time a \"not messaged recently\" check waited for another check on the same person.",
 			Buckets: quickBuckets,
 		}, []string{"channel"}),
 		DeliveryQueueAge: factory.NewHistogramVec(prometheus.HistogramOpts{

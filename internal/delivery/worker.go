@@ -952,18 +952,6 @@ func (w *Worker) record(ctx context.Context, item claim, next update, attempt *a
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
-	if _, err := recordIn(ctx, tx, item, next, attempt); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit record: %w", err)
-	}
-	return nil
-}
-
-// recordIn writes an outcome in the caller's transaction. It reports false when the
-// claim has moved on, as when its lease ran out and another worker took the message.
-func recordIn(ctx context.Context, tx pgx.Tx, item claim, next update, attempt *attemptRow) (bool, error) {
 	result, err := tx.Exec(ctx, `
 		UPDATE campaign_deliveries
 		SET status = $3, attempts = $4, next_attempt_at = now() + make_interval(secs => $5),
@@ -973,87 +961,124 @@ func recordIn(ctx context.Context, tx pgx.Tx, item claim, next update, attempt *
 		WHERE id = $1 AND claim_token = $2 AND status = 'SENDING'`,
 		item.id, item.token, next.status, next.attempts, next.retryIn.Seconds(), next.reason, next.messageID)
 	if err != nil {
-		return false, fmt.Errorf("update delivery: %w", err)
+		return fmt.Errorf("update delivery: %w", err)
 	}
 	if result.RowsAffected() == 0 {
 		slog.WarnContext(ctx, "claim was lost, outcome not recorded", "delivery_id", item.id)
-		return false, nil
+		return nil
 	}
 	if attempt != nil {
 		if _, err := tx.Exec(ctx, `INSERT INTO delivery_attempts (delivery_id, campaign_id, run_id, channel, attempt, response_code, outcome, error) VALUES ($1, $2, $8, $3, $4, $5, $6, NULLIF($7, ''))`,
 			item.id, item.campaignID, item.channel, attempt.number, attempt.code, attempt.outcome, attempt.err, item.runID); err != nil {
-			return false, fmt.Errorf("record attempt: %w", err)
+			return fmt.Errorf("record attempt: %w", err)
 		}
 	}
-	return true, nil
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit record: %w", err)
+	}
+	return nil
 }
 
-// recentContact finds what stands between a person and one more message under a "not
-// messaged recently" rule: "messaged" for a message from another send since the
-// cutoff, counting one that may have arrived, or "sending" for one on its way now.
-// A send that timed out may have got through, so a retry waiting after one counts
-// from when that call was made. The message's own run is left out: its other channel
-// is part of the same send.
-const recentContact = `
-	SELECT CASE
-		WHEN EXISTS (
-			SELECT 1 FROM campaign_deliveries d
-			WHERE d.user_id = $1 AND d.run_id <> $2::uuid AND d.status IN ('SENT', 'UNKNOWN') AND d.updated_at >= $3)
-		  OR EXISTS (
-			SELECT 1 FROM campaign_deliveries d
-			WHERE d.user_id = $1 AND d.run_id <> $2::uuid AND d.status = 'RETRYING'
-			  AND EXISTS (SELECT 1 FROM delivery_attempts a WHERE a.delivery_id = d.id AND a.outcome = $4 AND a.occurred_at >= $3))
-		THEN 'messaged'
-		WHEN EXISTS (
-			SELECT 1 FROM campaign_deliveries d
-			WHERE d.user_id = $1 AND d.run_id <> $2::uuid AND d.status = 'SENDING')
-		THEN 'sending'
-		ELSE ''
-	END`
+// lockContact waits for the person's turn and says how long that took. The lock
+// lasts until the end of the transaction, which in a batch outside one is the batch.
+const lockContact = `
+	SELECT EXTRACT(EPOCH FROM clock_timestamp() - statement_timestamp())::float8
+	FROM (SELECT pg_advisory_xact_lock(hashtextextended($1, 0))) turn`
+
+// checkContact finds what stands between a person and one more message under a "not
+// messaged recently" rule, and holds the message back in the same statement: skipped
+// as "messaged_recently" for a message from another send since the cutoff, counting
+// one that may have arrived, or waiting as "another_message_sending" for one on its
+// way now. A send that timed out may have got through, so a retry waiting after one
+// counts from when that call was made. The message's own run is left out: its other
+// channel is part of the same send. Nothing changes when its claim has moved on. It
+// gives what it found and whether it wrote. It must run after lockContact, as a
+// statement of its own, so that it sees what the last holder of the turn wrote.
+const checkContact = `
+	WITH seen AS (
+		SELECT CASE
+			WHEN EXISTS (
+				SELECT 1 FROM campaign_deliveries d
+				WHERE d.user_id = $1 AND d.run_id <> $2::uuid AND d.status IN ('SENT', 'UNKNOWN') AND d.updated_at >= $3)
+			  OR EXISTS (
+				SELECT 1 FROM campaign_deliveries d
+				WHERE d.user_id = $1 AND d.run_id <> $2::uuid AND d.status = 'RETRYING'
+				  AND EXISTS (SELECT 1 FROM delivery_attempts a WHERE a.delivery_id = d.id AND a.outcome = $4 AND a.occurred_at >= $3))
+			THEN 'messaged'
+			WHEN EXISTS (
+				SELECT 1 FROM campaign_deliveries d
+				WHERE d.user_id = $1 AND d.run_id <> $2::uuid AND d.status = 'SENDING')
+			THEN 'sending'
+			ELSE ''
+		END AS found
+	), held AS (
+		UPDATE campaign_deliveries d
+		SET status = CASE WHEN seen.found = 'messaged' THEN 'SKIPPED' ELSE 'RETRYING' END,
+		    last_error = CASE WHEN seen.found = 'messaged' THEN $7 ELSE $8 END,
+		    next_attempt_at = now() + CASE WHEN seen.found = 'messaged' THEN interval '0' ELSE make_interval(secs => $9) END,
+		    provider_message_id = NULL, sent_at = NULL, claim_token = NULL, lease_expires_at = NULL, updated_at = now()
+		FROM seen
+		WHERE seen.found <> '' AND d.id = $5 AND d.claim_token = $6 AND d.status = 'SENDING'
+		RETURNING d.id
+	)
+	SELECT found, EXISTS (SELECT 1 FROM held) FROM seen`
 
 // holdBack keeps a message with a "not messaged recently" rule from going out after
 // another send has reached the person, or while one is on its way. Checks for one
 // person take turns under a lock and write their outcome before letting go, so of
 // two messages claimed together the first to look waits and the second, finding it
-// no longer sending, goes. The lock is not held while calling the provider: a message
-// from a campaign without the rule, sent between this check and that call, still
-// goes. It reports true when the message must not be sent now, including when its
-// claim was lost.
-func (w *Worker) holdBack(ctx context.Context, item claim) (bool, error) {
+// no longer sending, goes. Both statements go in one batch, one round trip: outside a
+// transaction PostgreSQL runs a batch as one implicit transaction, so the lock holds
+// until the batch ends, while each statement still takes its own snapshot. The lock
+// is not held while calling the provider: a message from a campaign without the
+// rule, sent between this check and that call, still goes. It reports true when the
+// message must not be sent now, including when its claim was lost.
+func (w *Worker) holdBack(ctx context.Context, item claim) (held bool, err error) {
+	started := time.Now()
+	found := "error"
+	defer func() {
+		w.metrics.DeliveryContactCheck.WithLabelValues(item.channel, found).Observe(time.Since(started).Seconds())
+	}()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
 	defer cancel()
 	ctx, span := w.tracer.Start(ctx, "delivery.contact_check")
 	defer span.End()
-	tx, err := w.db.Begin(ctx)
-	if err != nil {
-		return false, fmt.Errorf("begin contact check: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, contactLock(item.userID)); err != nil {
+	cutoff := time.Now().AddDate(0, 0, -*item.notMessagedWithinDays)
+	batch := &pgx.Batch{}
+	batch.Queue(lockContact, contactLock(item.userID))
+	batch.Queue(checkContact, item.userID, item.runID, cutoff, outcomeTimeout, item.id, item.token,
+		reasonMessagedRecently, reasonAnotherSending, sendingWait.Seconds())
+	results := w.db.SendBatch(ctx, batch)
+	defer results.Close() //nolint:errcheck // closed below; this covers the early returns
+	var waited float64
+	if err := results.QueryRow().Scan(&waited); err != nil {
 		return false, fmt.Errorf("lock contact: %w", err)
 	}
-	// A statement of its own after the lock, so it sees what the last holder wrote.
-	cutoff := time.Now().AddDate(0, 0, -*item.notMessagedWithinDays)
-	var found string
-	if err := tx.QueryRow(ctx, recentContact, item.userID, item.runID, cutoff, outcomeTimeout).Scan(&found); err != nil {
+	var (
+		seen  string
+		wrote bool
+	)
+	if err := results.QueryRow().Scan(&seen, &wrote); err != nil {
 		return false, fmt.Errorf("check recent messages: %w", err)
 	}
-	var next update
-	switch found {
+	// Closing reads to the end of the batch, after its implicit commit.
+	if err := results.Close(); err != nil {
+		return false, fmt.Errorf("commit contact check: %w", err)
+	}
+	w.metrics.DeliveryContactLockWait.WithLabelValues(item.channel).Observe(waited)
+	switch seen {
 	case "":
+		found = "nothing"
 		return false, nil
 	case "messaged":
-		next = update{status: statusSkipped, attempts: item.attempts, reason: reasonMessagedRecently}
+		found = reasonMessagedRecently
 	default:
-		next = update{status: statusRetrying, attempts: item.attempts, retryIn: sendingWait, reason: reasonAnotherSending}
+		found = reasonAnotherSending
 	}
-	span.SetAttributes(attribute.String("delivery.held_back", next.reason))
-	if _, err := recordIn(ctx, tx, item, next, nil); err != nil {
-		return false, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("commit contact check: %w", err)
+	span.SetAttributes(attribute.String("delivery.held_back", found))
+	if !wrote {
+		slog.WarnContext(ctx, "claim was lost, outcome not recorded", "delivery_id", item.id)
 	}
 	return true, nil
 }
