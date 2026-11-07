@@ -48,7 +48,7 @@ They run on their own compose project, image and ports, next to the demo, and th
 
 ## Signal, our own design language
 
-The product follows the pattern shared by Klaviyo, Insider One and Braze: describe the goal, review a plain-language draft, then approve. It uses a guided workspace rather than a chat, because this flow has one fixed path. Mock provider acceptance is labelled `Accepted`, not delivered, because nothing confirms delivery to a person. The first version is light only, to keep scope on the core flow. See [DESIGN.md](DESIGN.md).
+The product follows the pattern shared by Klaviyo, Insider One and Braze: describe the goal, review a plain-language draft, then approve. It uses a guided workspace rather than a chat, because this flow has one fixed path. Mock provider acceptance is labelled `Accepted`, not delivered, because nothing confirms delivery to a person. The first version was light only, to keep scope on the core flow; Settings now offers light, dark and the device's choice. See [DESIGN.md](DESIGN.md).
 
 ## LLM providers behind one application-level interface
 
@@ -68,7 +68,7 @@ The Claude adapter rewrites the schema the same way as the OpenAI one: every pro
 
 ## The audience is counted as of the proposal time
 
-Windows such as "last 30 days" are measured from `audience_as_of`, so the number under review does not shrink as time passes. Event data is still live: a purchase recorded after the proposal can change the count. Freezing recipients at approval is the job of the dispatch step.
+Windows such as "last 30 days" are measured from `audience_as_of`, so the number under review does not shrink as time passes. Event data is still live: a purchase recorded after the proposal can change the count. For a one-time send, approval then stores the recipient list (see below); a repeating send finds who matches at each run.
 
 ## Telemetry level: production essentials, not a platform
 
@@ -80,9 +80,9 @@ Telemetry says how the system behaves; `audit_events` says what was decided. The
 
 ## A campaign workspace, with creation as a flow inside it
 
-The app opens on an overview rather than a form, because the system manages campaigns over time: `/` is the overview, `/campaigns` the list, `/campaigns/new` and `/campaigns/:id/edit` the creation wizard, and `/campaigns/:id` the detail page. Everything shown comes from the database, and sections without real data do not exist yet: the Deliveries tab, for example, arrives with that stage rather than as an empty placeholder, and the Content tab only appears once a campaign has messages. For the same reason there is no Settings page and no separate Activity page.
+The app opens on an overview rather than a form, because the system manages campaigns over time: `/` is the overview, `/campaigns` the list, `/campaigns/new` and `/campaigns/:id/edit` the creation wizard, and `/campaigns/:id` the detail page. Everything shown comes from the database, and sections without real data do not exist yet: the Deliveries tab, for example, arrives with that stage rather than as an empty placeholder, and the Content tab only appears once a campaign has messages. Pages beyond the campaigns, such as Settings, Templates, Analytics and the delivery monitor, were added only once they had real data or real choices behind them. Activity stays a tab on the campaign rather than a page of its own.
 
-Each status belongs to at most one of the overview's groups (drafts, live, completed, needs attention), so its counts match what those filters show. `COMPLETED_WITH_FAILURES` sits under needs attention, where someone will look for it. The list's row of status tabs adds narrower groups inside them, shown only while they hold something, with counts that follow the search and channel filter: needs approval within drafts, and repeating, sending now and paused within live. These overlap on purpose, since a repeating campaign that is sending belongs to both.
+Each status belongs to at most one of the overview's groups (drafts, active, completed, needs attention), so its counts match what those filters show. `COMPLETED_WITH_FAILURES` sits under needs attention, where someone will look for it. The list's row of status tabs adds narrower groups inside them, shown only while they hold something, with counts that follow the search and channel filter: needs approval within drafts, and repeating, sending now and paused within active. These overlap on purpose, since a repeating campaign that is sending belongs to both.
 
 Once campaigns repeat, the time a campaign was created says little about it, so the list is ordered by what sends next, then by what sent last. Created is only a sort option. Each row says in a second line what kind of campaign it is, in the words of its schedule, and shows the next send and the last run's result instead of everything ever sent added up. A repeating campaign between runs reads "Waiting for next run", not "Scheduled", because it has already sent. The next few sends across the workspace sit above the list. Copies are numbered from the original's name ("(copy)", "(copy 2)") so a list of them can be told apart.
 
@@ -94,7 +94,7 @@ The brief sits above the tabs on the detail page with its own accent, because it
 
 A campaign starts with a provisional name cut from its brief. The proposal suggests a better one, which passes the same validation as the rest of the model's output, and anyone can rename the campaign. `name_source` records who chose the name, so a suggestion never replaces a name someone typed. Renaming works in every status, because a name labels the campaign rather than being part of the immutable approved version. It is still recorded in the audit trail.
 
-The Activity tab is written from `audit_events`, not from spans. There are no user accounts in this case, so entries say what happened but cannot say who did it.
+The Activity tab is written from `audit_events`, not from spans. Each entry names who did it, from the sign-in name, or says the system did it.
 
 ## Streamed content is a preview, and only the finished output counts
 
@@ -118,13 +118,13 @@ Messages are written for a specific audience, and its longest name sets the limi
 
 A campaign uses SMS, email or both, and that choice is fixed once it exists. It is stored on the campaign rather than derived from which text was written, because the choice decides what gets written: the model is asked only for the chosen fields, text for any other field is dropped whoever wrote it, and deliveries are only created on the chosen channels. Reachable counts are zeroed for an unused channel before the approval checks run, so a campaign is not blocked by missing consent on a channel it does not use, and the number on the approve button stays exact.
 
-## One email template, filled with text
+## Emails are filled with text, never written as markup
 
-The model and the marketer write text only: subject, preview text, headline, body, button label and link. The backend puts that text into one table-based responsive template with `html/template`, so neither can add markup, and the plain text alternative comes from the same fields. Letting a model write HTML would need a sanitizer, would break differently in each mail client, and would make every campaign a new design to check. The cost is that campaigns cannot have their own layout or images.
+The model and the marketer write text only: subject, preview text, headline, body, button label and link. The backend puts that text into a table-based responsive layout with `html/template`, so neither can add markup, and the plain text alternative comes from the same fields. Letting a model write HTML would need a sanitizer, would break differently in each mail client, and would make every campaign a new design to check. Layout and images come from the design a person picks, never from the model.
 
 The preview calls the same renderer through an endpoint instead of copying it in the frontend, so what a marketer checks is what is sent. It is shown in a sandboxed frame with no scripts. The template editor's frame also has `allow-scripts`, because Safari silently drops the page's click listeners on a frame without it; its render carries `script-src 'none'`, so nothing inside the email can run. Sent emails do not carry that line.
 
-A button link from the model must appear in the brief, the instruction or the current version, because a made-up address sends real people somewhere nobody chose. A person editing the message can set any full http or https link. The footer text is English even for Turkish messages, which has the same cause as the `there` fallback: campaigns have no language field yet.
+A button link from the model must appear in the brief, the instruction or the current version, because a made-up address sends real people somewhere nobody chose. A person editing the message can set any full http or https link.
 
 ## Unsubscribing takes a signed link and a button
 
@@ -154,14 +154,13 @@ The marketer checks the rule in a breakdown table: from the main audience down t
 
 Counts used to be recalculated whenever a page opened, so a later consent change could move the number on a finished campaign. Approval now stores the counts and the step-by-step breakdown with the version, and the Audience tab says "snapshot" only when one exists. What was really sent stays a separate figure read from the delivery records, because consent is checked again at send time.
 
-
 ## Each condition shows the words it came from
 
 The model returns, for each filter, the exact words of the brief or refinement behind it. The backend keeps a quote only if it really appears in that text, ignoring case and spacing, and a filter without one is shown as added by the AI. A false quote costs only the explanation, so it does not reject the proposal. The check proves the words were written, not that the filter means the same thing, which is what human approval is for.
 
-## Known limits of content generation
+## Regenerating replaces a channel, and a missing name uses the reader's language
 
-Regeneration replaces every message rather than one, which keeps the validation of the offer across channels simple. The `there` fallback for a missing name is English and reads awkwardly in a Turkish message; per-language fallbacks belong with per-language content.
+Regenerating a channel rewrites its messages in every language and leaves the other channel as it is, including the marketer's edits there. Each channel is checked against the same brief, so the offer stays the same across them. A person with no first name is greeted with their language's own word ("müşterimiz", "there", "Kundschaft"), and the email footer is written in the reader's language too.
 
 ## Scheduling repeats a campaign, and the schedule says who may get it again
 
@@ -287,8 +286,8 @@ Signing in takes a username or email and no password. The name goes into an unsi
 
 A schedule is a row in `campaign_schedules`, including its next run time, and the scheduler keeps nothing in memory. Restarting any service or the machine loses nothing, and the data stays while the Postgres volume does: `make down` keeps it, `docker compose down -v` deletes it. Seeding skips a database that already has users. A one-time send whose time passed during downtime goes out when the system returns, and missed intervals become one run.
 
-
 Closing a campaign takes the same row lock a scheduled run holds while it adds deliveries, then looks for open deliveries again. Without that, a run starting just as the last one drained could be closed over: nothing claims the deliveries of a campaign that stopped sending, so they would sit queued under a campaign marked completed. The look has to be its own statement after the lock, because one statement keeps the view it started with.
+
 ## A refinement rewrites the brief
 
 The brief is what a marketer reads first and what message writing starts from, so it has to say the same thing as the rule. A refinement returns the whole brief rewritten next to the new rule, and the two are saved together.
@@ -303,11 +302,11 @@ The first arrival still writes all channels in one model call, because both mess
 
 Moving to another step saves what was typed, so there is no separate save button and no way to walk away from unsaved text by accident. Text the backend refuses keeps the person on the step with the problem shown on the field.
 
-## A few fixed email templates, not an editor
+## Three built-in email designs came first
 
-Campaign emails looked plain, and a marketer now picks one of three designs (Classic, Announcement, Offer) on the Email step and sees it in the preview, which the backend renders with the same code that sends. The choice is stored with the messages, so an approved email is frozen along with its design, and drafts from before this feature keep rendering as Classic.
+Campaign emails looked plain, so the Email step got three designs (Classic, Announcement, Offer), and a marketer picks one and sees it in the preview, which the backend renders with the same code that sends. The choice is stored with the messages, so an approved email is frozen along with its design, and drafts from before this feature keep rendering as Classic.
 
-The templates are code, not data. People and models still only write text that `html/template` escapes, so a custom template or a markup editor would be a new attack surface and is left for later. A model cannot pick a template: its value is dropped when output is parsed, and regenerating keeps what the person chose. There is no logo or brand color yet, because the product has no brand settings to take them from.
+These three are code, not data, and Classic is still the default. Marketers' own templates came later as documents of blocks rather than markup, with a brand kit for the logo, colors and footer they start from (see [Templates are documents of blocks](#templates-are-documents-of-blocks-drawn-by-our-own-renderer)). A model cannot pick a design: its value is dropped when output is parsed, and regenerating keeps what the person chose.
 
 ## The rule and the messages are compared with the brief
 
@@ -496,3 +495,25 @@ Setup adds eight templates, their images and an example brand kit, so a new inst
 A row in `starter_content` records that this happened. Without it, every restart would either bring back a template someone deleted or need to tell "deleted" from "never added". A template with the same name or an existing brand kit is kept as it is, which also makes the load safe on an installation that already has its own.
 
 The starter images have no words drawn into them and the templates have no fixed text, so every word in an email follows the campaign's language.
+
+## A saved audience is a rule, and its counts carry a date
+
+A marketer can keep a campaign's audience under a name and start later campaigns from it. What is kept is the rule, copied from the campaign where it already passed validation, never from the request, so a saved audience cannot hold a filter the backend would refuse. Using one needs no model call: its brief says what the message is about, not whom it is for, so nothing is read from it until someone asks to change the audience.
+
+The numbers on the Audiences page are from the last time it was counted, and the page says when. "Count again" sizes it as of now and says what changed, or that nothing did, so the button never looks as if it did nothing. A campaign started from a saved audience is counted as of its own proposal and keeps its own copy, so renaming, recounting or deleting the saved one never touches it. Names are unique regardless of case, the way tags are, and a saved audience outlives the campaign it came from.
+
+## A weekly schedule follows one time zone's clock
+
+A rule such as "Mondays at 10:00" is read in one time zone, which starts as the browser's and is stored with the schedule, so it keeps meaning 10:00 there after a clock change. Everyone in the audience gets it at that moment, not at 10:00 where they are: sending by each person's own time would need a time zone per customer, which the data does not have, and would turn one run into many. Interval schedules are a fixed span between runs, so they drift by an hour against the local clock when it changes. On the night the clock goes forward or back, a time inside the skipped or repeated hour still runs once, at one of the two readings Go's `time` package gives for it.
+
+## Settings shows the setup and does not change it
+
+The provider, the model, the sending limits and the demo data are set by environment variables, and the Settings page shows them with the variable to change and a restart. Changing them from the page would need a store for secrets and a way for running workers to pick up a new provider in the middle of a send. Only choices that belong to one person's browser, such as the theme, can be changed there.
+
+## The delivery monitor refreshes on a timer
+
+The monitor lists, across every campaign, the deliveries still on their way and those that ended badly, with filters by channel, outcome, last problem and time window. Accepted and skipped deliveries need nobody, so they are left out. It refreshes every 10 seconds by default, or as chosen, rather than over SSE as a campaign's page does: it reads across all campaigns with filters, and the SSE stream follows one campaign's progress. A tick waits for the last answer, and an answer later than 15 s is treated as lost, so one slow request cannot stop the refreshing. The filters live in the address, so a refresh keeps them and a link shares them.
+
+## Analytics reports sending, not engagement
+
+The Analytics page compares campaigns over 7, 30 or 90 days: what was planned, accepted, failed or unknown and bounced, provider calls by day in UTC, and campaigns ranked by failure rate, because the question it answers is where sending went wrong. It shows no open or click rates. Opens here come only from the test inbox, and bounces from the mock provider's simulated reports, which the page labels as such; presenting them as marketing results would read as real numbers.
