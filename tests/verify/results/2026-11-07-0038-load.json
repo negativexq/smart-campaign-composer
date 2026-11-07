@@ -1,0 +1,74 @@
+[
+  {
+    "name": "redis-crashed-5x",
+    "workers": 1,
+    "faults": {
+      "RATE_LIMIT_PER_SECOND": "100",
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0",
+      "VERIFY_SLOW": "0",
+      "VERIFY_SLOW_MAX_MS": "0",
+      "VERIFY_SLOW_MIN_MS": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 136.1,
+    "started": "2026-11-07T03:38:59.975174+03:00",
+    "final": {
+      "email": {
+        "SENT": 8198
+      },
+      "sms": {
+        "SENT": 7213
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 8198
+      },
+      "sms": {
+        "accepted": 7213
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 8198,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "late": 0,
+        "throttled": 0,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-07T00:39:01.366068592Z"
+      },
+      "sms": {
+        "accepted": 7213,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "late": 0,
+        "throttled": 0,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-07T00:39:01.366172717Z"
+      }
+    },
+    "events": null,
+    "notes": {
+      "crashes": [
+        "at 20.0 s, down 0.7 s, last save 49 s before",
+        "at 32.0 s, down 0.3 s, last save 12 s before",
+        "at 44.0 s, down 0.3 s, last save 12 s before",
+        "at 56.0 s, down 0.4 s, last save 12 s before",
+        "at 68.0 s, down 0.3 s, last save 12 s before"
+      ]
+    }
+  }
+]

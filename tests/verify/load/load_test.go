@@ -146,6 +146,7 @@ func scenarios() []scenario {
 			wantEvents: []string{"campaign.alert_opened sms credentials_refused", "campaign.alert_closed sms credentials_refused"},
 		},
 		{name: "redis-lost", faults: healthy(), event: loseRedisAt(30*time.Second, nil)},
+		{name: "redis-crashed-5x", faults: healthy(), event: crashRedis(20*time.Second, 5, 12*time.Second)},
 		{name: "redis-flushed-10x", faults: healthy(), event: flushRedis(20*time.Second, 10, 2*time.Second)},
 		{name: "redis-flushed-10x-2workers", faults: healthy(), event: flushRedis(20*time.Second, 10, 2*time.Second), workers: 2},
 		{
@@ -618,6 +619,42 @@ func loseRedisAt(offset time.Duration, next event) event {
 		r.note("redis_back_at", r.at())
 		if next != nil {
 			return next(ctx, r)
+		}
+		return nil
+	}
+}
+
+// crashRedis kills Redis count times, every interval apart, and starts it again at
+// once, without emptying it: it comes back with whatever it saved to disk last, as
+// after a crash or an out-of-memory kill.
+func crashRedis(offset time.Duration, count int, every time.Duration) event {
+	return func(ctx context.Context, r *run) error {
+		redis := stack.Container("redis")
+		var crashes []string
+		defer func() { r.note("crashes", crashes) }()
+		for i := range count {
+			if err := r.sleepUntil(ctx, offset+time.Duration(i)*every); err != nil {
+				return err
+			}
+			saved, _ := stack.DockerErr("exec", redis, "redis-cli", "lastsave")
+			killed := time.Now()
+			if _, err := stack.DockerErr("kill", redis); err != nil {
+				return err
+			}
+			if _, err := stack.DockerErr("start", redis); err != nil {
+				return err
+			}
+			for range 100 {
+				if pong, _ := stack.DockerErr("exec", redis, "redis-cli", "ping"); pong == "PONG" {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			age := "unknown"
+			if at, err := strconv.ParseInt(saved, 10, 64); err == nil {
+				age = fmt.Sprintf("%.0f s", killed.Sub(time.Unix(at, 0)).Seconds())
+			}
+			crashes = append(crashes, fmt.Sprintf("at %.1f s, down %.1f s, LASTSAVE (last snapshot, or start without snapshots) %s before", seconds(killed.Sub(r.started)), seconds(time.Since(killed)), age))
 		}
 		return nil
 	}

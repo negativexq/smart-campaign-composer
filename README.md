@@ -89,7 +89,7 @@ The overview shows campaign counts, recent activity and system health. Analytics
 - **Outages:** a circuit breaker holds a failing channel and tests it with a few probes, which cost messages no attempts. After 10 minutes with nothing finishing, the campaign stops as `PAUSED` with its messages intact, and a person resumes it. A channel in trouble while the campaign still moves raises an alert instead, and a 401 holds the channel without using attempts. Messages left in flight by a crashed worker are taken back through their leases.
 - **Notifications:** the bell at the top right lists scheduled starts, finished sends and problems.
 
-Details and the trade-offs behind each are in [DECISIONS.md](DECISIONS.md). How they hold up is checked by [22 load scenarios](tests/verify/README.md#load-scenarios): provider faults, slow answers, an outage, refused credentials, a crashed or restarted worker, PostgreSQL and Redis lost, Redis's clock stepped forward, and workers set above the provider's limit. Each lists what it measures, and the latest results are in [tests/verify/results](tests/verify/results/).
+Details and the trade-offs behind each are in [DECISIONS.md](DECISIONS.md). How they hold up is checked by [23 load scenarios](tests/verify/README.md#load-scenarios): provider faults, slow answers, an outage, refused credentials, a crashed or restarted worker, PostgreSQL and Redis lost, Redis's clock stepped forward, and workers set above the provider's limit. Each lists what it measures, and the latest results are in [tests/verify/results](tests/verify/results/).
 
 ## Install from scratch
 
@@ -225,7 +225,7 @@ make benchmark   # measures the system's limits in a single pass
 
 Integration tests use real PostgreSQL and fail, rather than skip, when it is missing.
 
-Deeper checks live in [tests/verify](tests/verify/README.md): [22 load scenarios](tests/verify/README.md#load-scenarios) under provider faults, clock steps, outages, crashed and restarted workers, and lost PostgreSQL and Redis, security probes against a running stack, and a mutation check that the tests catch broken code. They run on their own stack next to the demo, save their results for comparison, and log what they found in [FINDINGS.md](tests/verify/FINDINGS.md).
+Deeper checks live in [tests/verify](tests/verify/README.md): [23 load scenarios](tests/verify/README.md#load-scenarios) under provider faults, clock steps, outages, crashed and restarted workers, and lost PostgreSQL and Redis, security probes against a running stack, and a mutation check that the tests catch broken code. They run on their own stack next to the demo, save their results for comparison, and log what they found in [FINDINGS.md](tests/verify/FINDINGS.md).
 
 ```bash
 make verify-up && make verify-security && make verify-load && make verify-down

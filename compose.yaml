@@ -32,6 +32,13 @@ services:
 
   redis:
     image: redis:7-alpine
+    # No snapshots, and nothing on disk to load: after a restart Redis must start
+    # empty, so the rate limiter sees its window is gone and holds each channel for
+    # 8 s. A snapshot would bring back an old window that looks whole, and the last
+    # second's calls could be given out again.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    tmpfs:
+      - /data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 2s
