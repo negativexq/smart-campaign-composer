@@ -218,13 +218,30 @@ type Generation struct {
 }
 
 // StartGeneration checks the campaign can get content and claims it, so that
-// failures here can still be reported as an ordinary response.
+// failures here can still be reported as an ordinary response. The campaign is read
+// under its row lock in the transaction that claims it: the generation works from
+// that copy until it saves, so a copy read before the claim would let a new
+// audience, a change of languages or an edit committed in between be overwritten.
 func (s *Service) StartGeneration(ctx context.Context, id string, input GenerateInput) (*Generation, error) {
 	instruction := strings.TrimSpace(input.Instruction)
 	if utf8.RuneCountInString(instruction) > MaxInstructionLength {
 		return nil, ErrInvalidInstruction
 	}
-	view, err := s.Get(ctx, id)
+	// Read before the transaction, which must not ask the pool for a second connection.
+	cities, err := s.cities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin generation claim: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+
+	if _, _, err := lockForArchive(ctx, tx, id); err != nil {
+		return nil, err
+	}
+	view, err := s.get(ctx, tx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -250,16 +267,15 @@ func (s *Service) StartGeneration(ctx context.Context, id string, input Generate
 	if channel != "" && len(view.Channels) > 1 && content.NewDiscount(instruction, view.writingBrief()) {
 		return nil, ErrChannelDiscount
 	}
-	cities, err := s.cities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	result, err := s.db.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1 AND `+freeToDraft, id, statusGenerating)
+	result, err := tx.Exec(ctx, `UPDATE campaigns SET status = $2, updated_at = now() WHERE id = $1 AND `+freeToDraft, id, statusGenerating)
 	if err != nil {
 		return nil, fmt.Errorf("claim generation: %w", err)
 	}
 	if result.RowsAffected() == 0 {
 		return nil, ErrGenerationRunning
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit generation claim: %w", err)
 	}
 	languages := view.writingLanguages()
 	// A draft from before languages were kept was written for the audience's largest one.

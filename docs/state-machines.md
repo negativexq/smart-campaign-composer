@@ -113,7 +113,7 @@ Kept by the code under the row lock:
 
 `GENERATING` is also a lock held by one model run.
 
-- **Taking it:** `StartGeneration` takes it with a guarded `UPDATE`.
+- **Taking it:** `StartGeneration` locks the campaign row, reads the campaign and takes the claim with a guarded `UPDATE`, all in one transaction. The generation works from that copy until it saves, so it must be the state it claimed: a copy read before the lock would let a new audience, a change of languages or an edit that committed in between be saved over.
 - **Keeping it:** while writing, `stillRunning` touches `updated_at` before each version.
 - **Taking it over:** a claim untouched for five minutes counts as left by a dead process, and `freeToDraft` lets a new request take it.
 - **Releasing it:** the claim ends when `save` or `recordFailure` moves the status on, both guarded by `status = 'GENERATING'`.
@@ -292,5 +292,6 @@ Each fix has its own issue and pull request, and a test that fails without it.
 | Issue | Bug | Cause | Fix |
 |---|---|---|---|
 | [#2](https://github.com/negativexq/smart-campaign-composer/issues/2) | Approving froze whatever was stored at that moment. Messages edited in another tab, rewritten or written for a new audience after the review page loaded were approved unseen | The approval request carried nothing about what the page showed | `review_revision`, compared under the row lock; an older one gets `409` |
+| [#3](https://github.com/negativexq/smart-campaign-composer/issues/3) | A regeneration undid an edit made just before it started, and messages written for a replaced audience were saved as ready for review. A campaign deleted at that moment started generating and called the model | `StartGeneration` read the campaign, then claimed it in a separate statement, and worked from the earlier copy | Lock, read and claim in one transaction |
 
 The `CANCELLED` status is allowed by the constraint and shown by the frontend, but nothing sets it. Cancelling a schedule moves a campaign to one of the statuses above instead.
