@@ -140,7 +140,80 @@ Tone goes to the model separately and changes wording only. It has no validation
 
 "Skip people messaged recently" is a filter in the segment rule rather than a separate step, so counts, previews, the approved version and repeat runs all apply it the same way, and it shows in the conditions. It counts `SENT` and `UNKNOWN` deliveries from any campaign before the time the audience was counted, because an `UNKNOWN` message may have arrived and a campaign's own messages must not shrink its audience. Queuing applies it again. Messages that other campaigns still have queued are not counted then: one that goes out after this campaign's message breaks nothing this campaign promised, and one held by a paused campaign could otherwise keep people out without end.
 
-The worker checks the rule once more just before each message goes out, because between queuing and sending another campaign may reach the same person. That check skips the message (`messaged_recently`) when another send reached the person within the rule's days, counting `SENT` and `UNKNOWN` by their last change and a retry waiting after a call that got no answer by when that call was made, since the provider may have accepted it. It waits briefly (`another_message_sending`) when another message to the person is being sent right now. The message's own run is left out, because its other channel is part of the same send. Checks for one person take turns under an advisory lock and write their outcome before letting go, so two campaigns with the rule claimed together cannot both step back, and of the two only one goes. Neither the skip nor the wait uses an attempt. The lock and the check go to PostgreSQL as one batch: one round trip, which PostgreSQL runs as one implicit transaction, so the lock holds until the check's write commits. The check stays a statement of its own, because under READ COMMITTED a statement sees what committed before it started; folded into the statement that takes the lock, it would read before waiting and two campaigns would both step back. The batch still takes a pooled connection for each message: it shortens how long the connection is held, not how many are taken. `campaign_delivery_contact_check_seconds` (by what the check found) and `campaign_delivery_contact_lock_wait_seconds` show what the check costs. The lock is not held during the provider call. A message from a campaign without the rule could once slip in between the check and the call: in a forced worst case on the verification stack, a campaign with the rule and one without it reaching each of the same 15,411 people within microseconds, 462 and 413 of the rule's messages were recorded as sent after the other campaign's message, about 3%. So a message without the rule now waits too (`another_message_sending`, no attempt used, never skipped) while a message with the rule from another run to the same person is being sent, under the same lock, so whichever of the two looks first waits. In the same forced worst case none were afterwards; the pair took 250 s instead of 214 s, because messages without the rule waited. The checks run only when they can matter. A run keeps its rule and the time queuing counted recent messages up to (`campaign_runs.rule_days`, `rule_as_of`). A message with the rule checks only if another run has been open since then, give or take a minute for clocks: whatever went out before was left out at queuing, and anything sent after belongs to a run that was open at some point since. A message without the rule checks only while a run with the rule is open. Both are read in the claim statement, so a campaign sending on its own, with the rule or without it, does no extra work. Of two runs that start together, whichever claims later sees the other open. A paused run stays open, so checks stay on while it is paused. On the verification stack a campaign with the rule sending on its own took 20,656 pool acquires for 15,411 messages, against 19,508 for one without the rule and 34,002 when every message was checked. A message held back keeps waiting while other messages to the same person keep being sent and then fail; with a steady stream of them it has no bound.
+The worker checks the rule once more before each message goes out when another campaign may have reached the person since queuing. The next section describes what that check protects and when it runs.
+
+## The recent message rule is checked again before sending
+
+### What it protects
+
+A campaign with "Skip people messaged recently" promises that nobody it messages heard from us, from any campaign, within the rule's days. Queuing keeps that promise for everything sent before the campaign was queued. It cannot see what other campaigns send afterwards: two campaigns sending at the same hour to overlapping audiences could otherwise both reach a person whom each found unmessaged when it was queued.
+
+The rule binds only the campaign that has it. A campaign without the rule sends to everyone in its audience, and a message it sends after the rule's message breaks nothing the rule promised. Two campaigns without the rule never hold each other back.
+
+### The goal
+
+Protect the overlap cases without loading the normal ones. A campaign sending on its own, with the rule or without it, does no extra database work. The check, its lock and its extra round trip happen only while another run overlaps.
+
+### When it runs
+
+A run keeps its rule and the time queuing counted recent messages up to (`campaign_runs.rule_days`, `rule_as_of`). The claim statement reads, for each message, whether another run overlaps, so deciding adds no round trip.
+
+| Situation | Message with the rule | Message without the rule |
+|---|---|---|
+| The campaign sends on its own | No check | No check |
+| Other campaigns overlap, none of them with the rule | Checks | No check |
+| Another campaign with the rule is sending at the same time | Checks | Checks, and only waits |
+| Another campaign finished after this one was queued, or up to a minute before | Checks | No check |
+| Another campaign is paused with its run open | Checks | Checks if the paused one has the rule |
+
+"Overlaps" for a message with the rule means another run has been open at some point since its own queuing counted: whatever went out before that was already left out at queuing, and anything sent after belongs to a run that was open since. The minute covers clocks that differ between the API, the workers and PostgreSQL. A message without the rule only needs to know whether a run with the rule is open now, because it waits only for a message with the rule that is being sent. Of two runs that start together, whichever claims later sees the other open, so they cannot both skip the check.
+
+### What the check does
+
+- A message with the rule is skipped (`messaged_recently`) when another run's message reached the person within the rule's days: `SENT` and `UNKNOWN` by their last change, because an `UNKNOWN` message may have arrived, and a retry waiting after a call that got no answer by when that call was made, since the provider may have accepted it. Failures, refusals and skipped messages reached nobody and do not count.
+- A message with the rule waits (`another_message_sending`, `RETRYING` in 5 seconds) while another run's message to the person is being sent, and decides again when it is claimed next.
+- A message without the rule waits the same way while another run's message with the rule to the person is being sent. It is never skipped, and once that message has gone it goes too.
+- The message's own run is left out: its other channel is part of the same send.
+- Neither the skip nor the wait uses an attempt or records a call. A message whose claim moved on while it was being checked is neither sent nor changed.
+- An error in the check returns the message to the queue (`contact_check_failed`) rather than sending it.
+
+### How two checks take turns
+
+Claims commit before checks, so two messages to one person can both be `SENDING` when they look. Checks for one person take turns under a PostgreSQL advisory lock (`contact:<user id>`), and each writes its outcome before letting go. The first to look sees the other being sent and waits; the second, finding it no longer sending, goes. Without the turns both would see the other and both would wait.
+
+The lock and the check go to PostgreSQL as one batch: one round trip, which PostgreSQL runs as one implicit transaction, so the lock holds until the check's write commits. The check stays a statement of its own, because under READ COMMITTED a statement sees what committed before it started; folded into the statement that takes the lock, it would read before waiting, and two campaigns would both step back. The batch still takes a pooled connection for each checked message: it shortens how long the connection is held, not how many are taken. The lock is not held during the provider call.
+
+### What it does not cover
+
+- **Campaigns without the rule.** They are held to nothing. Two of them send to the same person at the same moment if their audiences overlap.
+- **Later messages.** A campaign without the rule may message the person right after the rule's message. The rule only looks back.
+- **Messages sent outside this system.** Only deliveries recorded here count.
+- **A message stuck in sending.** A message waiting for another one waits as long as that one stays `SENDING`, which its lease bounds. A message with the rule held back while other messages to the same person keep being sent and then fail keeps waiting; with a steady stream of them it has no bound.
+- **Paused campaigns.** A paused run stays open, so checks stay on while it is paused. That costs work, not correctness.
+- **Clocks further apart than a minute.** A run that finished more than a minute before this one was queued is not looked at.
+
+This narrows the overlap cases to what PostgreSQL records. It is not a promise about what a provider delivers.
+
+### What it costs
+
+Measured on the verification stack, with 15,411 messages per campaign and a pool of 8 connections. Check times are p50 / p95 / p99.
+
+| Scenario | Pool acquires | Waits for an empty pool | Checks | Rule messages sent after another campaign's |
+|---|---|---|---|---|
+| One campaign without the rule | 19,508 | 7 | 0 | — |
+| One campaign with the rule, every message checked (before the overlap gate) | 34,713 | 1,791 | 15,411 | 0 |
+| One campaign with the rule, overlap gate | 20,656 | 27 | 0 | 0 |
+| Rule and no rule interleaved, before the wait for messages without the rule | 52,401 | 2,509 | 21,809 | 462 and 413 in two runs, about 3% |
+| Rule and no rule interleaved, with it | 78,150 | 4,486 | 43,529 | 0 |
+| Two rules interleaved | 68,727 | 7,873 | 42,129 | 0 |
+
+The interleaved runs force both campaigns to reach each of the same people within microseconds; with the two queues one after the other, no rule message went after another's in any version. The interleaved pair with the wait took 250 s instead of 214 s, because messages without the rule waited. Sending the lock and the check as one batch instead of a transaction of their own halved the check's p99 in most scenarios, for example from 20.1 to 9.4 ms with two rule campaigns one after the other. A campaign without the rule, measured three times on the code before this work and three times after: total time 95.9–96.7 s against 95.5–96.1 s, pool acquires 18,460–19,638 against 18,327–19,723, and no checks. The claim statement's p95 rose from 2.4–3.3 ms to 3.3–3.9 ms, because it now joins the run and reads whether another run overlaps: planning it takes about 0.13 ms longer and the two lookups about 0.13 ms for 32 rows. A claim takes up to 32 messages, so that is a few microseconds a message.
+
+`campaign_delivery_contact_check_seconds` (by what the check found) and `campaign_delivery_contact_lock_wait_seconds` show what the check costs in production.
+
+### Tests that hold it
+
+`internal/delivery/contact_test.go` covers the cases above with one person and one channel. They cover what counts as a recent message, the wait for a message being sent, the same run being left out, a lost claim, no check for a campaign sending on its own, no check between campaigns without the rule, a run that finished since still counting, and the wait for a message without the rule. Two tests claim two messages together and assert, through `pg_locks`, that one check waits on the other's lock. Mutations that remove the lock, merge it into the check, run it in a transaction of its own, drop the overlap gate, its clock margin or the stored queuing time, or ignore finished runs each fail at least one test.
 
 ## Tried against a real model
 
@@ -180,7 +253,7 @@ Missed runs are not replayed one by one. After downtime one run covers them, bec
 
 A campaign that finished sending can be scheduled again, with the messages already approved. That send is another run, so the same choice applies, and it is shown for a one-time send too, because there are earlier sends to leave out. The default still reaches only people who have not received the campaign, which can be nobody. A cancelled schedule stays on the campaign page marked as stopped, so its rule does not read as if it were still running, and a new schedule replaces it.
 
-A one-time send, now or at a set time, goes to the people who were approved: approval stores the list, because someone signed off on that audience. New purchases or moves afterwards change nothing. Consent is the exception, checked again when queuing and before each message, and so is a "not messaged recently" rule, because a message sent since would break what the campaign promised. The check before sending is best effort (see [Tone, discount and recent message exclusion are optional form fields](#tone-discount-and-recent-message-exclusion-are-optional-form-fields)). A repeating send finds who matches at each run, because its point is to reach the people who match then, and the UI says the number can change. Approvals from before the list existed read the rule when they send.
+A one-time send, now or at a set time, goes to the people who were approved: approval stores the list, because someone signed off on that audience. New purchases or moves afterwards change nothing. Consent is the exception, checked again when queuing and before each message, and so is a "not messaged recently" rule, because a message sent since would break what the campaign promised. What the check before sending covers, and what it does not, is in [The recent message rule is checked again before sending](#the-recent-message-rule-is-checked-again-before-sending). A repeating send finds who matches at each run, because its point is to reach the people who match then, and the UI says the number can change. Approvals from before the list existed read the rule when they send.
 
 Known limit: a person who starts matching later can have a longer first name than anyone checked at approval. If their SMS then exceeds the limit, it ends as FAILED after a provider 400 rather than being cut.
 
