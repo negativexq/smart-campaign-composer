@@ -7,7 +7,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
@@ -1383,5 +1385,140 @@ func TestAnEditMadeToOlderMessagesIsRefused(t *testing.T) {
 	fresh.EmailSubject = "Edited in another tab"
 	if _, err := h.service.SaveContentAt(ctx, id, after.ContentRevision, fresh); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// holdCampaignRow locks the campaign row in a transaction of the test's own, the way
+// a concurrent request holds it while its change commits.
+func holdCampaignRow(t *testing.T, h *harness, id string) pgx.Tx {
+	t.Helper()
+	tx, err := h.pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tx.Rollback(context.Background()) }) //nolint:errcheck // no-op after commit
+	if _, err := tx.Exec(context.Background(), `SELECT 1 FROM campaigns WHERE id = $1 FOR UPDATE`, id); err != nil {
+		t.Fatal(err)
+	}
+	return tx
+}
+
+// waitForLockWaiter returns once another session of this test's database waits on a lock.
+func waitForLockWaiter(t *testing.T, h *harness) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting bool
+		if err := h.pool.QueryRow(context.Background(), `
+			SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock')`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("nothing waited for the campaign's lock")
+}
+
+type started struct {
+	generation *campaign.Generation
+	err        error
+}
+
+// startWhileHeld starts a generation while the test holds the campaign's row, commits
+// change in the test's transaction first, and returns what the start then gives.
+func startWhileHeld(t *testing.T, h *harness, id string, input campaign.GenerateInput, change func(pgx.Tx)) started {
+	t.Helper()
+	ctx := context.Background()
+	tx := holdCampaignRow(t, h, id)
+	result := make(chan started, 1)
+	go func() {
+		generation, err := h.service.StartGeneration(ctx, id, input)
+		result <- started{generation, err}
+	}()
+	waitForLockWaiter(t, h)
+	change(tx)
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return <-result
+}
+
+// Issue #3: a person's edit that commits while a regeneration waits for its claim is
+// kept, because the regeneration reads the campaign after it has the lock.
+func TestARegenerationKeepsAnEditCommittedBeforeItsClaim(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, _, id := newContentHarness(t, step{output: validContent})
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err != nil {
+		t.Fatal(err)
+	}
+	const typed = "Subject a person typed"
+	start := startWhileHeld(t, h, id, campaign.GenerateInput{Channel: "sms", Instruction: "Make it shorter"}, func(tx pgx.Tx) {
+		// The write SaveContentAt makes.
+		if _, err := tx.Exec(ctx, `UPDATE campaign_versions SET content = jsonb_set(content, '{email_subject}', to_jsonb($2::text)) WHERE campaign_id = $1`, id, typed); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if start.err != nil {
+		t.Fatal(start.err)
+	}
+	view, err := start.generation.Run(ctx, func(campaign.GenerationEvent) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Content.EmailSubject != typed {
+		t.Fatalf("email subject after regenerating the SMS: %q", view.Content.EmailSubject)
+	}
+}
+
+// Issue #3: messages are written for the audience the campaign has when the claim is
+// made, not for one replaced while the claim waited.
+func TestMessagesAreWrittenForTheAudienceAtTheClaim(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, provider, id := newContentHarness(t, step{output: validContent})
+	const newBrief = "Thank loyal customers in Ankara for their year with us"
+	start := startWhileHeld(t, h, id, campaign.GenerateInput{}, func(tx pgx.Tx) {
+		// The writes saveProposal makes for a new brief.
+		if _, err := tx.Exec(ctx, `UPDATE campaigns SET brief = $2, status = 'DRAFT' WHERE id = $1`, id, newBrief); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE campaign_versions SET content = '{}' WHERE campaign_id = $1`, id); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if start.err != nil {
+		t.Fatal(start.err)
+	}
+	if _, err := start.generation.Run(ctx, func(campaign.GenerationEvent) {}); err != nil {
+		t.Fatal(err)
+	}
+	if got := provider.contentCalls[len(provider.contentCalls)-1].Brief; got != newBrief {
+		t.Fatalf("messages written for %q", got)
+	}
+}
+
+// Issue #3: a campaign deleted while the claim waited is not claimed, and the model
+// is not called for it.
+func TestACampaignDeletedBeforeTheClaimIsNotGenerated(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h, provider, id := newContentHarness(t, step{output: validContent})
+	start := startWhileHeld(t, h, id, campaign.GenerateInput{}, func(tx pgx.Tx) {
+		if _, err := tx.Exec(ctx, `UPDATE campaigns SET deleted_at = now() WHERE id = $1`, id); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !errors.Is(start.err, campaign.ErrNotFound) {
+		t.Fatalf("start on a deleted campaign: %v", start.err)
+	}
+	var status string
+	if err := h.pool.QueryRow(ctx, `SELECT status FROM campaigns WHERE id = $1`, id).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status == "GENERATING" || len(provider.contentCalls) > 0 {
+		t.Fatalf("deleted campaign: status %s, model calls %d", status, len(provider.contentCalls))
 	}
 }
