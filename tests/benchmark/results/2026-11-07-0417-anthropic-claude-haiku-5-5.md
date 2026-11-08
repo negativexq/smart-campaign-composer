@@ -1,5 +1,7 @@
 # Benchmark: anthropic claude-haiku-5-5
 
+> **Superseded.** Kept as history, not a current result. Before the schema rewrite that keeps Claude's filters, so Claude dropped filters it had chosen. The current report is [2026-11-07-0451-anthropic-claude-haiku-5-5.md](2026-11-07-0451-anthropic-claude-haiku-5-5.md); see the [index](README.md).
+
 2026-11-07 04:17, 1 runs of 246 cases.
 
 ## Overall
