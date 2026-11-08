@@ -9,7 +9,7 @@ import { ruleText } from "../lib/audience";
 import { defaultChannels } from "../lib/preferences";
 import { EMAIL_TEMPLATES, isCustomTemplate } from "../lib/emailTemplates";
 import { BRIEF_EXAMPLES as suggestions } from "../lib/briefExamples";
-import { briefCodes, briefLinks, validCode } from "../lib/message";
+import { briefChannel, briefCodes, briefLinks, validCode } from "../lib/message";
 import { navigate } from "../lib/navigation";
 import { requestAudience } from "../lib/pendingAudience";
 
@@ -24,6 +24,15 @@ const code = ref("");
 const typedCode = computed(() => code.value.trim().toUpperCase());
 const codesInBrief = computed(() => briefCodes(brief.value));
 const linksInBrief = computed(() => briefLinks(brief.value));
+// The form decides the channels. A brief that names only one, while the other is
+// chosen too, is pointed out so the person can settle it before anything is written.
+const channelNames = { sms: "SMS", email: "email" } as const;
+const channelConflict = computed(() => {
+  const stated = briefChannel(brief.value);
+  if (!stated) return undefined;
+  const extra = channels.value.find((channel) => channel !== stated);
+  return extra ? { stated: channelNames[stated], extra: channelNames[extra as "sms" | "email"] } : undefined;
+});
 const quietDays = ref("");
 // Set by "Use template". It needs a channel to apply to, so email must stay chosen.
 const namedTemplate = new URLSearchParams(window.location.search).get("template") ?? "";
@@ -122,6 +131,9 @@ async function findAudience() {
       @submit="findAudience"
     >
       <ChannelPicker v-model="channels" :disabled="busy" />
+      <ValidationNotice v-if="channelConflict" tone="warning" title="The brief and the channels disagree" data-testid="channel-conflict">
+        The brief seems to ask for {{ channelConflict.stated }} only, but {{ channelConflict.extra }} is chosen too. The channels chosen here decide where the campaign goes, so clear {{ channelConflict.extra }} if it should not get one.
+      </ValidationNotice>
       <fieldset class="ab" :class="{ 'ab--on': abTest }" :disabled="busy" data-testid="ab-option">
         <label class="ab-choice" for="campaign-ab-test">
           <input id="campaign-ab-test" v-model="abTest" type="checkbox" data-testid="ab-test" />
@@ -165,7 +177,7 @@ async function findAudience() {
             </div>
             <label class="check small" for="campaign-has-offer">
               <input id="campaign-has-offer" v-model="hasOffer" type="checkbox" />
-              Add a discount
+              Add a percentage off
             </label>
             <div v-if="hasOffer" class="option">
               <label class="small muted" for="campaign-offer">Discount (%)</label>

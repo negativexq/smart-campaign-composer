@@ -42,10 +42,14 @@ var (
 // the audience. An option the marketer chose need not be in the brief.
 func CheckAgainstBrief(proposal *Proposal, brief string, cities []string, chosenQuietDays *int) *ValidationError {
 	problems := &ValidationError{}
+	// The parts are the model's split of the brief as written, link included; every
+	// reading below sees the brief without its links.
+	checkPartsAgainst := brief
+	brief = matching.WithoutLinks(brief)
 	reading := readBrief(brief)
 	proposal.Unmatched, proposal.Unsure = nil, nil
 	proposal.UnsupportedConditions = slices.DeleteFunc(proposal.UnsupportedConditions, matching.OnlyPeople)
-	checkParts(proposal, brief)
+	checkParts(proposal, checkPartsAgainst)
 	proposal.UnsupportedConditions = slices.DeleteFunc(proposal.UnsupportedConditions, saysNoCondition)
 	checkCity(proposal, problems, brief, cities)
 	checkWindows(proposal, problems, reading, chosenQuietDays)
@@ -391,7 +395,10 @@ func checkParts(proposal *Proposal, brief string) {
 		return
 	}
 	applied := Describe(proposal.Segment)
-	rest := " " + foldWords(brief) + " "
+	// What no part covers is read without links, so an address left out of the
+	// parts is not shown as words someone should check.
+	withoutLinks := func(text string) string { return foldWords(matching.WithoutLinks(text)) }
+	rest := " " + withoutLinks(brief) + " "
 	kept := make([]BriefPart, 0, len(proposal.BriefParts))
 	for _, part := range proposal.BriefParts {
 		part.Text = strings.TrimSpace(part.Text)
@@ -399,7 +406,9 @@ func checkParts(proposal *Proposal, brief string) {
 		if folded == "" || !strings.Contains(foldWords(brief), folded) {
 			continue
 		}
-		rest = strings.Replace(rest, folded, " ", 1)
+		if words := withoutLinks(part.Text); words != "" {
+			rest = strings.Replace(rest, words, " ", 1)
+		}
 		if matching.OnlyFiller(part.Text) {
 			continue
 		}

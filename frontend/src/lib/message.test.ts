@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  briefChannel,
   briefCodes,
   briefLinks,
   campaignDiscount,
@@ -151,5 +152,30 @@ describe("discount code", () => {
     expect(validCode("spring10")).toBe(false);
     expect(validCode("AB")).toBe(false);
     expect(validCode("SALE 10")).toBe(false);
+  });
+});
+
+describe("briefChannel", () => {
+  it.each([
+    ["Kış koleksiyonumuz geldi. Sadece e-posta ile teşekkür et.", "email"],
+    ["Yalnızca e-postayla duyur", "email"],
+    ["Send this only by email to customers in İzmir", "email"],
+    ["Email-only announcement for Ankara", "email"],
+    ["İzmir'deki müşterilere SMS gönderme, kampanyayı duyur", "email"],
+    ["Sadece SMS ile hatırlat", "sms"],
+    ["Remind them by text messages only", "sms"],
+    ["No emails, just a short reminder", "sms"],
+  ])("reads %j as %s", (brief, channel) => {
+    expect(briefChannel(brief)).toBe(channel);
+  });
+
+  it.each([
+    "İzmir'deki müşterilere yeni sezonu duyur",
+    "Send an SMS and an email to Ankara",
+    "Sadece İzmir'deki müşterilere e-posta ve SMS",
+    "Link: https://shop.example.com/sadece-sms",
+    "Sadece e-posta açanlara değil, sadece SMS alanlara",
+  ])("finds no single channel in %j", (brief) => {
+    expect(briefChannel(brief)).toBeUndefined();
   });
 });

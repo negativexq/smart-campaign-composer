@@ -160,3 +160,26 @@ export function warningTitle(warning: Warning): string {
   if (warning.reason === "no_button") return "No button";
   return warning.reason === "not_applied" ? "Not done" : "Differs from the brief";
 }
+
+const EMAIL_WORD = String.raw`(?:e-?posta|e-?mail|mail)`;
+const SMS_WORD = String.raw`(?:sms|text messages?|texts|kısa mesaj)`;
+const ONLY = String.raw`(?:sadece|yalnızca|yalnız|only(?: (?:by|via|over|through|as|in|send))?(?: an?)?)`;
+const STATED_CHANNEL: [RegExp, "sms" | "email"][] = [
+  [new RegExp(String.raw`(?:^|[^\p{L}])${ONLY} ${EMAIL_WORD}`, "u"), "email"],
+  [new RegExp(String.raw`(?:^|[^\p{L}])${ONLY} ${SMS_WORD}`, "u"), "sms"],
+  [new RegExp(String.raw`(?:^|[^\p{L}])${EMAIL_WORD}[- ]only(?:$|[^\p{L}])`, "u"), "email"],
+  [new RegExp(String.raw`(?:^|[^\p{L}])${SMS_WORD}[- ]only(?:$|[^\p{L}])`, "u"), "sms"],
+  [new RegExp(String.raw`(?:^|[^\p{L}])(?:no ${SMS_WORD}(?:$|[^\p{L}])|sms(?:'?(?:siz|sız)| (?:gönderme|atma|yok)))`, "u"), "email"],
+  [new RegExp(String.raw`(?:^|[^\p{L}])(?:no ${EMAIL_WORD}s?(?:$|[^\p{L}])|${EMAIL_WORD}(?:'?(?:siz|sız)| (?:gönderme|atma|yok)))`, "u"), "sms"],
+];
+
+/**
+ * The one channel a brief says to use, as in "sadece e-posta ile" or "SMS only".
+ * The channels chosen on the form decide where a campaign goes; this only lets the
+ * form say when the brief disagrees. A link's path is not read.
+ */
+export function briefChannel(brief: string): "sms" | "email" | undefined {
+  const text = brief.replace(BRIEF_LINK, " ").toLocaleLowerCase("tr");
+  const stated = new Set(STATED_CHANNEL.filter(([pattern]) => pattern.test(text)).map(([, channel]) => channel));
+  return stated.size === 1 ? [...stated][0] : undefined;
+}

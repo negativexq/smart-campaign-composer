@@ -1,6 +1,6 @@
 # Benchmark: anthropic claude-haiku-5-5
 
-> **Superseded.** Kept as history, not a current result. A full run after the schema rewrite but before the two prompt rules its three silently wrong audiences led to. The current report is [2026-11-07-0451-anthropic-claude-haiku-5-5.md](2026-11-07-0451-anthropic-claude-haiku-5-5.md); see the [index](README.md).
+> **Superseded.** Kept as history, not a current result. A full run after the schema rewrite but before the two prompt rules its three silently wrong audiences led to. The current report is [2026-11-09-0220-anthropic-claude-haiku-5-5.md](2026-11-09-0220-anthropic-claude-haiku-5-5.md); see the [index](README.md).
 
 2026-11-07 04:37, 1 runs of 246 cases.
 

@@ -1,6 +1,6 @@
 # Benchmark: anthropic claude-haiku-5-5
 
-> **Superseded.** Kept as history, not a current result. A partial run of 3 cases, three times each, to check that a trait said not to matter and a cart named as a feature no longer block. The current report is [2026-11-07-0451-anthropic-claude-haiku-5-5.md](2026-11-07-0451-anthropic-claude-haiku-5-5.md); see the [index](README.md).
+> **Superseded.** Kept as history, not a current result. A partial run of 3 cases, three times each, to check that a trait said not to matter and a cart named as a feature no longer block. The current report is [2026-11-09-0220-anthropic-claude-haiku-5-5.md](2026-11-09-0220-anthropic-claude-haiku-5-5.md); see the [index](README.md).
 
 2026-11-08 15:34, 3 runs of 3 cases.
 
