@@ -507,3 +507,52 @@ func TestAMessageWithoutTheRuleWaitsForOneWithIt(t *testing.T) {
 		t.Fatalf("after the other one went: %+v, calls %d", row, c.calls())
 	}
 }
+
+// A message whose own earlier call got no answer may already be with the provider, so
+// the rule never skips it: it is retried with the same key and ends as the provider
+// says. One whose earlier call failed reached nobody and is still skipped.
+func TestTheRuleNeverSkipsAMessageThatMayHaveArrived(t *testing.T) {
+	t.Parallel()
+	c := newContactRig(t)
+	cases := []struct {
+		tried string
+		want  string
+	}{
+		{"timeout", "SENT"},
+		{"server_error", "SKIPPED"},
+	}
+	for _, tc := range cases {
+		c.queueMine(t)
+		c.exec(t, `UPDATE campaign_deliveries SET status = 'RETRYING', attempts = 1 WHERE id = $1`, c.mine)
+		c.exec(t, `
+			INSERT INTO delivery_attempts (delivery_id, campaign_id, run_id, channel, attempt, outcome, occurred_at)
+			SELECT id, campaign_id, run_id, channel, 1, $2, now() - interval '1 minute' FROM campaign_deliveries WHERE id = $1`,
+			c.mine, tc.tried)
+		c.setTheirs(t, "SENT", "0 days")
+		var key string
+		if err := c.pool.QueryRow(context.Background(), `SELECT idempotency_key FROM campaign_deliveries WHERE id = $1`, c.mine).Scan(&key); err != nil {
+			t.Fatal(err)
+		}
+		before := c.calls()
+
+		c.process(t)
+
+		row := c.row(t, c.mine)
+		if row.status != tc.want {
+			t.Fatalf("after %s: mine %+v", tc.tried, row)
+		}
+		switch tc.want {
+		case "SENT":
+			c.sender.mu.Lock()
+			last := c.sender.calls[len(c.sender.calls)-1]
+			c.sender.mu.Unlock()
+			if c.calls()-before != 1 || last.IdempotencyKey != key {
+				t.Fatalf("after %s: %d calls, key %q, want %q", tc.tried, c.calls()-before, last.IdempotencyKey, key)
+			}
+		case "SKIPPED":
+			if c.calls() != before || row.reason != "messaged_recently" {
+				t.Fatalf("after %s: %d calls, mine %+v", tc.tried, c.calls()-before, row)
+			}
+		}
+	}
+}
