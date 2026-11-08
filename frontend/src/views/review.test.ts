@@ -291,7 +291,9 @@ describe("review", () => {
 
   it("names the brief's link and says how each channel carries it", async () => {
     const link = "https://shop.example.com/sonbahar";
-    const { wrapper } = await open({ ...ready, link });
+    const { wrapper } = await open({ ...ready, link, content: { ...ready.content!, sms: "Shop {{link}}", link } });
+    expect(wrapper.text()).toContain("Shop https://url.short/");
+    expect(wrapper.text()).not.toContain("{{link}}");
     expect(wrapper.text()).toContain(`${link}: every SMS carries it as its own short link, and every email's button opens it.`);
     expect(wrapper.text()).not.toContain("Email link");
     expect(wrapper.text()).toContain("Unsubscribe");
