@@ -476,3 +476,63 @@ func TestAnalyticsComparesCampaignsInsideTheWindow(t *testing.T) {
 		t.Fatalf("unknown range: %v", err)
 	}
 }
+
+// Webhooks repeat and arrive out of order. The report reads the set of events a
+// delivery has, not the order they came in, so every order gives the same answer.
+func TestReportsThatRepeatOrArriveOutOfOrderGiveTheSameResult(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC)
+	type event struct {
+		name  string
+		after time.Duration
+	}
+	for name, tt := range map[string]struct {
+		events      []event
+		delivered   int
+		bounced     int
+		deliveredAt *time.Time
+	}{
+		"delivered twice":            {[]event{{"delivered", time.Minute}, {"delivered", time.Hour}}, 1, 0, ptr(base.Add(time.Minute))},
+		"bounced twice":              {[]event{{"bounced", time.Minute}, {"bounced", time.Hour}}, 0, 1, nil},
+		"bounced, then delivered":    {[]event{{"bounced", 2 * time.Minute}, {"delivered", time.Minute}}, 0, 1, nil},
+		"delivered, then bounced":    {[]event{{"delivered", time.Minute}, {"bounced", 2 * time.Minute}}, 0, 1, nil},
+		"opened before delivered":    {[]event{{"opened", 5 * time.Minute}, {"delivered", time.Minute}}, 1, 0, ptr(base.Add(time.Minute))},
+		"everything twice, reversed": {[]event{{"opened", 5 * time.Minute}, {"delivered", time.Minute}, {"opened", 9 * time.Minute}, {"delivered", 3 * time.Minute}}, 1, 0, ptr(base.Add(time.Minute))},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h, id, named := sentCampaign(t)
+			ctx := context.Background()
+			key := keyOf(t, h, named["accepted"])
+			for _, e := range tt.events {
+				if err := h.service.RecordDeliveryEvent(ctx, key, e.name, base.Add(e.after)); err != nil {
+					t.Fatalf("record %s: %v", e.name, err)
+				}
+			}
+			got := lifecycleOf(t, h, id)
+			if got.Accepted != 1 || got.Delivered != tt.delivered || got.Bounced != tt.bounced || got.Waiting != 0 {
+				t.Fatalf("lifecycle: %+v", got)
+			}
+			rows, err := h.service.Deliveries(ctx, id, campaign.DeliveryFilter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range rows {
+				if row.ID != named["accepted"] {
+					continue
+				}
+				if row.Status != "SENT" {
+					t.Fatalf("a report changed the result: %s", row.Status)
+				}
+				if (tt.deliveredAt == nil) != (row.DeliveredAt == nil) || (tt.deliveredAt != nil && !row.DeliveredAt.Equal(*tt.deliveredAt)) {
+					t.Fatalf("delivered at %v, want %v", row.DeliveredAt, tt.deliveredAt)
+				}
+				if tt.bounced == 1 && row.BouncedAt == nil {
+					t.Fatal("no bounce time")
+				}
+			}
+		})
+	}
+}
+
+func ptr[T any](value T) *T { return &value }
