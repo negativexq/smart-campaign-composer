@@ -19,9 +19,11 @@ flowchart LR
         postgres[(PostgreSQL<br/>state and queue)]
         redis[(Redis<br/>rate limiter)]
         assets[/asset-data volume/]
+        journal[/provider-data volume/]
     end
 
     marketer -->|HTTP| frontend
+    recipient([SMS reader]) -->|/api/l/code| frontend
     frontend -->|/api/ and SSE| api
     api -->|proposals and messages| llm
     api --> postgres
@@ -30,6 +32,7 @@ flowchart LR
     worker -->|permits and pauses| redis
     worker -->|POST /v1/messages| provider
     provider -->|signed events| api
+    provider -->|accepted keys, owed reports| journal
     tester --> provider
     setup -->|migrate, seed, starter content| postgres
     setup --> assets
@@ -42,12 +45,12 @@ The API and the worker never call each other. They share PostgreSQL, so either c
 | Service | Port on the host | Role |
 |---|---|---|
 | `frontend` | 8080 | nginx serves the Vue app and forwards `/api/` to the API, with buffering off so events arrive as they are produced |
-| `api` | 8081 | HTTP API, LLM calls, validation, approval, live progress over SSE, provider webhook |
+| `api` | 8081 | HTTP API, LLM calls, validation, approval, live progress over SSE, provider webhook, and the short link redirect at `/api/l/<code>`, which counts the click |
 | `worker` | 8082 (health and metrics only) | Sends messages, recovers expired leases, closes finished campaigns, pauses stalled ones, runs schedules |
-| `mock-provider` | 8083 (test inbox) | Stands in for an SMS and email provider: idempotency keys, failures, delivery reports and a test inbox |
+| `mock-provider` | 8083 (test inbox) | Stands in for an SMS and email provider: idempotency keys, failures, delivery reports and a test inbox. It writes each accepted key and the reports it still owes to a journal on the `provider-data` volume before it answers, and replays it when it starts |
 | `setup` | none | Runs once before the API and worker: migrations, seed users, starter templates |
 | `postgres` | none | All durable state, including the delivery queue |
-| `redis` | none | Shared rate limiter: a sliding window and a pause key per channel |
+| `redis` | none | Shared rate limiter. Per channel: the sliding window, a pause after a 429, a credential lock after a 401, and a key that says the window is whole. It runs without persistence, so it always starts empty |
 
 ## Where each thing is decided
 
@@ -57,8 +60,9 @@ The API and the worker never call each other. They share PostgreSQL, so either c
 | An audience query cannot be injected or mean "everyone" | `segment.Compile` uses fixed fragments and parameters, and an empty rule compiles to `FALSE` |
 | Nothing is sent without approval | Status checks in `campaign.Service`, and the worker only claims from campaigns in `DISPATCHING` |
 | An approved version cannot change | Database trigger on `campaign_versions` |
-| One message per campaign, person and channel | Unique key on `campaign_deliveries` |
-| At most 100 messages per second per channel | Redis sliding window, shared by all workers |
+| One message per run, person and channel | Unique key `(run_id, user_id, channel)` on `campaign_deliveries`. A repeating campaign has a run for each send, and its schedule says whether a later run may reach someone again |
+| A retry is the same message to the provider | Each delivery's `idempotency_key`, sent with every attempt and kept when a crashed worker's message is taken back |
+| 100 calls per second per channel, as the provider counts them | Redis sliding window, shared by all workers. Clock steps beyond 100 ms can let a few calls through; see the [reviewer guide](reviewer-guide.md#3-rate-limiting-across-workers-and-failures) |
 | A stale worker cannot overwrite a result | `claim_token` must still match when recording |
 | The history of decisions cannot be edited | Append-only `audit_events`, written in the same transaction as the change |
 
@@ -74,7 +78,8 @@ erDiagram
     users ||--o{ campaign_deliveries : receives
     campaigns ||--o{ campaign_versions : has
     campaigns ||--o| campaign_schedules : "may have"
-    campaigns ||--o{ campaign_deliveries : queues
+    campaigns ||--o{ campaign_runs : "sends in"
+    campaign_runs ||--o{ campaign_deliveries : queues
     campaigns ||--o{ audit_events : records
     campaign_versions ||--o{ campaign_recipients : "keeps at approval"
     campaign_versions ||--o{ campaign_deliveries : "content for"
@@ -112,9 +117,17 @@ erDiagram
         jsonb spec
         timestamptz next_run_at
     }
+    campaign_runs {
+        uuid id PK
+        uuid campaign_id FK
+        int number
+        timestamptz finished_at
+        jsonb counts
+    }
     campaign_deliveries {
         uuid id PK
         uuid campaign_id FK
+        uuid run_id FK
         bigint user_id FK
         text channel
         text idempotency_key UK
@@ -122,6 +135,8 @@ erDiagram
         int attempts
         uuid claim_token
         timestamptz lease_expires_at
+        text link_code UK
+        timestamptz link_clicked_at
     }
     delivery_attempts {
         uuid delivery_id FK
@@ -142,6 +157,8 @@ erDiagram
 Three tables stand apart from campaigns, because a campaign keeps its own copy of what it took from them: `email_designs` (templates), `saved_segments` (reusable audiences) and `brand_profile`. `assets` lists uploaded images, whose files sit on the `asset-data` volume. `starter_content` records that the starter templates were loaded.
 
 `campaign_deliveries` is both the record of each message and the send queue. Keeping them together means a status and its place in the queue change in one transaction.
+
+`campaign_runs` holds one row per send of a campaign: one for a send now or a one-time schedule, one for each time a repeating schedule fires. Every delivery belongs to a run, and a finished run keeps its counts, so reports and lists read them without counting the deliveries again.
 
 ## Code map
 
@@ -164,6 +181,7 @@ Three tables stand apart from campaigns, because a campaign keeps its own copy o
 | `frontend/src/views`, `components`, `api`, `lib` | Pages, shared components, API client, frontend logic |
 | `migrations/` | SQL schema, applied by `setup` |
 | `tests/e2e`, `tests/chaos`, `tests/benchmark` | Acceptance, failure and model-limit tests |
+| `tests/verify` | Load scenarios under faults, security probes and the mutation check, run on their own stack ([README](../tests/verify/README.md)) |
 
 ## Observability
 
