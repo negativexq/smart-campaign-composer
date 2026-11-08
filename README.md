@@ -8,7 +8,7 @@ The full path works with the mock AI or a real model: brief, validated audience,
 
 To run it yourself, follow [Install from scratch](#install-from-scratch). It needs only Docker and no API key.
 
-Reviewing the code? The five-minute [reviewer guide](docs/reviewer-guide.md) shows how Claude's output is checked, why nothing goes out without approval, how the 100-a-second limit holds, and the tests that prove each.
+Reviewing the code? The five-minute [reviewer guide](docs/reviewer-guide.md) shows how Claude's output is checked, why nothing goes out without approval, how the 100-a-second limit holds and where it can slip, and the tests that prove each.
 
 ## Demo video
 

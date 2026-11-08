@@ -4,7 +4,7 @@ A five-minute path through the three claims a reviewer should check first. For e
 
 1. [Claude's output is checked, not trusted](#1-claudes-output-is-checked-not-trusted)
 2. [Nothing is sent that a person did not approve](#2-nothing-is-sent-that-a-person-did-not-approve)
-3. [No channel goes over 100 messages a second](#3-no-channel-goes-over-100-messages-a-second)
+3. [Rate limiting across workers and failures](#3-rate-limiting-across-workers-and-failures)
 4. [Run the checks yourself](#4-run-the-checks-yourself)
 
 ## 1. Claude's output is checked, not trusted
@@ -42,7 +42,9 @@ A five-minute path through the three claims a reviewer should check first. For e
 
 ## 2. Nothing is sent that a person did not approve
 
-**Claim:** valid model output is only a draft. A named person approves one specific version, and what goes out is exactly that version: its audience rule, its messages in every language and its counts. Nothing about it can change afterwards.
+**Claim:** valid model output is only a draft. A person approves one specific version, and what goes out is that version: its audience rule and its messages in every language. Neither can change afterwards. The audience snapshot taken at approval is frozen too, but it is not the number sent: consent is checked again before each message, so fewer can go out, and each run of a repeating campaign finds who matches the frozen rule at that time.
+
+The approver is the name typed at sign-in. It records who did what; it is not authentication. See [A simple sign-in that says who, not who you really are](../DECISIONS.md#a-simple-sign-in-that-says-who-not-who-you-really-are).
 
 **How:**
 
@@ -53,16 +55,16 @@ A five-minute path through the three claims a reviewer should check first. For e
   - something still blocks the audience;
   - a language has no messages.
 - On the review page, the approve button stays off until every language and every A/B version has been opened.
-- Approval stores the audience counts and the step-by-step breakdown with the version.
+- Approval stores the audience snapshot, its counts and step-by-step breakdown, with the version. What was really sent is a separate figure, read from the delivery records.
 - A database trigger, [`campaign_versions_immutable_after_approval`](../migrations/00001_initial_schema.sql#L77), rejects any update or delete of an approved version. The rule holds even if application code has a bug.
-- Sending and scheduling need an approved version. Later runs of a schedule send that same version. Consent is still checked again before each message, so a withdrawal after approval stops it.
+- Sending and scheduling need an approved version. A one-time send goes to the people who were approved. Each later run of a schedule sends that same version to whoever matches its rule then. Consent is checked again before each message either way, so a withdrawal after approval stops it.
 
 **Tests:**
 
 | What | Test |
 |---|---|
 | The database refuses to change an approved version | [`TestApprovedVersionIsImmutable`](../internal/db/schema_test.go#L242) |
-| Approval freezes the version and its counts | [`TestApprovalFreezesTheVersion`](../internal/campaign/dispatch_test.go#L54), [`TestApprovalFreezesTheAudienceCounts`](../internal/campaign/dispatch_test.go#L1144) |
+| Approval freezes the version and its audience snapshot | [`TestApprovalFreezesTheVersion`](../internal/campaign/dispatch_test.go#L54), [`TestApprovalFreezesTheAudienceCounts`](../internal/campaign/dispatch_test.go#L1144) |
 | An approval without a revision, or of an older review | [`TestAnApprovalWithoutARevisionIsRefused`](../internal/campaign/dispatch_test.go#L1327), [`TestAnApprovalOfAnOlderReviewIsRefused`](../internal/campaign/dispatch_test.go#L1253) |
 | Only a reviewed campaign, with every language | [`TestOnlyAReviewedCampaignCanBeApproved`](../internal/campaign/dispatch_test.go#L100), [`TestApprovalNeedsAVersionForEveryLanguage`](../internal/campaign/dispatch_test.go#L1190) |
 | Sending needs approval | [`TestDispatchNeedsApproval`](../internal/campaign/dispatch_test.go#L145), [`TestSchedulingNeedsApprovalAndAValidRule`](../internal/campaign/dispatch_test.go#L356) |
@@ -71,9 +73,9 @@ A five-minute path through the three claims a reviewer should check first. For e
 
 **The limit:** opening a version shows it to the person; it does not prove they read it. See [Approval is slower on purpose](../DECISIONS.md#approval-is-slower-on-purpose).
 
-## 3. No channel goes over 100 messages a second
+## 3. Rate limiting across workers and failures
 
-**Claim:** each channel stays at or below 100 calls a second as the provider counts them. This holds for any number of workers, through retries, crashes and the loss of Redis.
+**Claim:** each channel stays at or below 100 calls a second as the provider counts them. This holds for any number of workers, through retries, crashes and the loss of Redis, and through forward steps of Redis's clock of up to 100 ms. Larger clock steps can let a few calls through for a second; the measured limit is under [Under load](#under-load).
 
 **How:**
 
@@ -94,7 +96,9 @@ A five-minute path through the three claims a reviewer should check first. For e
 | The hold after Redis loses its window | [`TestAChannelWaitsAfterRedisLostItsWindow`](../internal/delivery/limiter_test.go#L153) |
 | Nothing goes out without Redis | [`TestLimiterFailsWhenRedisIsDown`](../internal/delivery/limiter_test.go#L370), [`TestNothingIsSentWithoutTheRateLimiter`](../tests/chaos/chaos_test.go#L277) |
 
-**Under load:** the [24 load scenarios](../tests/verify/README.md#load-scenarios) send about 15,400 messages each. They add provider faults, slow and lost answers, an outage, crashed and restarted workers, PostgreSQL killed, Redis flushed and crashed, and Redis's clock stepped forward. The mock provider counts every call on arrival, refused ones included, and any second over 100 fails the run, outside the scenarios that test past the limit on purpose. Clock steps of 70 and 100 ms stayed at 100. Larger steps are reported rather than failed: 104 after 150 ms, and 117 after 500 ms. The provider refuses those extra calls, and each message is still accepted once. The trade-off is explained in [DECISIONS.md](../DECISIONS.md#the-rate-limiter-is-a-sliding-window-in-redis).
+### Under load
+
+The [24 load scenarios](../tests/verify/README.md#load-scenarios) send about 15,400 messages each. They add provider faults, slow and lost answers, an outage, crashed and restarted workers, PostgreSQL killed, Redis flushed and crashed, and Redis's clock stepped forward. The mock provider counts every call on arrival, refused ones included, and any second over 100 fails the run, outside the scenarios that test past the limit on purpose. Clock steps of 70 and 100 ms stayed at 100. Larger steps are reported rather than failed: 104 after 150 ms, and 117 after 500 ms. The provider refuses those extra calls, and each message is still accepted once. The trade-off is explained in [DECISIONS.md](../DECISIONS.md#the-rate-limiter-is-a-sliding-window-in-redis).
 
 Two mutation cases break the limiter on purpose: one removes the clock margin, the other skips the hold after Redis loses its window. The tests have to catch both ([`mutation/cases.go`](../tests/verify/mutation/cases.go)).
 
