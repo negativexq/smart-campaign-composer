@@ -1,6 +1,20 @@
-//go:build verify
-
 package mutation
+
+// Case is one deliberate fault and the test expected to catch it.
+type Case struct {
+	Name     string
+	File     string // relative to the repository root
+	Find     string
+	Replace  string
+	Go       *GoTest
+	Frontend *FrontendTest
+}
+
+// GoTest runs `go test -run Run Package`.
+type GoTest struct{ Package, Run string }
+
+// FrontendTest runs one vitest file, filtered by test name.
+type FrontendTest struct{ File, Name string }
 
 // Each case breaks one rule the code keeps and names the test written for that rule.
 // Find must appear exactly once in File. A case that no longer matches fails, so a

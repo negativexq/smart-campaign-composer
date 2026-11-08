@@ -264,7 +264,7 @@ The system runs on a deterministic mock by default, and the top bar says so with
 ## Test
 
 ```bash
-make test        # Go and frontend tests in containers, no API key needed
+make test        # Go and frontend tests and the frontend type check in containers, no API key needed
 make test-local  # Go tests with the local toolchain, for faster iteration
 make test-e2e    # acceptance test against a stack started with `make up`
 make test-chaos  # kills and stops services under a running stack, takes a few minutes

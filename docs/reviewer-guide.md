@@ -143,7 +143,7 @@ Two mutation cases break the limiter on purpose: one removes the clock margin, t
 ## 6. Run the checks yourself
 
 ```bash
-make test        # Go and frontend tests in containers, including the benchmark checks without a model
+make test        # Go and frontend tests and the type check in containers, with the benchmark and mutation case checks that need no model
 ```
 
 ```bash

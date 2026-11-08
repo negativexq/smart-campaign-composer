@@ -52,7 +52,7 @@ services:
     profiles: [runner]
     image: node:22-alpine
     working_dir: /src
-    command: sh -c "npm ci --no-audit --no-fund && npm test"
+    command: sh -c "npm ci --no-audit --no-fund && npm test && npm run typecheck"
     volumes:
       - ./frontend:/src
       - frontend-node-modules:/src/node_modules

@@ -20,22 +20,6 @@ import (
 	"time"
 )
 
-// Case is one deliberate fault and the test expected to catch it.
-type Case struct {
-	Name     string
-	File     string // relative to the repository root
-	Find     string
-	Replace  string
-	Go       *GoTest
-	Frontend *FrontendTest
-}
-
-// GoTest runs `go test -run Run Package`.
-type GoTest struct{ Package, Run string }
-
-// FrontendTest runs one vitest file, filtered by test name.
-type FrontendTest struct{ File, Name string }
-
 const caseTimeout = 10 * time.Minute
 
 func TestEveryFaultIsCaught(t *testing.T) {
