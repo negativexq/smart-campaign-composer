@@ -5,9 +5,6 @@
 # wrong:   a wrong answer (case, then the mistake) the backend lets through.
 # naive:   an answer that drops a condition and is let through.
 
-correct: noise-21
-correct: noise-24
-correct: noise-25
 correct: unseen_negation-18
 naive: ambiguous-06
 naive: ambiguous-07

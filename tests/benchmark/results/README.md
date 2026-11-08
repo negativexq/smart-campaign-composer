@@ -11,7 +11,7 @@ One run of all 247 cases on each model, with the same prompt and cases.
 | claude-haiku-5-5 | [2026-11-07-0451](2026-11-07-0451-anthropic-claude-haiku-5-5.md) | 241 | 5 | 1 | 0 | 0 |
 | gpt-6-luna | [2026-11-07-0447](2026-11-07-0447-openai-gpt-6-luna.md) | 242 | 5 | 0 | 0 | 0 |
 
-One clean run says little about the next one, and these are cases we wrote ourselves, not real traffic. See [DECISIONS.md](../../../DECISIONS.md#the-benchmark-draws-the-limits-it-is-not-a-target).
+Three of the Claude run's five blocked cases (noise-21, noise-24 and noise-25) were fixed after it; a partial run of those three, listed below, passed all 9 times. One clean run says little about the next one, and these are cases we wrote ourselves, not real traffic. See [DECISIONS.md](../../../DECISIONS.md#the-benchmark-draws-the-limits-it-is-not-a-target).
 
 ## History
 
@@ -19,6 +19,7 @@ Each of these is superseded. They are kept because DECISIONS.md cites them as th
 
 | Report | Cases | Why it is not current |
 |---|---|---|
+| [2026-11-08-1534 claude-haiku-5-5](2026-11-08-1534-anthropic-claude-haiku-5-5.md) | 3 × 3 | Partial run to check the noise-21, noise-24 and noise-25 fixes |
 | [2026-11-07-0441 gpt-6-luna](2026-11-07-0441-openai-gpt-6-luna.md) | 4 | Partial run to check two prompt rules |
 | [2026-11-07-0440 claude-haiku-5-5](2026-11-07-0440-anthropic-claude-haiku-5-5.md) | 4 | Partial run to check two prompt rules |
 | [2026-11-07-0437 claude-haiku-5-5](2026-11-07-0437-anthropic-claude-haiku-5-5.md) | 246 | After the schema rewrite, before the two prompt rules its 3 silently wrong audiences led to |

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -21,19 +22,17 @@ func TestEveryBenchmarkReportIsCurrentOrMarkedSuperseded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	newest := map[string]string{}
+	cases := map[string]int{}
 	for _, path := range reports {
 		name := filepath.Base(path)
 		if name == "README.md" {
 			continue
 		}
-		if model := modelOf(name); name > newest[model] {
-			newest[model] = name
-		}
 		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
+		cases[name] = caseCount(string(body))
 		marked := strings.HasPrefix(strings.TrimSpace(strings.SplitN(string(body), "\n", 2)[1]), "> **Superseded.**")
 		switch {
 		case current[name] && marked:
@@ -46,9 +45,13 @@ func TestEveryBenchmarkReportIsCurrentOrMarkedSuperseded(t *testing.T) {
 			t.Errorf("%s is superseded but missing from the history in results/README.md", name)
 		}
 	}
+	// A partial run may come after the current report; a run of at least as many
+	// cases is a new result for that model and has to be chosen one way or the other.
 	for name := range current {
-		if newest[modelOf(name)] != name {
-			t.Errorf("%s is listed as current, but %s is newer; mark one of them superseded", name, newest[modelOf(name)])
+		for other, count := range cases {
+			if other > name && modelOf(other) == modelOf(name) && count >= cases[name] {
+				t.Errorf("%s is listed as current, but %s is newer and has as many cases; make it current or say why not", name, other)
+			}
 		}
 	}
 	for name := range history {
@@ -82,6 +85,18 @@ func linkedReports(t *testing.T, index string) (current, history map[string]bool
 		t.Fatal("results/README.md lists no current report")
 	}
 	return current, history
+}
+
+var casesLine = regexp.MustCompile(`(?m)^[0-9-]+ [0-9:]+, [0-9]+ runs? of ([0-9]+) cases\.`)
+
+// caseCount reads "1 runs of 247 cases." from a report's heading.
+func caseCount(body string) int {
+	match := casesLine.FindStringSubmatch(body)
+	if match == nil {
+		return 0
+	}
+	count, _ := strconv.Atoi(match[1])
+	return count
 }
 
 // modelOf is the part of a report's name after its date and time.

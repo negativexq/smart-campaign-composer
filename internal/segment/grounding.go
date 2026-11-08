@@ -46,6 +46,7 @@ func CheckAgainstBrief(proposal *Proposal, brief string, cities []string, chosen
 	proposal.Unmatched, proposal.Unsure = nil, nil
 	proposal.UnsupportedConditions = slices.DeleteFunc(proposal.UnsupportedConditions, matching.OnlyPeople)
 	checkParts(proposal, brief)
+	proposal.UnsupportedConditions = slices.DeleteFunc(proposal.UnsupportedConditions, saysNoCondition)
 	checkCity(proposal, problems, brief, cities)
 	checkWindows(proposal, problems, reading, chosenQuietDays)
 	checkBehavior(proposal, problems, reading)
@@ -161,7 +162,11 @@ func readBrief(brief string) briefReading {
 	tokens := matching.Tokens(brief)
 	reading := briefReading{durations: matching.Durations(brief), bound: map[string][]matching.Duration{}, languages: map[string]bool{}}
 	subjects := map[int]string{}
+	skip := notConditionWords(tokens)
 	for index, token := range tokens {
+		if skip[index] {
+			continue
+		}
 		switch {
 		case cartWord.MatchString(token):
 			reading.hasCart = true
@@ -397,6 +402,9 @@ func checkParts(proposal *Proposal, brief string) {
 		rest = strings.Replace(rest, folded, " ", 1)
 		if matching.OnlyFiller(part.Text) {
 			continue
+		}
+		if saysNoCondition(part.Text) {
+			part.Kind = PartOther
 		}
 		part.UsedAs = filtersOf(proposal, part, applied)
 		if part.Kind == PartAudience && len(part.UsedAs) == 0 && !alreadyReported(proposal.UnsupportedConditions, part.Text) {
