@@ -218,10 +218,18 @@ func TestOpeningAMessageReportsOnceWithItsKey(t *testing.T) {
 	if event.IdempotencyKey != mail.IdempotencyKey || event.OccurredAt.IsZero() {
 		t.Fatalf("event: %+v", event)
 	}
-	select {
-	case extra := <-events:
-		t.Fatalf("opened twice: %+v", extra)
-	case <-time.After(100 * time.Millisecond):
+	// The simulated delivery report for the same message may come in meanwhile; only a
+	// second open is wrong.
+	quiet := time.After(100 * time.Millisecond)
+	for waiting := true; waiting; {
+		select {
+		case extra := <-events:
+			if extra.Event == "opened" {
+				t.Fatalf("opened twice: %+v", extra)
+			}
+		case <-quiet:
+			waiting = false
+		}
 	}
 	page := provider.Inbox("", "", 10)
 	if page.Messages[0].OpenedAt == nil || page.Unopened != 0 {

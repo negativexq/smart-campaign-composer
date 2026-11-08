@@ -1,5 +1,7 @@
 # Benchmark: anthropic claude-sonnet-5-5
 
+> **Superseded.** Kept as history, not a current result. A one-time diagnostic before the schema rewrite, to see whether a larger model failed the same way. Sonnet is not measured by this benchmark. The current report is [2026-11-07-0451-anthropic-claude-haiku-5-5.md](2026-11-07-0451-anthropic-claude-haiku-5-5.md); see the [index](README.md).
+
 2026-11-07 04:24, 1 runs of 246 cases.
 
 ## Overall
