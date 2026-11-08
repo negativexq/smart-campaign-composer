@@ -30,7 +30,7 @@ A focused professional tool, not an AI chatbot or a generic analytics template. 
 
 Color is semantic and never the only signal: every status also has a text label and an icon. WCAG AA contrast is enforced by `frontend/src/design/tokens.test.ts`.
 
-The first version is light only.
+The first version was light only. Settings now offers light, dark and the device's choice,. The contrast test covers the light tokens only.
 
 ## Typography
 
@@ -56,7 +56,7 @@ Inter is the UI face. Metrics use Inter with tabular numbers. JetBrains Mono is 
 
 ## AI behavior
 
-- AI suggestions are marked and stay distinguishable from user edits. The label names no vendor, because the provider is configurable.
+- AI suggestions are marked and stay distinguishable from user edits. That label names no vendor, because the provider is configurable. The top bar's badge is different: it shows the setup, so it names the model in use, or `Mock AI`.
 - Streaming content is a draft. `Validated` appears only after the backend confirms it.
 - Assumptions and conditions the system cannot apply are shown, never dropped silently.
 - Audience conditions come before counts in reading order. A plausible count does not prove the conditions are right.
@@ -65,9 +65,9 @@ Inter is the UI face. Metrics use Inter with tabular numbers. JetBrains Mono is 
 
 ## Campaign flow
 
-Brief → Audience → Content → Review → Monitor.
+Brief → Audience → SMS → Email → Review → Monitor.
 
-The first four steps form the creation workspace. Monitor becomes the active view after dispatch. The UI always shows the campaign status, the current step and the next available action.
+The steps up to Review form the creation workspace, and a channel the campaign does not use has no step. Monitor becomes the active view after dispatch. The UI always shows the campaign status, the current step and the next available action.
 
 ## Operational states
 
@@ -90,7 +90,7 @@ The first four steps form the creation workspace. Monitor becomes the active vie
 
 ## Components
 
-`CampaignStepper`, `BriefComposer`, `AudienceRule`, `MetricCard`, `MessageEditor`, `PhonePreview`, `ValidationNotice`, `ApprovalSummary` and `DeliveryTimeline`, supported by `AppShell`, `OriginTag` and `StatusBadge`.
+The core components are `CampaignStepper`, `BriefComposer`, `AudienceRule`, `MetricCard`, `MessageEditor`, `PhonePreview`, `ValidationNotice`, `ApprovalSummary` and `DeliveryTimeline`, supported by `AppShell`, `OriginTag` and `StatusBadge`. Later pages, such as the calendar, the template editor and notifications, are built from the same tokens.
 
 ## Exclusions
 
