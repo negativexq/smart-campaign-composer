@@ -159,12 +159,13 @@ sequenceDiagram
 
     M->>A: POST /dispatch
     A->>D: Lock the campaign
-    A->>D: One delivery per person and channel,<br/>QUEUED with consent, otherwise SKIPPED
+    A->>D: A run, and one delivery per person and channel in it,<br/>QUEUED with consent, otherwise SKIPPED
+    A->>D: Each queued SMS gets its own short link code<br/>when the brief has a link
     A->>D: Status DISPATCHING, audit event
     A-->>M: Sending started
 ```
 
-The approval page stays closed until each language version has been opened. Repeating either call changes nothing. In an A/B test, each person's side comes from a hash of the campaign and the person, so a retry or a later run never moves them. `POST /schedule` replaces `/dispatch` when the send should wait: see [Scheduling](#scheduling).
+The approval page stays closed until each language version has been opened. Repeating either call changes nothing. The idempotency key of each delivery is its run, person and channel, so every retry of it sends the same key. In an A/B test, each person's side comes from a hash of the campaign and the person, so a retry or a later run never moves them. `POST /schedule` replaces `/dispatch` when the send should wait: see [Scheduling](#scheduling).
 
 ## Sending a message
 
@@ -188,7 +189,7 @@ sequenceDiagram
     par For each claimed message
         W->>W: Consent is still given? Otherwise SKIPPED
         W->>D: Only while another run overlaps, under the person's lock:<br/>with the rule, another send reached them? SKIPPED. One is being sent? RETRYING<br/>without it, one with the rule is being sent? RETRYING
-        W->>W: Render the message for this person's language and version
+        W->>W: Render the message for this person's language and version:<br/>their name, the discount code and their short link fill the variables
         W->>P: POST /v1/messages with Idempotency-Key
         P-->>W: Response, or no answer
         W->>D: Attempt row and new status, in one transaction,<br/>only if claim_token still matches
@@ -323,6 +324,25 @@ sequenceDiagram
 ```
 
 Workers can run anywhere, so the database is the one place that knows the truth, and a page that reconnects simply gets the current state.
+
+## Following a short link
+
+An SMS never carries the brief's long link. Each SMS with a link got its own eight-character code when it was queued, and `{{link}}` became `https://url.short/<code>` when it was rendered. That domain stands in for one a deployment owns and points at the API.
+
+```mermaid
+sequenceDiagram
+    actor C as Customer
+    participant A as API
+    participant D as PostgreSQL
+
+    C->>A: GET /api/l/{code}, from the SMS
+    A->>A: The code has the right shape, otherwise 404
+    A->>D: Count the click and read the approved version's link
+    A-->>C: 302 to the brief's link, not cached
+    Note over A,D: A HEAD request gets the same answer without a click,<br/>and an unknown code gets 404
+```
+
+The report shows how many SMS had their link opened. A retried message keeps its code. See [An SMS carries the brief's link as a short link](../DECISIONS.md#an-sms-carries-the-briefs-link-as-a-short-link).
 
 ## Unsubscribing
 

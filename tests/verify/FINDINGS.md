@@ -2,6 +2,14 @@
 
 Problems and wrong behaviour that the verification runs found, newest first. Each entry says how it showed up, what caused it and where it stands. Security items still open are listed in [docs/security.md](../../docs/security.md#open-items).
 
+## 2026-11-08
+
+### Fixed: the mutation check could not start
+
+`make verify-mutation` stopped before breaking anything, because two cases pointed at code that had moved: a query in `internal/campaign/schedule.go` had been rewritten without its table alias, and the list's "Schedule stopped" label had moved from `CampaignTable.vue` to `frontend/src/lib/campaignRow.ts`. The check refuses to run when the code it would break is not found exactly once, so nothing was reported as caught that was not, but it had not run since the code moved, and nothing else noticed. Found when the check was run to confirm the count in the docs.
+
+Both cases now point at the current code, and the run on 2026-11-08 caught all 24 faults. `make test` now runs `TestEveryCaseStillPointsAtItsCodeAndTest`, which reads every case without breaking anything: the code must still appear once, and the Go or vitest test it names must still exist. A refactor that moves the code now fails `make test` at once.
+
 ## 2026-11-07
 
 ### Fixed: the load checks did not count the messages
