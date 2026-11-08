@@ -480,6 +480,8 @@ describe("content page", () => {
     await flushPromises();
 
     expect(email.text()).toContain("No button");
+    expect(email.find(".notice--info").text()).toContain("This email has no button.");
+    expect(email.find(".notice--warning").exists()).toBe(false);
     expect(email.find("[data-testid=email-button]").attributes("open")).toBeDefined();
     expect(email.text()).not.toContain("Differs from the brief");
   });
