@@ -365,14 +365,18 @@ func insertDeliveries(ctx context.Context, tx pgx.Tx, id, runID string, rule sch
 	// all of their values stay parameters.
 	err = tx.QueryRow(ctx, `
 		WITH inserted AS (
-			INSERT INTO campaign_deliveries (campaign_id, run_id, campaign_version_id, user_id, channel, idempotency_key, status, last_error, trace_context, variant)
+			INSERT INTO campaign_deliveries (campaign_id, run_id, campaign_version_id, user_id, channel, idempotency_key, status, last_error, trace_context, variant, link_code)
 			SELECT `+campaignParam+`::uuid, `+runParam+`::uuid,
 			       (SELECT v.id FROM campaign_versions v WHERE v.campaign_id = `+campaignParam+`::uuid AND v.version = `+versionParam+`::int),
 			       u.id, ch.channel, `+runParam+`::uuid::text || ':' || u.id || ':' || ch.channel,
 			       CASE WHEN consent.allowed THEN 'QUEUED' ELSE 'SKIPPED' END,
 			       CASE WHEN consent.allowed THEN NULL ELSE '`+reasonWithoutConsent+`' END,
 			       NULLIF(`+traceParam+`::text, ''),
-			       CASE WHEN `+testParam+`::int > 0 THEN `+variantOf(campaignParam, testParam)+` END
+			       CASE WHEN `+testParam+`::int > 0 THEN `+variantOf(campaignParam, testParam)+` END,
+			       CASE WHEN ch.channel = 'sms' AND consent.allowed
+			                 AND COALESCE((SELECT v.content->>'link' FROM campaign_versions v
+			                               WHERE v.campaign_id = `+campaignParam+`::uuid AND v.version = `+versionParam+`::int), '') <> ''
+			            THEN `+newLinkCode+` END
 			FROM users u
 			CROSS JOIN unnest(`+channelsParam+`::text[]) AS ch (channel)
 			LEFT JOIN consents consent ON consent.user_id = u.id AND consent.channel = ch.channel
@@ -389,6 +393,11 @@ func insertDeliveries(ctx context.Context, tx pgx.Tx, id, runID string, rule sch
 	}
 	return queued, skipped, nil
 }
+
+// newLinkCode is a short link's code: eight characters from the random part of a
+// UUID, 48 bits, so two messages getting the same code is far less likely than any
+// other failure of a send. The unique index refuses one if it ever happens.
+const newLinkCode = `translate(encode(substring(uuid_send(gen_random_uuid()) from 1 for 6), 'base64'), '+/', '-_')`
 
 // Progress is a campaign's deliveries added up, for the live view and the report.
 type Progress struct {

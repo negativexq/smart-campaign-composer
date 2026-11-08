@@ -974,6 +974,8 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusBadRequest, "The brief mentions a different discount than the one you entered. Change one of them."
 	case errors.Is(err, campaign.ErrCodeConflict):
 		status, message = http.StatusBadRequest, "The brief names a different discount code than the one you entered, or more than one. Keep one code."
+	case errors.Is(err, campaign.ErrLinkConflict):
+		status, message = http.StatusBadRequest, "The brief has more than one link. Every SMS carries one short link, so keep the one people should open."
 	case errors.Is(err, campaign.ErrInvalidName):
 		status, message = http.StatusBadRequest, "Write a campaign name of up to 80 characters."
 	case errors.Is(err, campaign.ErrSegmentNotFound):

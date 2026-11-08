@@ -443,6 +443,24 @@ describe("content page", () => {
     expect(sms.find("[data-testid=phone-frame]").text()).toContain("use SONBAHAR15");
   });
 
+  it("offers the link in the SMS editor, counts it short and previews a short link", async () => {
+    const link = "https://shop.example.com/sonbahar";
+    stub({ ...ready, link, content: { ...stored, sms: "Hi {{first_name}}, shop {{link}}", link } });
+    const sms = open("sms");
+    await flushPromises();
+    expect(sms.find("[data-testid=insert-link]").exists()).toBe(true);
+    expect(sms.find("[data-testid=phone-frame]").text()).toContain("shop https://url.short/");
+    expect(sms.find("[data-testid=phone-frame]").text()).not.toContain(link);
+    expect(sms.text()).not.toContain("{{link}} is not");
+  });
+
+  it("does not offer the link without one in the brief", async () => {
+    stub(ready);
+    const sms = open("sms");
+    await flushPromises();
+    expect(sms.find("[data-testid=insert-link]").exists()).toBe(false);
+  });
+
   it("keeps a template picked just now when the text is regenerated", async () => {
     const newText = { ...ready, content: { ...stored, email_subject: "New" } };
     stub(ready, async () => ({ ok: true, status: 200, body: streamOf(event("done", newText)) }));

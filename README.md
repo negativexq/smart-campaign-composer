@@ -36,7 +36,7 @@ Images go through one library, which redraws each upload and removes its hidden 
 
 ### 2. Write the brief
 
-Say who the campaign is for and what it should say, choose SMS, email or both, and start from the template you picked. A link in the brief becomes the email's button.
+Say who the campaign is for and what it should say, choose SMS, email or both, and start from the template you picked. A link in the brief becomes the email's button, and every SMS carries it as a short link of its own.
 
 ![New campaign: a brief, both channels selected and the Member Night template chosen](docs/screenshots/brief.png)
 
@@ -74,6 +74,10 @@ The report follows each message from plan to arrival, separates provider accepta
 
 ![Deliveries report: results by channel, provider calls over time and the reasons messages did not go out](docs/screenshots/delivery-report.png)
 
+When the brief has a link, every SMS carries a short link of its own, and opening it counts a click. The report's **Short link opened** card shows how many SMS had their link opened at least once, out of those accepted with one, and a test shows the same per version. To try it in the demo, copy a short link's code from an SMS in the test inbox and open `http://localhost:8080/api/l/<code>`: it redirects to the brief's link and the card counts it. Opening the same link again adds to that message's clicks but not to the card, and a link preview's HEAD request is not counted.
+
+![Short link opened card: 37 of 403 SMS had their short link opened](docs/screenshots/short-link-opened.png)
+
 The test inbox shows each message the mock provider accepted, as the customer would get it: here the Winter campaigns template in Turkish, with the name filled in. Nothing leaves your machine.
 
 ![Test inbox: a list of accepted emails in several languages and one open winter sale email in Turkish](docs/screenshots/test-inbox.png)
@@ -95,6 +99,7 @@ The overview shows campaign counts, recent activity and system health. The campa
 - **No duplicates:** there is one delivery per run, recipient and channel, and every retry reuses its idempotency key. A one-time campaign has one run. Later runs of a repeating one leave out people reached before unless its schedule says to reach them again. Rejecting a repeat is then up to the provider remembering that key. The mock writes each accepted message's key to a journal on its own volume before it answers, and replays the journal when it starts, so a retry after a provider restart is recognised as the same message. Unit tests restart it between a lost answer and its retry, and the load suite restarts it in the middle of five sends.
 - **Retries:** failed calls back off with jitter. A 429 pauses the channel without using up an attempt. A call with no answer may have gone through, so a message that runs out of attempts after one ends as `UNKNOWN` instead of failed.
 - **Outages:** a circuit breaker holds a failing channel and tests it with a few probes, which cost messages no attempts. After 10 minutes with nothing finishing, the campaign stops as `PAUSED` with its messages intact, and a person resumes it. A channel in trouble while the campaign still moves raises an alert instead, and a 401 holds the channel without using attempts. Messages left in flight by a crashed worker are taken back through their leases.
+- **Short links:** an SMS never carries the brief's long link. The model writes `{{link}}`, and when a message is queued it gets its own eight-character code, sent as `https://url.short/<code>`. That address stands in for a short domain you own: point it at the API's `/api/l/<code>`, which redirects to the brief's link and counts the click. A retried message keeps its code, and the length check counts the short link, not the long one. The report shows how many SMS had their link opened. See [DECISIONS.md](DECISIONS.md#an-sms-carries-the-briefs-link-as-a-short-link).
 - **Notifications:** the bell at the top right lists scheduled starts, finished sends and problems.
 
 Details and the trade-offs behind each are in [DECISIONS.md](DECISIONS.md). How they hold up is checked by [24 load scenarios](tests/verify/README.md#load-scenarios): provider faults, slow answers, an outage, refused credentials, a crashed or restarted worker, PostgreSQL and Redis lost, Redis's clock stepped forward, and workers set above the provider's limit. Each lists what it measures, and the latest results are in [tests/verify/results](tests/verify/results/).

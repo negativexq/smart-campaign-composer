@@ -274,7 +274,7 @@ func (b Block) checkFinished() string {
 }
 
 func checkFixedWords(text string) string {
-	if issues := checkField("", "Text", text, math.MaxInt, 0, ""); len(issues) > 0 {
+	if issues := checkField("", "Text", text, math.MaxInt, 0, "", false); len(issues) > 0 {
 		return "Only {{first_name}} can be filled in. Check the braces in your text."
 	}
 	return ""

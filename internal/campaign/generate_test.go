@@ -633,6 +633,19 @@ func TestAModelCannotMakeUpWhereAButtonLeads(t *testing.T) {
 	}
 }
 
+func TestAModelCannotMakeUpALinkInItsText(t *testing.T) {
+	t.Parallel()
+	invented := `{"sms":"Hi {{first_name}}, shop at https://evil.example.com/sale","email_subject":"Hello {{first_name}}","email_body":"Your cart is waiting."}`
+	h, provider, id := newContentHarness(t, step{output: invented}, step{output: validContent})
+
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err != nil {
+		t.Fatalf("the corrected attempt should pass: %v", err)
+	}
+	if len(provider.contentCalls) != 2 || !strings.Contains(provider.contentCalls[1].ValidationError, "https://evil.example.com/sale") {
+		t.Fatalf("calls: %+v", provider.contentCalls)
+	}
+}
+
 func TestAModelMayUseALinkFromTheInstruction(t *testing.T) {
 	t.Parallel()
 	given := `{"sms":"Hi {{first_name}}","email_subject":"Hello {{first_name}}","email_body":"Your cart is waiting.","email_cta_label":"Go","email_cta_url":"https://shop.example.com/sale"}`

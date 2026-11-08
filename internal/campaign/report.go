@@ -73,10 +73,15 @@ type ReportLifecycle struct {
 	// ArrivedUnknown had no answer to any call, and the provider later reported them
 	// arrived. Their status stays UNKNOWN because our calls did get no answer.
 	ArrivedUnknown int `json:"arrived_unknown"`
+	// Linked counts the accepted messages that carried a short link, and Clicked those
+	// whose short link was opened at least once.
+	Linked  int `json:"linked"`
+	Clicked int `json:"clicked"`
 }
 
 // ReportVariant follows one channel's messages for one version of a test. It compares
-// what happened and names no winner, because nothing here measures what people did.
+// what happened and names no winner: opens and clicks say what some people did, but a
+// small test cannot tell a better message from chance.
 type ReportVariant struct {
 	Variant   string `json:"variant"`
 	Channel   string `json:"channel"`
@@ -86,6 +91,7 @@ type ReportVariant struct {
 	Bounced   int    `json:"bounced"`
 	Waiting   int    `json:"waiting"`
 	Opened    int    `json:"opened"`
+	Clicked   int    `json:"clicked"`
 }
 
 // Report is what the delivery records say about a campaign, beyond its counts.
@@ -198,7 +204,9 @@ func (s *Service) reportLifecycle(ctx context.Context, id string, run *string) (
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NOT NULL),
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.bounced_at IS NOT NULL),
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL),
-		       count(*) FILTER (WHERE d.status = 'UNKNOWN' AND arrival.delivered_at IS NOT NULL)
+		       count(*) FILTER (WHERE d.status = 'UNKNOWN' AND arrival.delivered_at IS NOT NULL),
+		       count(*) FILTER (WHERE d.status = 'SENT' AND d.link_code IS NOT NULL),
+		       count(*) FILTER (WHERE d.link_clicked_at IS NOT NULL)
 		FROM campaign_deliveries d
 		LEFT JOIN arrival ON arrival.delivery_id = d.id
 		LEFT JOIN called ON called.delivery_id = d.id
@@ -223,7 +231,8 @@ func (s *Service) reportVariants(ctx context.Context, id string, run *string) ([
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NOT NULL),
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.bounced_at IS NOT NULL),
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL),
-		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.opened)
+		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.opened),
+		       count(*) FILTER (WHERE d.link_clicked_at IS NOT NULL)
 		FROM campaign_deliveries d
 		LEFT JOIN arrival ON arrival.delivery_id = d.id
 		WHERE d.campaign_id = $1 AND d.variant IS NOT NULL AND ($2::uuid IS NULL OR d.run_id = $2)

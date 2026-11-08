@@ -289,6 +289,18 @@ describe("review", () => {
     expect(entered.wrapper.text()).toContain("Every message carries the 25% discount you entered.");
   });
 
+  it("names the brief's link and says how each channel carries it", async () => {
+    const link = "https://shop.example.com/sonbahar";
+    const { wrapper } = await open({ ...ready, link });
+    expect(wrapper.text()).toContain(`${link}: every SMS carries it as its own short link, and every email's button opens it.`);
+    expect(wrapper.text()).not.toContain("Email link");
+    expect(wrapper.text()).toContain("Unsubscribe");
+
+    const changed = await open({ ...ready, link, content_warnings: [{ field: "sms", reason: "link_changed", message: "These messages were written for another link. Write them again." }] });
+    expect(changed.wrapper.text()).toContain("These messages were written for another link.");
+    expect(changed.wrapper.text()).toContain("Needs attention");
+  });
+
   it("will not approve with blockers", async () => {
     const { wrapper } = await open({ ...ready, blockers: ["No users match."] });
     expect((wrapper.find("[data-testid=approve]").element as HTMLButtonElement).disabled).toBe(true);

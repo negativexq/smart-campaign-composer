@@ -133,6 +133,32 @@ This is strict for a person too, unlike a percentage. Changing the offer is a pr
 
 **Not covered.** One-time codes per person need a pool of codes and tracking of which were used, and are left for later. Whether a code works in the shop is for the shop to know; we only make sure the code given is the code sent. A campaign has one code, like one discount. Reading a code from the brief needs a word for a code next to it, so a code written any other way has to go in the form field.
 
+## An SMS carries the brief's link as a short link
+
+A brief with a link sent it only as the email's button; no SMS carried it, and nothing checked that one did ([#29](https://github.com/negativexq/smart-campaign-composer/issues/29)). An SMS without the link sends people nowhere, and a long link uses up much of its 160 characters.
+
+**How it gets into a message.** As with a discount code, the model writes `{{link}}` in the SMS and the backend fills it in, so it cannot be mistyped, shortened by hand or dropped without the check seeing it. A link the model or a person types out in the SMS becomes `{{link}}` before the checks run. Each version stores the link, set by the backend from the brief and never from a model or a request, so approval freezes it with the text. The email keeps the link on its button, where its length does not matter.
+
+**Why a short link of our own.** SMS campaigns usually send short links: a long one can push a message into a second part, which costs more. A short link on a public shortener is often filtered as spam, so senders use a domain of their own. Here each SMS gets its own eight-character code when its delivery is queued, sent as `https://url.short/<code>`. `url.short` is a stand-in: a deployment sets `content.ShortLinkBase` to a domain it owns and points that at the API's `/api/l/<code>`, which redirects to the brief's link. Because the code belongs to one delivery, a retry sends the same link, and a click says which message it came from. The code is 48 random bits from a UUID, and a unique index refuses a repeat rather than sending two people the same link.
+
+**What is checked.**
+
+| Case | Model output | A person's edit |
+|---|---|---|
+| The brief has a link and an SMS has no `{{link}}` | Repaired like any invalid output | Not saved, with the reason on the field |
+| The brief has a link and the email's button opens something else, or there is no button | Repaired | Not saved |
+| `{{link}}` without a link in the brief, or in an email | Repaired | Not saved |
+| A link in any text that is not in the brief, the instruction or the current button | Repaired | Allowed |
+| Messages written for another link, or before the brief had one | — | Shown on the review page; approval is refused until they are written again |
+| SMS length | `{{link}}` counts as the 26 characters of a short link | Same |
+| Two different links in the brief | Refused when the brief is saved, since an SMS carries one link | Same |
+
+**How a click is checked.** A short link's code belongs to one delivery, so opening `/api/l/<code>` finds exactly which message was opened. One update both counts the click and reads where to send the person: it adds one to the delivery's `link_clicks` and sets `link_clicked_at` the first time only, then answers with a 302 to the brief's link and `Cache-Control: no-store`, so a browser asks again on the next open instead of skipping the count. A HEAD request, which link previews and some scanners send, redirects without counting. A code that is not eight URL-safe characters, or that no message carries, gets a 404 without touching the database beyond one indexed lookup.
+
+**What the report counts.** The report counts messages, not clicks: a message whose link was opened at least once, out of the accepted messages that carried a short link, per channel and per test version. A person who opens their link five times is one, so the number says how many people acted rather than how eager a few were; the total clicks stay on each delivery. Phones that preview links can still open one with a GET before the person does, and the card says so. The report names no winner of a test, since a small one cannot tell a better message from chance.
+
+**Not covered.** The email's button keeps the full link, so email clicks are not counted. A brief can hold one link; a campaign that needs two puts the second in the email by hand. Changing the link means changing the brief, so an instruction cannot point the button somewhere else. The redirect works only once the short domain points at the API; in the demo, `/api/l/<code>` on the API or through the frontend shows it.
+
 ## Changing the audience clears the content
 
 Messages are written for a specific audience, and its longest name sets the limits. Keeping them after a change would leave text checked against limits that no longer apply, so a new proposal puts the campaign back to a draft without content, and the page says so before it happens.
@@ -147,7 +173,7 @@ The model and the marketer write text only: subject, preview text, headline, bod
 
 The preview calls the same renderer through an endpoint instead of copying it in the frontend, so what a marketer checks is what is sent. It is shown in a sandboxed frame with no scripts. The template editor's frame also has `allow-scripts`, because Safari silently drops the page's click listeners on a frame without it; its render carries `script-src 'none'`, so nothing inside the email can run. Sent emails do not carry that line.
 
-A button link from the model must appear in the brief, the instruction or the current version, because a made-up address sends real people somewhere nobody chose. A person editing the message can set any full http or https link.
+A button link from the model must appear in the brief, the instruction or the current version, because a made-up address sends real people somewhere nobody chose. A person editing the message can set any full http or https link, except that a brief with a link holds the button to it (see [An SMS carries the brief's link as a short link](#an-sms-carries-the-briefs-link-as-a-short-link)).
 
 ## Unsubscribing takes a signed link and a button
 

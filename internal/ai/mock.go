@@ -323,6 +323,10 @@ func (m *Mock) StreamContent(ctx context.Context, request ContentRequest, handle
 	if strings.Contains(request.Brief, "{{"+content.CodeVariable+"}}") {
 		draft.SMS += fmt.Sprintf(copy.code, "{{"+content.CodeVariable+"}}")
 	}
+	// The SMS carries the link as {{link}}, which becomes a short link when it is sent.
+	if strings.Contains(request.Brief, "{{"+content.LinkVariable+"}}") {
+		draft.SMS += " {{" + content.LinkVariable + "}}"
+	}
 	if link := mockLink.FindString(request.Brief + " " + request.Instruction); link != "" {
 		draft.EmailCTAURL, draft.EmailCTALabel = link, copy.ctaLabel
 	}

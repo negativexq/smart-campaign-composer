@@ -65,6 +65,7 @@ var (
 	ErrInvalidOptions   = errors.New("tone, offer or exclusion is not valid")
 	ErrOfferConflict    = errors.New("brief mentions a different discount than the offer")
 	ErrCodeConflict     = errors.New("brief names a different discount code than the form, or more than one")
+	ErrLinkConflict     = errors.New("brief names more than one link")
 	ErrInvalidName      = errors.New("campaign name is empty or too long")
 	ErrNotFound         = errors.New("campaign not found")
 	ErrNotEditable      = errors.New("campaign can no longer be edited")
@@ -105,6 +106,9 @@ type View struct {
 	// DiscountCode is the code every message carries: the form's, or the one the brief
 	// names. Empty when there is none.
 	DiscountCode string `json:"discount_code"`
+	// Link is the brief's link: every SMS carries it as a short link and every email's
+	// button opens it. Empty when the brief has none.
+	Link string `json:"link"`
 	// NotMessagedWithinDays is what the form asked for; the audience rule that
 	// applies is in Proposal.
 	NotMessagedWithinDays *int                `json:"not_messaged_within_days"`
@@ -212,6 +216,10 @@ func checkOffer(brief string, offer *int, code *string) error {
 	if len(codes) > 1 || (code != nil && len(codes) == 1 && codes[0] != *code) {
 		return ErrCodeConflict
 	}
+	// Every SMS carries one short link, so a brief with two would leave one out.
+	if len(content.BriefLinks(brief)) > 1 {
+		return ErrLinkConflict
+	}
 	return nil
 }
 
@@ -234,6 +242,14 @@ func discountCode(brief string, form *string) string {
 	}
 	if codes := content.BriefCodes(brief); len(codes) == 1 {
 		return codes[0]
+	}
+	return ""
+}
+
+// briefLink is the link the messages carry, or empty.
+func briefLink(brief string) string {
+	if links := content.BriefLinks(brief); len(links) == 1 {
+		return links[0]
 	}
 	return ""
 }
@@ -596,6 +612,9 @@ func (v View) writingBrief() string {
 	}
 	if v.DiscountCode != "" {
 		brief = fmt.Sprintf("%s\n\nDiscount code set by the marketer: %s. Write {{%s}} where the code goes; the code is filled in when the message is sent.", brief, v.DiscountCode, content.CodeVariable)
+	}
+	if v.Link != "" {
+		brief = fmt.Sprintf("%s\n\nLink: %s. Put it on the email's button exactly as written, and write {{%s}} in the SMS where it goes; each SMS gets a short link in its place when it is sent.", brief, v.Link, content.LinkVariable)
 	}
 	return brief
 }
@@ -1044,7 +1063,7 @@ func (s *Service) get(ctx context.Context, q segment.Querier, id string) (View, 
 			return View{}, err
 		}
 	}
-	view.ContentLimits = content.Limits{SkipSMS: !slices.Contains(view.Channels, "sms"), SkipEmail: !slices.Contains(view.Channels, "email"), Code: view.DiscountCode}
+	view.ContentLimits = content.Limits{SkipSMS: !slices.Contains(view.Channels, "sms"), SkipEmail: !slices.Contains(view.Channels, "email"), Code: view.DiscountCode, Link: view.Link}
 	for i := range view.Languages {
 		view.ContentLimits.SMSName = max(view.ContentLimits.SMSName, view.Languages[i].SMSName)
 		view.ContentLimits.EmailName = max(view.ContentLimits.EmailName, view.Languages[i].EmailName)
@@ -1064,6 +1083,7 @@ func (s *Service) get(ctx context.Context, q segment.Querier, id string) (View, 
 	if view.Content != nil {
 		view.ContentWarnings = append(view.ContentWarnings, content.CheckDiscounts(view.Content.Content, view.writingBrief())...)
 		view.ContentWarnings = append(view.ContentWarnings, content.CheckCode(view.Content.Content, view.limitsFor(view.Content.Language))...)
+		view.ContentWarnings = append(view.ContentWarnings, content.CheckLink(view.Content.Content, view.limitsFor(view.Content.Language))...)
 		view.ContentWarnings = append(view.ContentWarnings, view.Content.NotApplied...)
 		for _, root := range view.Content.variants() {
 			for index, version := range root.all() {
@@ -1072,6 +1092,7 @@ func (s *Service) get(ctx context.Context, q segment.Querier, id string) (View, 
 				}
 				issues := append(content.CheckDiscounts(version.Content, view.writingBrief()), version.NotApplied...)
 				issues = append(issues, content.CheckCode(version.Content, view.limitsFor(version.Language))...)
+				issues = append(issues, content.CheckLink(version.Content, view.limitsFor(version.Language))...)
 				for _, issue := range issues {
 					issue.Message = versionLabel(version, index > 0) + ": " + issue.Message
 					view.ContentWarnings = append(view.ContentWarnings, issue)
@@ -1131,6 +1152,7 @@ func (s *Service) loadFrom(ctx context.Context, q segment.Querier, id string) (V
 		return View{}, fmt.Errorf("load campaign: %w", err)
 	}
 	view.DiscountCode = discountCode(view.Brief, view.FormDiscountCode)
+	view.Link = briefLink(view.Brief)
 	if version == nil {
 		return view, nil
 	}

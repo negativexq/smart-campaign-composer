@@ -77,6 +77,8 @@ onBeforeUnmount(() => {
 
 const lifecycle = computed(() => report.value?.lifecycle ?? []);
 const variants = computed(() => report.value?.variants ?? []);
+// Only a campaign whose messages carried a short link has clicks to show.
+const linkedRows = computed(() => lifecycle.value.filter((row) => (row.linked ?? 0) > 0));
 const arrivedUnknown = computed(() => lifecycle.value.reduce((sum, row) => sum + row.arrived_unknown, 0));
 const stepsOf = (row: ReportLifecycle): { key: string; count: number; selection: Partial<DeliveryQuery> }[] => [
   { key: "accepted", count: row.accepted, selection: { channel: row.channel, status: "SENT" } },
@@ -381,6 +383,23 @@ const isPicked = (selection: Partial<DeliveryQuery> | null) => Boolean(selection
         </div>
         <span class="small engagement-value" :data-testid="`engagement-${item.channel}`">
           <span class="mono">{{ item.opened.toLocaleString("en-US") }}</span> of <span class="mono">{{ item.accepted.toLocaleString("en-US") }}</span> {{ openedWord(item.channel) }}
+        </span>
+      </div>
+    </article>
+
+    <article v-if="linkedRows.length" class="card chart" data-testid="click-chart">
+      <header>
+        <h3 class="title">Short link opened</h3>
+        <p class="small muted">Counts messages whose short link was opened at least once, out of those accepted with one. A phone that previews links can open one before the person does.</p>
+      </header>
+      <div v-for="row in linkedRows" :key="row.channel" class="channel-row engagement-row">
+        <span class="channel-name">{{ formatChannel(row.channel) }}</span>
+        <div class="stack">
+          <span v-if="row.clicked" class="segment segment--opened" :style="{ flexGrow: row.clicked }"></span>
+          <span v-if="(row.linked ?? 0) > (row.clicked ?? 0)" class="segment mark--WAITING" :style="{ flexGrow: (row.linked ?? 0) - (row.clicked ?? 0) }"></span>
+        </div>
+        <span class="small engagement-value" :data-testid="`clicked-${row.channel}`">
+          <span class="mono">{{ (row.clicked ?? 0).toLocaleString("en-US") }}</span> of <span class="mono">{{ (row.linked ?? 0).toLocaleString("en-US") }}</span> opened
         </span>
       </div>
     </article>

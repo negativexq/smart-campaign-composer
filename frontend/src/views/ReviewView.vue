@@ -116,7 +116,10 @@ const checks = computed<Check[]>(() => {
   const hasDiscount = Boolean(current.offer_percent) || /%\s*\d|\d\s*%/.test(current.brief);
   // What the model left undone and a missing button are their own notices, not about discounts.
   const codeReasons = ["missing_code", "code_changed"];
-  const differs = current.content_warnings.filter((warning) => warning.reason !== "not_applied" && warning.reason !== "no_button" && !codeReasons.includes(warning.reason));
+  const linkReasons = ["missing_link", "link_changed"];
+  const differs = current.content_warnings.filter(
+    (warning) => warning.reason !== "not_applied" && warning.reason !== "no_button" && !codeReasons.includes(warning.reason) && !linkReasons.includes(warning.reason),
+  );
   if (differs.length || hasDiscount) {
     list.push({
       label: "Discount",
@@ -163,12 +166,25 @@ const checks = computed<Check[]>(() => {
       ok: !noSecondVersion.value && !empty,
     });
   }
-  if (current.channels.includes("email") && current.content) {
+  // Shown only for a brief with a link, or messages written for one it no longer has.
+  const linkProblems = current.content_warnings.filter((warning) => linkReasons.includes(warning.reason));
+  if (current.link || linkProblems.length) {
+    const carriers = [current.channels.includes("sms") && "every SMS carries it as its own short link", current.channels.includes("email") && "every email's button opens it"].filter(Boolean);
     list.push({
-      label: "Email link",
-      detail: current.content.email_cta_url ? `The button opens ${current.content.email_cta_url}` : "This email has no button.",
-      ok: true,
+      label: "Link",
+      detail: linkProblems.length ? uniqueWarnings(linkProblems).map((warning) => warning.message).join(" ") : `${current.link}: ${carriers.join(", and ")}.`,
+      ok: !linkProblems.length,
     });
+  }
+  if (current.channels.includes("email") && current.content) {
+    // With a link in the brief, the Link row says where the button goes.
+    if (!current.link) {
+      list.push({
+        label: "Email link",
+        detail: current.content.email_cta_url ? `The button opens ${current.content.email_cta_url}` : "This email has no button.",
+        ok: true,
+      });
+    }
     list.push({ label: "Unsubscribe", detail: "Each email carries its own unsubscribe link and a plain text version.", ok: true });
   }
   list.push({ label: "When", detail: problem.value || (form.value.mode === "now" ? "Sends as soon as you approve." : "Sends on the schedule below."), ok: !problem.value });

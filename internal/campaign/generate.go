@@ -661,7 +661,7 @@ func (g *Generation) validate(ctx context.Context, output []byte, offerSource st
 	defer span.End()
 	generated, err := content.ParseGenerated(output, g.limits(), offerSource)
 	if err == nil {
-		if issues := content.CheckLinks(generated, g.linkSource()); len(issues) > 0 {
+		if issues := append(content.CheckLinks(generated, g.linkSource()), content.CheckTextLinks(generated, g.linkSource())...); len(issues) > 0 {
 			err = &content.ValidationError{Issues: issues}
 		} else if issues := content.CheckFacts(generated, g.factSource(), g.cities); len(issues) > 0 {
 			err = &content.ValidationError{Issues: issues}
@@ -914,7 +914,7 @@ func (s *Service) SaveContentAt(ctx context.Context, id, revision string, edited
 	edited = limits.Keep(edited)
 	edited.Language, edited.Variant = target.Language, target.Variant
 	// The code comes from the campaign, and a code typed out becomes the variable.
-	edited = content.WithCode(edited, limits.Code)
+	edited = content.WithLink(content.WithCode(edited, limits.Code), limits.Link)
 	if issues := content.CheckMessages(edited, limits); len(issues) > 0 {
 		return View{}, &content.ValidationError{Issues: issues}
 	}

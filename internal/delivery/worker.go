@@ -507,6 +507,8 @@ type claim struct {
 	// probe marks a call testing whether a failing provider is back.
 	probe   bool
 	content content.Content
+	// linkCode is this SMS's short link code, when its campaign has a link.
+	linkCode string
 	// granted is when the limiter gave this message's permit, and take the round that
 	// claimed it, which is in another trace.
 	granted time.Time
@@ -594,7 +596,8 @@ func (w *Worker) claim(ctx context.Context, channel string, limit int) ([]claim,
 		              WHERE o.id <> r.id AND (o.finished_at IS NULL OR o.finished_at >= COALESCE(r.rule_as_of, '-infinity') - make_interval(secs => $4))),
 		          r.rule_days IS NULL AND EXISTS (
 		              SELECT 1 FROM campaign_runs o
-		              WHERE o.id <> r.id AND o.finished_at IS NULL AND o.rule_days IS NOT NULL)`,
+		              WHERE o.id <> r.id AND o.finished_at IS NULL AND o.rule_days IS NOT NULL),
+		          COALESCE(d.link_code, '')`,
 		limit, w.config.Lease.Seconds(), channel, overlapMargin.Seconds())
 	if err != nil {
 		return nil, timing, fmt.Errorf("claim deliveries: %w", err)
@@ -613,7 +616,7 @@ func (w *Worker) claim(ctx context.Context, channel string, limit int) ([]claim,
 		)
 		if err := row.Scan(&item.id, &item.token, &item.campaignID, &item.runID, &item.channel, &item.key, &item.userID, &item.attempts, &item.traceContext,
 			&age, &item.firstName, &item.email, &item.phone, &language, &variant, &item.consented, &encoded, &item.notMessagedWithinDays,
-			&item.overlapping, &item.ruleOpen); err != nil {
+			&item.overlapping, &item.ruleOpen, &item.linkCode); err != nil {
 			return claim{}, err
 		}
 		var stored content.Versions
@@ -644,7 +647,12 @@ func (c claim) message(unsubscribeURL, assetBase string) (Message, error) {
 	message := Message{Channel: c.channel, IdempotencyKey: c.key}
 	if c.channel == "sms" {
 		message.To = c.phone
-		message.Body = content.Render(c.content.SMS, content.NameFor(c.content.Language, c.firstName), c.content.DiscountCode)
+		// A message queued before its campaign had short links carries the link itself.
+		link := c.content.Link
+		if c.linkCode != "" {
+			link = content.ShortLink(c.linkCode)
+		}
+		message.Body = content.RenderSMS(c.content, content.NameFor(c.content.Language, c.firstName), link)
 		return message, nil
 	}
 	message.To = c.email

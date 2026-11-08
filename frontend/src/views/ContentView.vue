@@ -119,6 +119,8 @@ const designChoices = computed(() => {
 });
 // The code comes from the campaign: a save takes it from there too, never from the page.
 const code = computed(() => campaign.value?.discount_code ?? "");
+// The link comes from the brief, and only the SMS writes it as {{link}}.
+const link = computed(() => campaign.value?.link ?? "");
 const previewMessage = computed(() => {
   const chosen = template.value;
   if (!isCustomTemplate(chosen)) return { ...messages, discount_code: code.value };
@@ -431,6 +433,7 @@ onBeforeUnmount(() => controller?.abort());
             origin="ai"
             :longest-name="nameLength"
             :code="code"
+            :link="link"
             :problem="issueFor('sms')"
           />
           <template v-else>
@@ -477,7 +480,7 @@ onBeforeUnmount(() => controller?.abort());
       </div>
 
       <aside v-if="recipients.length" class="previews" aria-label="Message preview">
-        <PhonePreview v-if="channel === 'sms'" :key="selectedVariant + selectedLanguage" :message="messages.sms" :recipients="shownRecipients" :language="selectedLanguage" :code="code" />
+        <PhonePreview v-if="channel === 'sms'" :key="selectedVariant + selectedLanguage" :message="messages.sms" :recipients="shownRecipients" :language="selectedLanguage" :code="code" :link="link" />
         <EmailPreview v-else :key="selectedVariant + selectedLanguage" :message="previewMessage" :recipients="shownRecipients" :language="selectedLanguage" />
       </aside>
     </div>
