@@ -151,6 +151,11 @@ export function uniqueWarnings<T extends Warning>(warnings: T[]): T[] {
   return warnings.filter((warning, index) => warnings.findIndex((other) => other.reason === warning.reason && other.message === warning.message) === index);
 }
 
+// A missing button is expected when the brief has no link, so it reads as a note, not a problem.
+export function warningTone(warning: Warning): "info" | "warning" {
+  return warning.reason === "no_button" ? "info" : "warning";
+}
+
 export function warningTitle(warning: Warning): string {
   if (warning.reason === "no_button") return "No button";
   return warning.reason === "not_applied" ? "Not done" : "Differs from the brief";

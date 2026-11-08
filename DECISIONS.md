@@ -178,6 +178,8 @@ The preview calls the same renderer through an endpoint instead of copying it in
 
 A button link from the model must appear in the brief, the instruction or the current version, because a made-up address sends real people somewhere nobody chose. A person editing the message can set any full http or https link, except that a brief with a link holds the button to it (see [An SMS carries the brief's link as a short link](#an-sms-carries-the-briefs-link-as-a-short-link)).
 
+An email without a button is said, so a template's button does not disappear without a word, but it is a note, not a problem. A brief with no link is a normal campaign. The Email step shows the note where a button can be added, and review lists it among its checks instead of putting it at the top next to the things that need fixing. It first showed there as a warning, and a marketer who had left the link out on purpose read it as an error.
+
 ## Unsubscribing takes a signed link and a button
 
 Every email has its own link, signed with HMAC-SHA256, so it needs no session and cannot be changed to withdraw someone else's consent. Opening it only asks, because mail scanners open links; the POST withdraws email consent and can be repeated. SMS consent does not change. The worker reads consent again before each send, so queued emails for that person end as `consent_withdrawn` with no extra code. The worker refuses to start without `UNSUBSCRIBE_SECRET`, so no campaign can go out with a footer that does not work.

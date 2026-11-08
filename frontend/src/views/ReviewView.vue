@@ -29,6 +29,8 @@ const props = defineProps<{ campaignId: string }>();
 const emit = defineEmits<{ status: [status: string]; channels: [channels: string[]] }>();
 
 const campaign = ref<Campaign | null>(null);
+// A missing button is not a problem to fix here: the checks below say the email has none.
+const problems = <T extends { reason: string }>(warnings: T[]) => warnings.filter((warning) => warning.reason !== "no_button");
 const loadError = ref("");
 const actionError = ref("");
 const submitting = ref(false);
@@ -182,7 +184,7 @@ const checks = computed<Check[]>(() => {
     if (!current.link) {
       list.push({
         label: "Email link",
-        detail: current.content.email_cta_url ? `The button opens ${current.content.email_cta_url}` : "This email has no button.",
+        detail: current.content.email_cta_url ? `The button opens ${current.content.email_cta_url}` : "The brief has no link, so the email has no button.",
         ok: true,
       });
     }
@@ -247,7 +249,7 @@ onMounted(async () => {
     </header>
 
     <ValidationNotice v-for="blocker in campaign.blockers" :key="blocker" tone="error" title="This blocks approval">{{ blocker }}</ValidationNotice>
-    <ValidationNotice v-for="warning in uniqueWarnings(campaign.content_warnings)" :key="warning.field + warning.reason" tone="warning" :title="warningTitle(warning)">
+    <ValidationNotice v-for="warning in uniqueWarnings(problems(campaign.content_warnings))" :key="warning.field + warning.reason" tone="warning" :title="warningTitle(warning)">
       {{ warning.message }}
     </ValidationNotice>
 
