@@ -248,6 +248,7 @@ Each step is measured with the same scenario as the baseline and compared with i
 | 6 | Work done only when it changes something: a finished run's kept total instead of counting its deliveries; pages watching a campaign share one reading; hidden browser tabs stop asking | Step 5 | Deliveries tab 1.6 ms instead of 5.2 ms; 20 open pages of a campaign cost 4 queries a second instead of 80; at 800 RPS the top queries take 4.8 s of database time instead of 26–27 s, p95 2.0 ms instead of 6 ms |
 | 7 | A call counts against the limit until a second after its answer, instead of for 1.1 s from its grant; answers ride on the worker's next Redis call | Sending at the channel limit after step 6 | Send without faults 88.1–88.8 s instead of 94.0–94.7 s, about 95 messages/s per channel instead of 89; no second above 100 at the provider in 8 runs, against 106 and 125 in one run before |
 | 8 | The list's message preview is read from two generated columns instead of out of each version's content | Measured again on 2026-11-08 | Campaign list alone: 2,040–2,261 requests/s instead of 1,764–1,810, against 2,123–2,609 for step 6's code without previews on the same data |
+| 9 | The analytics channel totals read the window's events once and join them, instead of looking up each delivery's events | The two-hour soak of 2026-11-08 | Channel totals over 36,525 deliveries: 33–40 ms instead of 86–93 ms |
 
 ### Step 1: the read path
 
@@ -581,3 +582,24 @@ What these runs do not show:
 
 - The API, PostgreSQL and k6 share 8 CPUs, so runs of the same code differ by up to about 20% above 2000 RPS. Differences smaller than that are not findings.
 - The ceiling is still the pool of 8 connections, not PostgreSQL's CPU. A larger pool was not tried, for the reason given after step 6.
+
+### Step 9: analytics channel totals
+
+The two-hour soak of 2026-11-08 read 13 endpoints at 40 requests a second while a finished campaign was sent again every 10 minutes. Deliveries grew from 12,927 to 36,525, and over the same time the mean of the routes without an id in their path went from about 7 ms to about 14 ms. Apart from the event streams, which stay open by design, `/api/analytics` was the slowest endpoint at 52 ms on average over the run, and 63–104 ms when called by hand at the end.
+
+The analytics page runs three queries. With 36,525 deliveries in the 7-day window, the calls by day took 8–10 ms and the campaign results 10–13 ms. The channel totals took 86–93 ms: they looked up each delivery's events through the same lateral join the delivery filters use, 36,525 index lookups in the plan, and joined the opened events a second time. That cost grows with every delivery in the window.
+
+The fix reads the events once, grouped by delivery, and joins them to the deliveries in one pass, as the report has done since step 2 ([analytics.go](../internal/campaign/analytics.go)). The window bounds the events by `received_at`, because an event is received after its delivery was created, so no event of a delivery in the window is left out, and a provider clock that is behind does not drop one. [`TestAnalyticsCountsArrivalFromEachDeliverysEvents`](../internal/campaign/events_test.go) pins the counts for delivered, bounced, opened-only, delivered-then-bounced and a far-behind provider time, and passes on the old query and the new one.
+
+The channel totals query alone, on the soak's data, warm, five runs each:
+
+| | Before | After |
+|---|---|---|
+| Channel totals, 7 days, 36,525 deliveries | 86–93 ms | 33–40 ms |
+
+What this does not show:
+
+- The time still grows with the deliveries in the window, only more slowly. A 90-day window over months of sending will be slower than this. A summary kept per day, as the decisions on query shapes already suggest for history across campaigns, would take that away and is left for when such data exists.
+- The soak read the analytics page about 3 times a second, far more than people open it. The page was not slow for a person at this size; the change is for the growth.
+- Only the query was timed. The endpoint as a whole was not measured again after the change.
+

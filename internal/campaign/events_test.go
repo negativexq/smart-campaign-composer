@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/negativexq/smart-campaign-composer/internal/campaign"
 )
 
@@ -474,6 +476,66 @@ func TestAnalyticsComparesCampaignsInsideTheWindow(t *testing.T) {
 	}
 	if _, err := h.service.Analytics(ctx, 8); !errors.Is(err, campaign.ErrUnknownFilter) {
 		t.Fatalf("unknown range: %v", err)
+	}
+}
+
+// Analytics reads every delivery's arrival from its events: a bounce outweighs a
+// delivered report, an open alone shows the message arrived, and the time the
+// provider gives an event does not decide whether it counts.
+func TestAnalyticsCountsArrivalFromEachDeliverysEvents(t *testing.T) {
+	t.Parallel()
+	h, id, _ := sentCampaign(t)
+	ctx := context.Background()
+
+	rows, err := h.pool.Query(ctx, `SELECT id FROM campaign_deliveries WHERE campaign_id = $1 AND status = 'QUEUED' ORDER BY id LIMIT 6`, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(ids) < 6 {
+		t.Fatalf("queued: %d %v", len(ids), err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE campaign_deliveries SET status = 'SENT' WHERE id = ANY($1)`, ids); err != nil {
+		t.Fatal(err)
+	}
+	events := []struct {
+		delivery int
+		kind     string
+		at       string
+	}{
+		{0, "delivered", "2026-11-03T12:01:00Z"},
+		{1, "bounced", "2026-11-03T12:01:00Z"},
+		{2, "delivered", "2026-11-03T12:01:00Z"},
+		{2, "opened", "2026-11-03T12:30:00Z"},
+		{3, "opened", "2026-11-03T12:30:00Z"},
+		{4, "delivered", "2026-11-03T12:01:00Z"},
+		{4, "bounced", "2026-11-03T12:02:00Z"},
+		// A provider clock far behind still reports an arrival inside the window.
+		{5, "delivered", "2000-01-01T00:00:00Z"},
+	}
+	for _, e := range events {
+		if _, err := h.pool.Exec(ctx, `INSERT INTO delivery_events (delivery_id, campaign_id, event_type, occurred_at) VALUES ($1, $2, $3, $4)`,
+			ids[e.delivery], id, e.kind, e.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report, err := h.service.Analytics(ctx, 30)
+	if err != nil {
+		t.Fatalf("analytics: %v", err)
+	}
+	var sum campaign.ChannelTotals
+	for _, channel := range report.Channels {
+		sum.Accepted += channel.Accepted
+		sum.Delivered += channel.Delivered
+		sum.Bounced += channel.Bounced
+		sum.Waiting += channel.Waiting
+		sum.Opened += channel.Opened
+	}
+	// sentCampaign accepted one delivery with no events; six more are accepted here.
+	want := campaign.ChannelTotals{Accepted: 7, Delivered: 4, Bounced: 2, Waiting: 1, Opened: 2}
+	if sum != want {
+		t.Fatalf("totals %+v, want %+v", sum, want)
 	}
 }
 
