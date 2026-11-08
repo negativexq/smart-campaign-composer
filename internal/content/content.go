@@ -65,7 +65,9 @@ const (
 
 var (
 	variablePattern = regexp.MustCompile(`\{\{\s*([a-zA-Z0-9_]+)\s*\}\}`)
-	discountPattern = regexp.MustCompile(`%\s*(\d+)|(\d+)\s*%`)
+	// discountPattern reads a percent written with a sign or a word, in the languages
+	// messages are written in: "%15", "15%", "yüzde 15", "15 percent", "15 Prozent".
+	discountPattern = regexp.MustCompile(`%\s*(\d+)|(\d+)\s*%|(?i:\byüzde)\s+(\d+)\b|\b(\d+)\s+(?i:yüzde|percent|per\s+cent|prozent|por\s+ciento|pour\s*cent)\b`)
 	codeShape       = regexp.MustCompile(`^[A-Z0-9][A-Z0-9-]*$`)
 	// briefCode finds a code next to a word that names one: "kodu SONBAHAR15",
 	// "SONBAHAR15 kodunu", "code SPRING10", "promo code: SPRING-10".
@@ -206,7 +208,8 @@ func (e *ValidationError) Error() string {
 	for _, issue := range e.Issues {
 		messages = append(messages, issue.Message)
 	}
-	return strings.Join(messages, "; ")
+	// Each message is a sentence of its own.
+	return strings.Join(messages, " ")
 }
 
 // ParseGenerated decodes and validates untrusted model output. Discount
@@ -229,6 +232,7 @@ func ParseGenerated(raw []byte, limits Limits, offerSource string) (Content, err
 	generated.EmailDesign = nil
 	generated = WithLink(WithCode(generated, limits.Code), limits.Link)
 	issues := append(CheckMessages(generated, limits), CheckDiscounts(generated, offerSource)...)
+	issues = append(issues, CheckEmailCode(generated, limits)...)
 	if len(issues) > 0 {
 		return Content{}, &ValidationError{Issues: issues}
 	}
@@ -545,6 +549,28 @@ func HasCode(text string) bool {
 	return false
 }
 
+// CheckEmailCode keeps a written email from spelling out the code. The email shows
+// it in a box below the text, so a body that writes it too says it twice. The subject
+// and preview text may carry it, since they are read in the inbox, where the box is
+// not. It holds for what a model writes: a person who puts it in the text means to.
+func CheckEmailCode(c Content, limits Limits) []Issue {
+	if limits.SkipEmail || limits.Code == "" {
+		return nil
+	}
+	var issues []Issue
+	for _, field := range []struct{ name, label, text string }{
+		{FieldEmailHeadline, "Email headline", c.EmailHeadline},
+		{FieldEmailBody, "Email body", c.EmailBody},
+		{FieldEmailCTALabel, "Email button", c.EmailCTALabel},
+	} {
+		if HasCode(field.text) {
+			issues = append(issues, Issue{field.name, "code_in_email", fmt.Sprintf(
+				"%s writes the discount code, but the email already shows it in a box below the text. Leave it out of the %s.", field.label, strings.ToLower(field.label))})
+		}
+	}
+	return issues
+}
+
 // CheckCode holds a version to the campaign's code. An SMS must carry it, since it is
 // the whole message; an email always shows it in a box of its own. A version written
 // for another code, or for none, cannot go out with this one.
@@ -608,10 +634,15 @@ func CheckDiscounts(c Content, source string) []Issue {
 
 var linkPattern = regexp.MustCompile(`https?://[^\s<>"]+[^\s<>".,;:!?)]`)
 
+// Discounts lists the percentages text mentions, each once, in order.
+func Discounts(text string) []int {
+	return discounts(text)
+}
+
 func discounts(text string) []int {
 	found := []int{}
 	for _, match := range discountPattern.FindAllStringSubmatch(text, -1) {
-		value, err := strconv.Atoi(match[1] + match[2])
+		value, err := strconv.Atoi(strings.Join(match[1:], ""))
 		if err == nil && !slices.Contains(found, value) {
 			found = append(found, value)
 		}

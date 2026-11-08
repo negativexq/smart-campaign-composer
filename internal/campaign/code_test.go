@@ -3,6 +3,7 @@ package campaign_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -105,8 +106,8 @@ func TestAFormCodeMustAgreeWithTheBrief(t *testing.T) {
 	}{
 		{"another code", campaign.NewCampaign{Brief: codeBrief, DiscountCode: code("KIS20")}, campaign.ErrCodeConflict},
 		{"two codes in the brief", campaign.NewCampaign{Brief: "Kodu YAZ10 ya da kodu KIS20 ile gönder."}, campaign.ErrCodeConflict},
-		{"not a code", campaign.NewCampaign{Brief: "Yeni koleksiyonu duyur.", DiscountCode: code("SALE 10")}, campaign.ErrInvalidOptions},
-		{"too short", campaign.NewCampaign{Brief: "Yeni koleksiyonu duyur.", DiscountCode: code("AB")}, campaign.ErrInvalidOptions},
+		{"not a code", campaign.NewCampaign{Brief: "Yeni koleksiyonu duyur.", DiscountCode: code("SALE 10")}, campaign.ErrInvalidCode},
+		{"too short", campaign.NewCampaign{Brief: "Yeni koleksiyonu duyur.", DiscountCode: code("AB")}, campaign.ErrInvalidCode},
 	} {
 		if _, err := h.service.CreateWith(ctx, test.input); !errors.Is(err, test.want) {
 			t.Errorf("%s: %v, want %v", test.name, err, test.want)
@@ -219,4 +220,33 @@ func hasWarning(view campaign.View, reason string) bool {
 		}
 	}
 	return false
+}
+
+// A brief that says "indirim kodu 15" has no code, and a model reading it wrote
+// {{discount_code}} anyway. The writer is told in so many words.
+func TestTheWriterIsToldWhenThereIsNoCode(t *testing.T) {
+	t.Parallel()
+	h, provider, id := newContentHarness(t, step{output: validContent})
+	if _, _, err := run(t, h, id, campaign.GenerateInput{}); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if brief := provider.contentCalls[0].Brief; !strings.Contains(brief, "No discount code is set") {
+		t.Fatalf("brief: %q", brief)
+	}
+}
+
+// "30 percent" is the same offer as "30%": the messages carry it and pass.
+func TestABriefMayWriteItsPercentAsAWord(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	service := mockService(h)
+	_, view := writtenCampaign(t, service, campaign.NewCampaign{Brief: strings.Replace(audienceBrief, "30%", "30 percent", 1)})
+	if !slices.Contains(content.Discounts(view.Content.SMS), 30) {
+		t.Fatalf("SMS without the offer: %q", view.Content.SMS)
+	}
+	for _, warning := range view.ContentWarnings {
+		if strings.HasSuffix(warning.Reason, "_discount") {
+			t.Errorf("warning: %v", warning)
+		}
+	}
 }

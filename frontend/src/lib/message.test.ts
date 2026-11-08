@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   briefCodes,
+  briefLinks,
   campaignDiscount,
   countCharacters,
   findUnknownVariables,
@@ -129,6 +130,12 @@ describe("discount code", () => {
     expect(findUnknownVariables("Use {{discount_code}}")).toEqual(["discount_code"]);
     expect(findUnknownVariables("Use {{discount_code}}", "SONBAHAR15")).toEqual([]);
     expect(hasCode("Use {{ discount_code }}")).toBe(true);
+  });
+
+  it("reads a brief's links without trailing punctuation, each once", () => {
+    expect(briefLinks("Shop at https://shop.example.com/cart?utm_source=sms&x=1. Again: https://shop.example.com/cart?utm_source=sms&x=1")).toEqual(["https://shop.example.com/cart?utm_source=sms&x=1"]);
+    expect(briefLinks("https://a.example.com and (https://b.example.com)")).toEqual(["https://a.example.com", "https://b.example.com"]);
+    expect(briefLinks("No link here.")).toEqual([]);
   });
 
   it("is read from a brief next to a word for one, as the backend reads it", () => {

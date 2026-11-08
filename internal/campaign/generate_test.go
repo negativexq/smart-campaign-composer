@@ -1508,7 +1508,8 @@ func TestMessagesAreWrittenForTheAudienceAtTheClaim(t *testing.T) {
 	if _, err := start.generation.Run(ctx, func(campaign.GenerationEvent) {}); err != nil {
 		t.Fatal(err)
 	}
-	if got := provider.contentCalls[len(provider.contentCalls)-1].Brief; got != newBrief {
+	// The brief the writer gets goes on to say what the form set, such as that there is no code.
+	if got := provider.contentCalls[len(provider.contentCalls)-1].Brief; !strings.HasPrefix(got, newBrief+"\n") {
 		t.Fatalf("messages written for %q", got)
 	}
 }

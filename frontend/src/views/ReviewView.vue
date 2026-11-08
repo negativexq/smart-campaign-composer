@@ -134,11 +134,12 @@ const checks = computed<Check[]>(() => {
   // Shown only for a campaign with a code, or messages written for one it no longer has.
   const codeProblems = current.content_warnings.filter((warning) => codeReasons.includes(warning.reason));
   if (current.discount_code || codeProblems.length) {
+    const showsCode = [current.channels.includes("sms") && "every SMS carries it", current.channels.includes("email") && "every email shows it in a box below the text"].filter(Boolean);
     list.push({
       label: "Discount code",
       detail: codeProblems.length
         ? uniqueWarnings(codeProblems).map((warning) => warning.message).join(" ")
-        : `Every SMS carries ${current.discount_code}, and every email shows it in a box below the text.`,
+        : `${current.discount_code}: ${showsCode.join(", and ")}.`,
       ok: !codeProblems.length,
     });
   }

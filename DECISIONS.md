@@ -108,7 +108,7 @@ Generation is tied to the request: closing the page or pressing Stop cancels the
 
 ## A discount mismatch stops the model but only warns a person
 
-The model may not invent or drop an offer: a percentage that differs from the brief fails validation and goes through repair. An instruction such as "make it 40%" becomes the source for that run, because the marketer asked for it. A marketer's own edit can also change the offer, since they are the authority on it, so it passes with a visible warning and stays visible until the brief and message agree. Length, variable and empty-field rules are hard for both, because a person editing cannot make an SMS fit by intent.
+The model may not invent or drop an offer: a percentage that differs from the brief fails validation and goes through repair. A percentage counts written with a sign ("%15", "15%") or a word ("yüzde 15", "15 yüzde", "20 percent", "15 Prozent", "10 por ciento", "30 pour cent"). Only the sign counted at first, so a brief saying "indirim kodu 15 yüzde" got a model that rightly wrote "%15" refused as an invented discount, twice, and the campaign could not be written. An instruction such as "make it 40%" becomes the source for that run, because the marketer asked for it. A marketer's own edit can also change the offer, since they are the authority on it, so it passes with a visible warning and stays visible until the brief and message agree. Length, variable and empty-field rules are hard for both, because a person editing cannot make an SMS fit by intent.
 
 ## A discount code is filled in, never written
 
@@ -126,8 +126,11 @@ A brief that asked for 15% off with the code `SONBAHAR15` produced messages with
 | `{{discount_code}}` without a code | Repaired | Not saved |
 | Messages written for another code, or before the campaign had one | — | Shown on the review page; approval is refused until they are written again |
 | SMS length | Counted with the real code | Counted with the real code |
+| The code in the email's headline, body or button | Repaired | Saved: the person means it |
 
 The email does not depend on the text at all: whenever a code is set, every design shows it in a box of its own below the body and above the button, labelled in the reader's language, and the plain text version has the same line. A marketer's own design gets the box right after its body block. Without a code nothing changes: no box, no row on the review page, and `{{discount_code}}` is refused.
+
+So a model leaves the code out of the email's headline, body and button. With a real model, 25 of 30 written emails also put it in the body, and the reader saw it twice, once as "Your code: ADANA20" and again in the box. The subject and preview text may carry it, because they are read in the inbox, where the box is not. The writer is also told when there is no code: a brief saying "indirim kodu 15" has none, and a model wrote `{{discount_code}}` for it anyway.
 
 This is strict for a person too, unlike a percentage. Changing the offer is a pricing decision the marketer may make; deleting the code from an SMS is a mistake, and a campaign that should go without a code drops it from the form.
 

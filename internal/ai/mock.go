@@ -316,11 +316,16 @@ func (m *Mock) StreamContent(ctx context.Context, request ContentRequest, handle
 	if len(request.Reference) > 0 {
 		second = mockMentions(string(request.Reference), 1)
 	}
-	draft := mockDraft(copy, mockDiscount.FindString(source), second)
+	offer := mockDiscount.FindString(source)
+	// A percent written as a word ("yüzde 15", "15 percent") is the same offer.
+	if found := content.Discounts(source); offer == "" && len(found) > 0 {
+		offer = fmt.Sprintf("%d%%", found[0])
+	}
+	draft := mockDraft(copy, offer, second)
 	draft = mockTone(draft, request.Tone, copy)
-	// A code is never typed out: the brief asks for the variable, and the backend fills it.
+	// A code is never typed out: the SMS carries the variable, and the backend fills it.
 	// The email shows the code in a box of its own, so only the SMS names it.
-	if strings.Contains(request.Brief, "{{"+content.CodeVariable+"}}") {
+	if request.Limits.Code != "" {
 		draft.SMS += fmt.Sprintf(copy.code, "{{"+content.CodeVariable+"}}")
 	}
 	// The SMS carries the link as {{link}}, which becomes a short link when it is sent.

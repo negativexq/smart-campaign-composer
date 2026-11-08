@@ -954,6 +954,8 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusBadRequest, "Choose SMS, email or both."
 	case errors.Is(err, campaign.ErrInvalidLanguages):
 		status, message = http.StatusBadRequest, "Only languages we write in, other than English, can be left out."
+	case errors.Is(err, campaign.ErrInvalidCode):
+		status, message = http.StatusBadRequest, "Enter a discount code of 3 to 30 capital letters, digits or hyphens."
 	case errors.Is(err, campaign.ErrInvalidOptions):
 		status, message = http.StatusBadRequest, "Check the tone, the discount of 1 to 100 percent and the days to skip of 1 to 365."
 	case errors.Is(err, campaign.ErrChannelDiscount):
@@ -1037,7 +1039,7 @@ func describeError(r *http.Request, err error) (int, string) {
 	case errors.Is(err, campaign.ErrGenerationRunning):
 		status, message = http.StatusConflict, "Messages are already being written for this campaign."
 	case errors.Is(err, campaign.ErrContentRejected):
-		status, message = http.StatusUnprocessableEntity, "We could not write messages that pass validation: "+err.Error()+". Try again, or give an instruction."
+		status, message = http.StatusUnprocessableEntity, "We could not write messages that pass validation: "+strings.TrimRight(err.Error(), ".")+". Try again, or give an instruction."
 	case errors.Is(err, ai.ErrRefused):
 		status, message = http.StatusUnprocessableEntity, "The AI declined this brief. Rephrase it and try again."
 	case errors.Is(err, ai.ErrTruncated), errors.Is(err, ai.ErrInvalidOutput):

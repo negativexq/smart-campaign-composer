@@ -65,6 +65,7 @@ var (
 	ErrInvalidOptions   = errors.New("tone, offer or exclusion is not valid")
 	ErrOfferConflict    = errors.New("brief mentions a different discount than the offer")
 	ErrCodeConflict     = errors.New("brief names a different discount code than the form, or more than one")
+	ErrInvalidCode      = errors.New("discount code is not 3 to 30 capital letters, digits or hyphens")
 	ErrLinkConflict     = errors.New("brief names more than one link")
 	ErrInvalidName      = errors.New("campaign name is empty or too long")
 	ErrNotFound         = errors.New("campaign not found")
@@ -195,7 +196,7 @@ func (n NewCampaign) validate() error {
 		return ErrInvalidOptions
 	}
 	if n.DiscountCode != nil && !content.ValidCode(*n.DiscountCode) {
-		return ErrInvalidOptions
+		return ErrInvalidCode
 	}
 	if n.NotMessagedWithinDays != nil && (*n.NotMessagedWithinDays < 1 || *n.NotMessagedWithinDays > 365) {
 		return ErrInvalidOptions
@@ -611,7 +612,9 @@ func (v View) writingBrief() string {
 		brief = fmt.Sprintf("%s\n\nOffer set by the marketer: %d%% discount.", brief, *v.OfferPercent)
 	}
 	if v.DiscountCode != "" {
-		brief = fmt.Sprintf("%s\n\nDiscount code set by the marketer: %s. Write {{%s}} where the code goes; the code is filled in when the message is sent.", brief, v.DiscountCode, content.CodeVariable)
+		brief = fmt.Sprintf("%s\n\nDiscount code set by the marketer: %s. Write {{%s}} in the SMS where the code goes; the code is filled in when the message is sent. The email shows it in a box below the text, so leave it out of the email's headline, body and button.", brief, v.DiscountCode, content.CodeVariable)
+	} else {
+		brief = fmt.Sprintf("%s\n\nNo discount code is set, so write no {{%s}}.", brief, content.CodeVariable)
 	}
 	if v.Link != "" {
 		brief = fmt.Sprintf("%s\n\nLink: %s. Put it on the email's button exactly as written, and write {{%s}} in the SMS where it goes; each SMS gets a short link in its place when it is sent.", brief, v.Link, content.LinkVariable)

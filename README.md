@@ -58,7 +58,7 @@ The SMS writes the code as `{{discount_code}}` and the link as `{{link}}`. The b
 
 ![SMS step: Turkish and English tabs, the message with its first_name, discount_code and link variables, and a phone preview with the code and a short link filled in](docs/screenshots/sms-content.png)
 
-The email shows the code in a box of its own, in the reader's language, and its button opens the brief's link.
+The email shows the code in a box of its own, in the reader's language, so the text written for it leaves the code out, and its button opens the brief's link.
 
 ![Email step: the template picker with Cart Reminder chosen, the editable fields and a preview with the SONBAHAR15 code box above the button](docs/screenshots/email-content.png)
 
