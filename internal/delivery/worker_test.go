@@ -1235,6 +1235,17 @@ func TestEachPersonReadsTheirOwnLanguage(t *testing.T) {
 func TestEachPersonReadsTheirSideOfATest(t *testing.T) {
 	t.Parallel()
 	r := newRigFor(t, campaign.NewCampaign{Brief: brief, ABTest: true}, always(accepted, nil))
+	// The split comes from a hash of the campaign and the person, so with a few SMS
+	// recipients it can put all of them on one side (TestTheShareEnteredDecidesTheSplit
+	// covers the split). Here each person who gets an SMS is given a side in turn, so
+	// both sides are always sent.
+	if _, err := r.pool.Exec(context.Background(), `
+		UPDATE campaign_deliveries d SET variant = CASE WHEN turn.n % 2 = 0 THEN 'A' ELSE 'B' END
+		FROM (SELECT user_id, row_number() OVER (ORDER BY user_id) AS n
+		      FROM campaign_deliveries WHERE campaign_id = $1 AND channel = 'sms' GROUP BY user_id) turn
+		WHERE d.campaign_id = $1 AND d.user_id = turn.user_id`, r.id); err != nil {
+		t.Fatal(err)
+	}
 	r.drain(t)
 
 	sides := map[string]string{}
