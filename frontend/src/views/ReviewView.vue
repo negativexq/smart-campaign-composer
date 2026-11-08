@@ -115,7 +115,8 @@ const checks = computed<Check[]>(() => {
   // A campaign without a discount has nothing to check here.
   const hasDiscount = Boolean(current.offer_percent) || /%\s*\d|\d\s*%/.test(current.brief);
   // What the model left undone and a missing button are their own notices, not about discounts.
-  const differs = current.content_warnings.filter((warning) => warning.reason !== "not_applied" && warning.reason !== "no_button");
+  const codeReasons = ["missing_code", "code_changed"];
+  const differs = current.content_warnings.filter((warning) => warning.reason !== "not_applied" && warning.reason !== "no_button" && !codeReasons.includes(warning.reason));
   if (differs.length || hasDiscount) {
     list.push({
       label: "Discount",
@@ -125,6 +126,17 @@ const checks = computed<Check[]>(() => {
           ? `Every message carries the ${current.offer_percent}% discount you entered.`
           : "Every message carries the discount from the brief.",
       ok: !differs.length,
+    });
+  }
+  // Shown only for a campaign with a code, or messages written for one it no longer has.
+  const codeProblems = current.content_warnings.filter((warning) => codeReasons.includes(warning.reason));
+  if (current.discount_code || codeProblems.length) {
+    list.push({
+      label: "Discount code",
+      detail: codeProblems.length
+        ? uniqueWarnings(codeProblems).map((warning) => warning.message).join(" ")
+        : `Every SMS carries ${current.discount_code}, and every email shows it in a box below the text.`,
+      ok: !codeProblems.length,
     });
   }
   if (current.content && (versions.value.length > 1 || missing.value.length)) {
@@ -249,7 +261,7 @@ onMounted(async () => {
           <p v-if="'also' in shownEntry && shownEntry.also.length" class="muted small" :data-testid="`review-also-${shownEntry.language}`">Also read by those who read {{ listNames(shownEntry.also.map(languageName)) }}.</p>
           <article v-if="campaign.channels.includes('sms') && (shownEntry.sms || shownGroup.entries.length === 1)" class="message card" data-testid="review-sms">
             <h3 class="muted small">SMS</h3>
-            <PhonePreview :message="shownEntry.version.sms" :recipients="shownRecipients" :language="shownEntry.language" />
+            <PhonePreview :message="shownEntry.version.sms" :recipients="shownRecipients" :language="shownEntry.language" :code="shownEntry.version.discount_code" />
           </article>
           <article v-if="campaign.channels.includes('email') && (shownEntry.email || shownGroup.entries.length === 1)" class="message card" data-testid="review-email">
             <h3 class="muted small">Email</h3>

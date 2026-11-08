@@ -1617,3 +1617,22 @@ func TestAnOutageOfServerErrorsIsWaitedOut(t *testing.T) {
 		t.Fatalf("after the outage: %v, want %d sent", got, queued)
 	}
 }
+
+// Issue #27: every message that goes out carries the campaign's code, filled in.
+func TestEveryMessageSentCarriesTheCode(t *testing.T) {
+	t.Parallel()
+	code := "SPRING-30"
+	r := newRigFor(t, campaign.NewCampaign{Brief: brief, DiscountCode: &code}, always(accepted, nil))
+	r.drain(t)
+	if len(r.sender.calls) == 0 {
+		t.Fatal("nothing was sent")
+	}
+	for _, message := range r.sender.calls {
+		if !strings.Contains(message.Body, code) || strings.Contains(message.Body+message.Subject, "{{") {
+			t.Fatalf("%s to %s: %q", message.Channel, message.To, message.Body)
+		}
+		if message.Channel == "email" && !strings.Contains(message.HTML, code) {
+			t.Fatalf("email HTML to %s has no code", message.To)
+		}
+	}
+}

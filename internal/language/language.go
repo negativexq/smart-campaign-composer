@@ -15,6 +15,8 @@ type Language struct {
 	Words []string
 	// Footer texts of an email.
 	Received, Unsubscribe, LinkLater string
+	// CodeLabel names the discount code in an email's code box.
+	CodeLabel string
 }
 
 var all = []Language{
@@ -22,26 +24,31 @@ var all = []Language{
 		Code: "tr", Name: "Turkish", MissingName: "müşterimiz", Words: []string{"turkce", "turkish"},
 		Received:    "Kampanya e-postalarına izin verdiğiniz için bu e-postayı aldınız.",
 		Unsubscribe: "Abonelikten çık", LinkLater: "bağlantı gönderimde eklenir",
+		CodeLabel: "İndirim kodun",
 	},
 	{
 		Code: "en", Name: "English", MissingName: "there", Words: []string{"ingilizce", "english"},
 		Received:    "You received this because you agreed to campaign emails.",
 		Unsubscribe: "Unsubscribe", LinkLater: "the link is added when this is sent",
+		CodeLabel: "Your discount code",
 	},
 	{
 		Code: "de", Name: "German", MissingName: "Kundschaft", Words: []string{"almanca", "german", "deutsch"},
 		Received:    "Sie erhalten diese E-Mail, weil Sie Kampagnen-E-Mails zugestimmt haben.",
 		Unsubscribe: "Abmelden", LinkLater: "der Link wird beim Versand ergänzt",
+		CodeLabel: "Ihr Rabattcode",
 	},
 	{
 		Code: "fr", Name: "French", MissingName: "cher client", Words: []string{"fransizca", "french", "francais"},
 		Received:    "Vous recevez cet e-mail car vous avez accepté les e-mails de campagne.",
 		Unsubscribe: "Se désabonner", LinkLater: "le lien est ajouté à l'envoi",
+		CodeLabel: "Votre code de réduction",
 	},
 	{
 		Code: "es", Name: "Spanish", MissingName: "cliente", Words: []string{"ispanyolca", "spanish", "espanol"},
 		Received:    "Recibes este correo porque aceptaste los correos de campañas.",
 		Unsubscribe: "Darse de baja", LinkLater: "el enlace se añade al enviar",
+		CodeLabel: "Tu código de descuento",
 	},
 }
 

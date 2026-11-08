@@ -913,6 +913,8 @@ func (s *Service) SaveContentAt(ctx context.Context, id, revision string, edited
 	limits := view.limitsFor(target.Language)
 	edited = limits.Keep(edited)
 	edited.Language, edited.Variant = target.Language, target.Variant
+	// The code comes from the campaign, and a code typed out becomes the variable.
+	edited = content.WithCode(edited, limits.Code)
 	if issues := content.CheckMessages(edited, limits); len(issues) > 0 {
 		return View{}, &content.ValidationError{Issues: issues}
 	}

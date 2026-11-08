@@ -42,6 +42,12 @@ const (
 	FieldEmailTemplate  = "email_template"
 
 	firstNameVariable = "first_name"
+	// CodeVariable stands for the campaign's discount code. The backend fills it in, so a
+	// model cannot mistype or translate the code.
+	CodeVariable = "discount_code"
+	// MinCodeLength and MaxCodeLength bound a discount code.
+	MinCodeLength = 3
+	MaxCodeLength = 30
 	// VariantB marks the second version of a campaign that compares two.
 	VariantB = "B"
 )
@@ -49,6 +55,10 @@ const (
 var (
 	variablePattern = regexp.MustCompile(`\{\{\s*([a-zA-Z0-9_]+)\s*\}\}`)
 	discountPattern = regexp.MustCompile(`%\s*(\d+)|(\d+)\s*%`)
+	codeShape       = regexp.MustCompile(`^[A-Z0-9][A-Z0-9-]*$`)
+	// briefCode finds a code next to a word that names one: "kodu SONBAHAR15",
+	// "SONBAHAR15 kodunu", "code SPRING10", "promo code: SPRING-10".
+	briefCode = regexp.MustCompile(`(?i:\b(?:kod|kodu|kodunu|koduyla|kodlu|kupon|kuponu|code|coupon|promo)\b)[\s:"'“”]*(?:(?i:code|kodu)[\s:"'“”]*)?([A-Z0-9][A-Z0-9-]{2,29})\b|\b([A-Z0-9][A-Z0-9-]{2,29})['’]?[\s"'“”]*(?i:kod|kodu|kodunu|koduyla|kodlu|kupon|kuponu|kuponunu|code|coupon)\b`)
 )
 
 // Content is one campaign's messages, with {{first_name}} left unfilled.
@@ -69,6 +79,9 @@ type Content struct {
 	Language string `json:"language,omitempty"`
 	// Variant is "B" for the second version of a campaign that compares two.
 	Variant string `json:"variant,omitempty"`
+	// DiscountCode fills {{discount_code}}. The backend sets it from the campaign, never
+	// from a model or a request, so approval freezes the code with the text.
+	DiscountCode string `json:"discount_code,omitempty"`
 }
 
 // FallbackName is the word used for a person with no name in this language.
@@ -142,6 +155,8 @@ type Limits struct {
 	// SkipSMS and SkipEmail mark channels the campaign does not use.
 	SkipSMS   bool `json:"-"`
 	SkipEmail bool `json:"-"`
+	// Code is the campaign's discount code, or empty.
+	Code string `json:"-"`
 }
 
 // Keep clears text for channels the campaign does not use, whoever wrote it.
@@ -196,6 +211,7 @@ func ParseGenerated(raw []byte, limits Limits, offerSource string) (Content, err
 	generated := limits.Keep(decoded.Content)
 	generated.EmailTemplate, generated.Language, generated.Variant = "", "", ""
 	generated.EmailDesign = nil
+	generated = WithCode(generated, limits.Code)
 	issues := append(CheckMessages(generated, limits), CheckDiscounts(generated, offerSource)...)
 	if len(issues) > 0 {
 		return Content{}, &ValidationError{Issues: issues}
@@ -241,9 +257,10 @@ func CheckMessages(c Content, limits Limits) []Issue {
 		{FieldEmailBody, "Email body", c.EmailBody, MaxEmailBody, limits.EmailName, limits.SkipEmail},
 	} {
 		if !rule.skip {
-			issues = append(issues, checkField(rule.field, rule.label, rule.text, rule.max, rule.nameLength)...)
+			issues = append(issues, checkField(rule.field, rule.label, rule.text, rule.max, rule.nameLength, c.DiscountCode)...)
 		}
 	}
+	issues = append(issues, CheckCode(c, limits)...)
 	if !limits.SkipEmail {
 		if c.EmailTemplate != "" && !usableTemplate(c) {
 			issues = append(issues, Issue{FieldEmailTemplate, "unknown_template", "This email template does not exist."})
@@ -256,19 +273,25 @@ func CheckMessages(c Content, limits Limits) []Issue {
 	return issues
 }
 
-func checkField(field, label, text string, limit, nameLength int) []Issue {
+func checkField(field, label, text string, limit, nameLength int, code string) []Issue {
 	if strings.TrimSpace(text) == "" {
 		return []Issue{{field, "empty", label + " is empty."}}
 	}
 	var issues []Issue
-	if length := RenderedLength(text, nameLength); length > limit {
+	if length := RenderedLength(text, nameLength, code); length > limit {
 		issues = append(issues, Issue{field, "too_long", fmt.Sprintf(
 			"%s is %d characters with the longest name in this audience; the limit is %d.", label, length, limit)})
 	}
 	for _, match := range variablePattern.FindAllStringSubmatch(text, -1) {
-		if match[1] != firstNameVariable {
+		switch {
+		case match[1] == firstNameVariable:
+		case match[1] == CodeVariable && code != "":
+		case match[1] == CodeVariable:
 			issues = append(issues, Issue{field, "unknown_variable", fmt.Sprintf(
-				"%s uses {{%s}}; only {{first_name}} is available.", label, match[1])})
+				"%s uses {{%s}}, but this campaign has no discount code.", label, CodeVariable)})
+		default:
+			issues = append(issues, Issue{field, "unknown_variable", fmt.Sprintf(
+				"%s uses {{%s}}; only {{first_name}} and {{discount_code}} are available.", label, match[1])})
 		}
 	}
 	remainder := variablePattern.ReplaceAllString(text, "")
@@ -290,7 +313,7 @@ func checkEmailDesign(c Content, limits Limits) []Issue {
 		{FieldEmailCTALabel, "Button label", c.EmailCTALabel, MaxEmailCTALabel},
 	} {
 		if strings.TrimSpace(rule.text) != "" {
-			issues = append(issues, checkField(rule.field, rule.label, rule.text, rule.max, limits.EmailName)...)
+			issues = append(issues, checkField(rule.field, rule.label, rule.text, rule.max, limits.EmailName, c.DiscountCode)...)
 		}
 	}
 	label, link := strings.TrimSpace(c.EmailCTALabel), strings.TrimSpace(c.EmailCTAURL)
@@ -321,13 +344,16 @@ func CheckLinks(c Content, source string) []Issue {
 }
 
 // RenderedLength is the length in characters once variables are filled with a
-// name of nameLength characters, or the fallback if that is longer.
-func RenderedLength(template string, nameLength int) int {
+// name of nameLength characters, or the fallback if that is longer, and the code.
+func RenderedLength(template string, nameLength int, code string) int {
 	fill := max(nameLength, utf8.RuneCountInString(FirstNameFallback))
 	length := utf8.RuneCountInString(template)
 	for _, match := range variablePattern.FindAllStringSubmatch(template, -1) {
-		if match[1] == firstNameVariable {
+		switch {
+		case match[1] == firstNameVariable:
 			length += fill - utf8.RuneCountInString(match[0])
+		case match[1] == CodeVariable && code != "":
+			length += utf8.RuneCountInString(code) - utf8.RuneCountInString(match[0])
 		}
 	}
 	return length
@@ -335,16 +361,78 @@ func RenderedLength(template string, nameLength int) int {
 
 // Render fills in the variables for one person. A missing name gets the fallback,
 // so nobody receives a message with a gap in it.
-func Render(template, firstName string) string {
+func Render(template, firstName, code string) string {
 	if strings.TrimSpace(firstName) == "" {
 		firstName = FirstNameFallback
 	}
 	return variablePattern.ReplaceAllStringFunc(template, func(variable string) string {
-		if variablePattern.FindStringSubmatch(variable)[1] == firstNameVariable {
+		switch name := variablePattern.FindStringSubmatch(variable)[1]; {
+		case name == firstNameVariable:
 			return firstName
+		case name == CodeVariable && code != "":
+			return code
 		}
 		return variable
 	})
+}
+
+// ValidCode says whether code can be a discount code: capital letters, digits and
+// hyphens, so it reads the same in every language and fits an SMS.
+func ValidCode(code string) bool {
+	return len(code) >= MinCodeLength && len(code) <= MaxCodeLength && codeShape.MatchString(code)
+}
+
+// BriefCodes lists the discount codes a brief names, each once, in order.
+func BriefCodes(text string) []string {
+	found := []string{}
+	for _, match := range briefCode.FindAllStringSubmatch(text, -1) {
+		code := match[1] + match[2]
+		// A code has a letter; "15" next to "kodu" is a number, not a code.
+		if strings.ContainsAny(code, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") && ValidCode(code) && !slices.Contains(found, code) {
+			found = append(found, code)
+		}
+	}
+	return found
+}
+
+// WithCode sets a version's code and turns every place the text spells the code out
+// into {{discount_code}}, so it is filled in like the rest and checked the same way.
+func WithCode(c Content, code string) Content {
+	c.DiscountCode = code
+	if code == "" {
+		return c
+	}
+	spelled := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(code) + `\b`)
+	variable := "{{" + CodeVariable + "}}"
+	for _, field := range []*string{&c.SMS, &c.EmailSubject, &c.EmailBody, &c.EmailPreheader, &c.EmailHeadline, &c.EmailCTALabel} {
+		*field = spelled.ReplaceAllLiteralString(*field, variable)
+	}
+	return c
+}
+
+// HasCode says whether text carries the discount code.
+func HasCode(text string) bool {
+	for _, match := range variablePattern.FindAllStringSubmatch(text, -1) {
+		if match[1] == CodeVariable {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckCode holds a version to the campaign's code. An SMS must carry it, since it is
+// the whole message; an email always shows it in a box of its own. A version written
+// for another code, or for none, cannot go out with this one.
+func CheckCode(c Content, limits Limits) []Issue {
+	var issues []Issue
+	if c.DiscountCode != limits.Code {
+		issues = append(issues, Issue{FieldSMS, "code_changed", "These messages were written for another discount code. Write them again."})
+	}
+	if limits.Code != "" && !limits.SkipSMS && strings.TrimSpace(c.SMS) != "" && !HasCode(c.SMS) {
+		issues = append(issues, Issue{FieldSMS, "missing_code", fmt.Sprintf(
+			"SMS does not carry the discount code %s. Add {{%s}} where it goes.", limits.Code, CodeVariable)})
+	}
+	return issues
 }
 
 // ReasonNoButton marks an email that will go out without a button.
@@ -416,7 +504,7 @@ func OfferAgrees(text string, percent int) bool {
 	return true
 }
 
-// AddsOffersOrLinks reports whether text has a discount or link that none of the
+// AddsOffersOrLinks reports whether text has a discount, code or link that none of the
 // sources has. Message writers trust these in a brief, so a model rewriting one
 // must not bring in new ones.
 func AddsOffersOrLinks(text string, sources ...string) bool {
@@ -426,6 +514,9 @@ func AddsOffersOrLinks(text string, sources ...string) bool {
 		if !slices.Contains(known, found) {
 			return true
 		}
+	}
+	if slices.ContainsFunc(BriefCodes(text), func(code string) bool { return !slices.Contains(BriefCodes(source), code) }) {
+		return true
 	}
 	return slices.ContainsFunc(linkPattern.FindAllString(text, -1), func(link string) bool { return !strings.Contains(source, link) })
 }

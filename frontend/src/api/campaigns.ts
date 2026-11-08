@@ -14,7 +14,7 @@ export type Messages = Record<MessageField, string>;
 export type ContentIssue = { field: string; reason: string; message: string };
 export type SampleRecipient = { id: number; label: string; first_name: string; language?: string };
 export type LanguageAudience = { language: string; total: number; sms: number; email: number; sms_name_length: number; email_name_length: number };
-export type MessageVersion = Messages & { edited: MessageField[]; language?: string; variant?: string; email_design?: EmailDesign | null };
+export type MessageVersion = Messages & { edited: MessageField[]; language?: string; variant?: string; email_design?: EmailDesign | null; discount_code?: string };
 /** One version of a test: its messages and their other languages. */
 export type VariantContent = MessageVersion & { translations?: MessageVersion[] };
 
@@ -100,6 +100,10 @@ export type Campaign = {
   channels: string[];
   tone?: string;
   offer_percent?: number | null;
+  /** The code every message carries: the form's, or the one the brief names. */
+  discount_code?: string;
+  /** The code chosen on the form, if one was. */
+  form_discount_code?: string | null;
   not_messaged_within_days?: number | null;
   version: number;
   proposal?: { saved_audience?: string; brief_parts?: BriefPart[] | null; unsure?: string[] | null; not_applied?: string[] | null; not_audience?: string[] | null; assumptions: Assumption[]; evidence?: Evidence[] | null; unsupported_conditions: string[] };
@@ -249,7 +253,7 @@ function post<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-export type CampaignOptions = { tone?: string; offer_percent?: number; not_messaged_within_days?: number; ab_test?: boolean; variant_a_percent?: number; email_template?: string; saved_audience_id?: string };
+export type CampaignOptions = { tone?: string; offer_percent?: number; discount_code?: string; not_messaged_within_days?: number; ab_test?: boolean; variant_a_percent?: number; email_template?: string; saved_audience_id?: string };
 
 export async function createCampaign(brief: string, channels: string[], options: CampaignOptions = {}): Promise<string> {
   return (await post<{ id: string }>("/api/campaigns", { brief, channels, ...options })).id;
@@ -496,12 +500,14 @@ const EMAIL_FIELDS: MessageField[] = ["email_subject", "email_preheader", "email
 
 export type EmailPreviewResult = { subject: string; html: string; text: string };
 
-export function previewEmail(message: Partial<Messages> & { email_design?: EmailDesign | null }, firstName: string, language = "", editing = false): Promise<EmailPreviewResult> {
+export function previewEmail(message: Partial<Messages> & { email_design?: EmailDesign | null; discount_code?: string }, firstName: string, language = "", editing = false): Promise<EmailPreviewResult> {
   // Stored content also says who edited what, which the template has no use for.
   const fields = EMAIL_FIELDS.map((field) => [field, message[field] ?? ""]);
   return post<EmailPreviewResult>("/api/email-preview", {
     ...Object.fromEntries(fields),
     ...(message.email_design ? { email_design: designOnly(message.email_design) } : {}),
+    // The code fills {{discount_code}} and its box, as it will when sent.
+    ...(message.discount_code ? { discount_code: message.discount_code } : {}),
     ...(language ? { language } : {}),
     ...(editing ? { editing } : {}),
     first_name: firstName,

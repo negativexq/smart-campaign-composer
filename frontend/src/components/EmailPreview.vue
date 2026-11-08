@@ -5,7 +5,7 @@ import { previewEmail, type EmailDesign, type EmailPreviewResult, type Messages 
 import { renderMessage } from "../lib/message";
 
 const props = defineProps<{
-  message: Partial<Messages> & { email_design?: EmailDesign | null };
+  message: Partial<Messages> & { email_design?: EmailDesign | null; discount_code?: string };
   recipients: { id: number; label: string; first_name: string }[];
   language?: string;
 }>();
@@ -27,7 +27,7 @@ watch(
   },
 );
 const firstName = computed(() => props.recipients.find((recipient) => String(recipient.id) === selectedId.value)?.first_name ?? "");
-const values = computed(() => ({ first_name: firstName.value }));
+const values = computed(() => ({ first_name: firstName.value, discount_code: props.message.discount_code }));
 
 const mode = ref<(typeof MODES)[number]["id"]>("desktop");
 const designWidth = computed(() => MODES.find((item) => item.id === mode.value)?.width ?? 0);

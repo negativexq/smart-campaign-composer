@@ -41,6 +41,9 @@ const (
 	blockText    = "text"
 	blockButton  = "button"
 	blockDivider = "divider"
+	// blockCode is the discount code's box. Designs cannot hold one: it follows the body
+	// slot whenever the campaign has a code.
+	blockCode = "code"
 
 	// Slots are the blocks whose words come from the campaign, not the template.
 	SlotHeadline = "headline"
@@ -271,7 +274,7 @@ func (b Block) checkFinished() string {
 }
 
 func checkFixedWords(text string) string {
-	if issues := checkField("", "Text", text, math.MaxInt, 0); len(issues) > 0 {
+	if issues := checkField("", "Text", text, math.MaxInt, 0, ""); len(issues) > 0 {
 		return "Only {{first_name}} can be filled in. Check the braces in your text."
 	}
 	return ""
@@ -372,9 +375,9 @@ func emailBlocks(c Content, firstName, assetBase string, editing bool) []emailBl
 				out.Link = block.Link
 			}
 		case blockHeading:
-			out.Text = Render(block.Text, firstName)
+			out.Text = Render(block.Text, firstName, c.DiscountCode)
 			if block.Slot == SlotHeadline {
-				out.Text = Render(c.EmailHeadline, firstName)
+				out.Text = Render(c.EmailHeadline, firstName, c.DiscountCode)
 			}
 			if out.Style == "" {
 				out.Style = "plain"
@@ -390,15 +393,15 @@ func emailBlocks(c Content, firstName, assetBase string, editing bool) []emailBl
 			if block.Slot == SlotBody {
 				text = c.EmailBody
 			}
-			out.Text = strings.TrimSpace(Render(text, firstName))
+			out.Text = strings.TrimSpace(Render(text, firstName, c.DiscountCode))
 			if out.Text == "" && editing && !out.IsSlot {
 				out.Text = "Your words"
 			}
 			out.Paragraphs = paragraphs(out.Text)
 		case blockButton:
-			out.Label, out.URL = Render(block.Label, firstName), block.URL
+			out.Label, out.URL = Render(block.Label, firstName, c.DiscountCode), block.URL
 			if block.Slot == SlotCTA {
-				out.Label, out.URL = Render(c.EmailCTALabel, firstName), c.EmailCTAURL
+				out.Label, out.URL = Render(c.EmailCTALabel, firstName, c.DiscountCode), c.EmailCTAURL
 			}
 			if !validLink(out.URL) {
 				if !editing || out.IsSlot {
@@ -411,6 +414,9 @@ func emailBlocks(c Content, firstName, assetBase string, editing bool) []emailBl
 			}
 		}
 		blocks = append(blocks, out)
+		if block.Slot == SlotBody && c.DiscountCode != "" {
+			blocks = append(blocks, emailBlock{ID: block.ID + "-code", Type: blockCode, Align: out.Align})
+		}
 	}
 	return blocks
 }

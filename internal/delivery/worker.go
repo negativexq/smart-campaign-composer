@@ -644,7 +644,7 @@ func (c claim) message(unsubscribeURL, assetBase string) (Message, error) {
 	message := Message{Channel: c.channel, IdempotencyKey: c.key}
 	if c.channel == "sms" {
 		message.To = c.phone
-		message.Body = content.Render(c.content.SMS, content.NameFor(c.content.Language, c.firstName))
+		message.Body = content.Render(c.content.SMS, content.NameFor(c.content.Language, c.firstName), c.content.DiscountCode)
 		return message, nil
 	}
 	message.To = c.email

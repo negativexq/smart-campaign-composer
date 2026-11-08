@@ -18,6 +18,8 @@ const props = defineProps<{
   longestName?: number;
   // Hides the shortcut for adding a variable, as in a link, where one has no place.
   noVariables?: boolean;
+  // The campaign's discount code. With one, {{discount_code}} is allowed and counted as the code.
+  code?: string;
   problem?: string;
   // One field among others in a step that shows state and origin once for all of them.
   plain?: boolean;
@@ -28,10 +30,10 @@ const emit = defineEmits<{ "update:modelValue": [value: string] }>();
 const id = useId();
 const countsRendered = computed(() => props.longestName !== undefined);
 const length = computed(() =>
-  countsRendered.value ? longestRenderedLength(props.modelValue, props.longestName ?? 0) : countCharacters(props.modelValue),
+  countsRendered.value ? longestRenderedLength(props.modelValue, props.longestName ?? 0, props.code ?? "") : countCharacters(props.modelValue),
 );
 const overBy = computed(() => (props.limit ? length.value - props.limit : 0));
-const unknownVariables = computed(() => findUnknownVariables(props.modelValue));
+const unknownVariables = computed(() => findUnknownVariables(props.modelValue, props.code ?? ""));
 const streaming = computed(() => props.state === "streaming");
 const hasLocalProblem = computed(() => overBy.value > 0 || unknownVariables.value.length > 0);
 
@@ -48,8 +50,8 @@ const display = computed(() => {
   return { icon: PencilLine, text: "Draft", tone: "muted" };
 });
 
-function insertFirstName() {
-  emit("update:modelValue", `${props.modelValue}{{first_name}}`);
+function insert(variable: string) {
+  emit("update:modelValue", `${props.modelValue}{{${variable}}}`);
 }
 </script>
 
@@ -86,9 +88,20 @@ function insertFirstName() {
         class="insert small mono"
         data-testid="insert-variable"
         :disabled="streaming"
-        @click="insertFirstName"
+        @click="insert('first_name')"
       >
         + first_name
+      </button>
+      <button
+        v-if="!noVariables && code"
+        type="button"
+        class="insert small mono"
+        data-testid="insert-code"
+        :disabled="streaming"
+        :title="`Filled in as ${code} when sent`"
+        @click="insert('discount_code')"
+      >
+        + discount_code
       </button>
       <span v-if="!plain" class="state small" :class="`state--${display.tone}`" data-testid="message-state">
         <component :is="display.icon" :size="14" aria-hidden="true" />

@@ -318,6 +318,11 @@ func (m *Mock) StreamContent(ctx context.Context, request ContentRequest, handle
 	}
 	draft := mockDraft(copy, mockDiscount.FindString(source), second)
 	draft = mockTone(draft, request.Tone, copy)
+	// A code is never typed out: the brief asks for the variable, and the backend fills it.
+	// The email shows the code in a box of its own, so only the SMS names it.
+	if strings.Contains(request.Brief, "{{"+content.CodeVariable+"}}") {
+		draft.SMS += fmt.Sprintf(copy.code, "{{"+content.CodeVariable+"}}")
+	}
 	if link := mockLink.FindString(request.Brief + " " + request.Instruction); link != "" {
 		draft.EmailCTAURL, draft.EmailCTALabel = link, copy.ctaLabel
 	}
@@ -379,8 +384,10 @@ type mockCopy struct {
 	wordings             [2]content.Content
 	markers              [2]string
 	offerSMS, offerEmail string
-	formal               *strings.Replacer
-	hurry, ctaLabel      string
+	// code names the discount code, with %s where it goes.
+	code            string
+	formal          *strings.Replacer
+	hurry, ctaLabel string
 }
 
 var mockCopies = map[string]mockCopy{
@@ -400,6 +407,7 @@ var mockCopies = map[string]mockCopy{
 		}},
 		markers:  [2]string{"seni unutmadık", "kaldığın yerden"},
 		offerSMS: " %s indirimin hazır.", offerEmail: " Sana özel %s indirimin seni bekliyor.",
+		code:   " Kod: %s",
 		formal: strings.NewReplacer("Merhaba {{", "Sayın {{", "Selam {{", "Sayın {{"),
 		hurry:  " Acele et!", ctaLabel: "Teklifi gör",
 	},
@@ -419,6 +427,7 @@ var mockCopies = map[string]mockCopy{
 		}},
 		markers:  [2]string{"we saved your spot", "pick up where"},
 		offerSMS: " Your %s discount is ready.", offerEmail: " Your %s discount is waiting for you.",
+		code:   " Code: %s",
 		formal: strings.NewReplacer("Hi {{", "Dear {{", "Hello {{", "Dear {{"),
 		hurry:  " Hurry!", ctaLabel: "See the offer",
 	},
@@ -438,6 +447,7 @@ var mockCopies = map[string]mockCopy{
 		}},
 		markers:  [2]string{"an dich gedacht", "aufgehört hast"},
 		offerSMS: " Dein Rabatt von %s ist bereit.", offerEmail: " Dein Rabatt von %s wartet auf dich.",
+		code:   " Code: %s",
 		formal: strings.NewReplacer("Hallo {{", "Guten Tag {{"),
 		hurry:  " Schnell!", ctaLabel: "Angebot ansehen",
 	},
@@ -457,6 +467,7 @@ var mockCopies = map[string]mockCopy{
 		}},
 		markers:  [2]string{"nous pensons à vous", "reprenez là"},
 		offerSMS: " Votre réduction de %s est prête.", offerEmail: " Votre réduction de %s vous attend.",
+		code:   " Code : %s",
 		formal: strings.NewReplacer("Bonjour {{", "Madame, Monsieur {{"),
 		hurry:  " Vite !", ctaLabel: "Voir l'offre",
 	},
@@ -476,6 +487,7 @@ var mockCopies = map[string]mockCopy{
 		}},
 		markers:  [2]string{"pensamos en ti", "donde lo dejaste"},
 		offerSMS: " Tu descuento del %s está listo.", offerEmail: " Tu descuento del %s te espera.",
+		code:   " Código: %s",
 		formal: strings.NewReplacer("Hola {{", "Estimado {{"),
 		hurry:  " ¡Date prisa!", ctaLabel: "Ver la oferta",
 	},

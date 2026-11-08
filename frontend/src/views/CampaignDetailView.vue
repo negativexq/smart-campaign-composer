@@ -524,7 +524,7 @@ onBeforeUnmount(() => {
       <template v-if="shownVersion">
         <article v-if="campaign.channels.includes('sms')" class="message card" data-testid="content-sms">
           <div class="message-head"><h2>SMS</h2><OriginTag :origin="originOf('sms', shownVersion.version)" /></div>
-          <PhonePreview :message="shownVersion.version.sms" :recipients="shownRecipients" :language="shownVersion.language" />
+          <PhonePreview :message="shownVersion.version.sms" :recipients="shownRecipients" :language="shownVersion.language" :code="shownVersion.version.discount_code" />
         </article>
         <article v-if="campaign.channels.includes('email')" class="message card" data-testid="content-email">
           <div class="message-head"><h2>Email</h2><OriginTag :origin="originOf('email_body', shownVersion.version)" /></div>

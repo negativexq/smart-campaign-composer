@@ -80,7 +80,7 @@ func TestLimitsCountTheLongestNameInTheAudience(t *testing.T) {
 	t.Parallel()
 	// 160 characters as written, with a 14 character placeholder.
 	sms := "{{first_name}}" + strings.Repeat("x", 146)
-	if got := content.RenderedLength(sms, 14); got != 160 {
+	if got := content.RenderedLength(sms, 14, ""); got != 160 {
 		t.Fatalf("length: %d", got)
 	}
 
@@ -110,7 +110,7 @@ func TestLimitsCountCodePointsNotBytes(t *testing.T) {
 
 func TestAShortNameStillAllowsForTheFallback(t *testing.T) {
 	t.Parallel()
-	if got := content.RenderedLength("{{first_name}}", 0); got != len(content.FirstNameFallback) {
+	if got := content.RenderedLength("{{first_name}}", 0, ""); got != len(content.FirstNameFallback) {
 		t.Fatalf("length: %d", got)
 	}
 }
@@ -243,10 +243,10 @@ func TestSchemaForbidsExtraFields(t *testing.T) {
 
 func TestRenderFillsTheNameOrTheFallback(t *testing.T) {
 	t.Parallel()
-	if got := content.Render("Hi {{first_name}}, {{ first_name }}!", "Ayşe"); got != "Hi Ayşe, Ayşe!" {
+	if got := content.Render("Hi {{first_name}}, {{ first_name }}!", "Ayşe", ""); got != "Hi Ayşe, Ayşe!" {
 		t.Fatalf("got %q", got)
 	}
-	if got := content.Render("Hi {{first_name}}", " "); got != "Hi "+content.FirstNameFallback {
+	if got := content.Render("Hi {{first_name}}", " ", ""); got != "Hi "+content.FirstNameFallback {
 		t.Fatalf("got %q", got)
 	}
 }
