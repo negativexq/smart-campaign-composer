@@ -97,6 +97,16 @@ On a normal shutdown, a call already in flight is finished and recorded before t
 - **Settling permits fails** after deliveries were claimed. The claimed deliveries go back to `RETRYING` after 1 s, with no attempt used.
 - **PostgreSQL slow or down.** Recording an outcome waits up to 5 s. A claim whose outcome cannot be recorded stays `SENDING` until its lease expires, and is then taken back as described above.
 
+## When the provider restarts
+
+While the provider is down, calls cannot reach it and are handled like the outage in the table: no attempt used, the channel rests, and the breaker opens if it lasts. What matters after it comes back is whether it still knows what it accepted.
+
+- **Accepted keys survive.** The mock writes each accepted key to a journal on the `provider-data` volume before it answers, and replays the journal when it starts. A retry whose first call was accepted just before the restart, with its answer lost, gets `200` with `duplicate: true` and the first message's ID, so it is recorded as `SENT` and not accepted twice.
+- **Owed reports survive.** A delivery report the provider had not yet sent, or could not send while the API was down, is in the journal too and is sent once after the restart.
+- **A crash mid-write** can leave a cut-off last line. It is dropped when the journal is read, and the rest stays usable.
+
+This relies on the provider remembering the key. A real provider must be checked for it: see [Retrying depends on the provider's idempotency](../DECISIONS.md#retrying-depends-on-the-providers-idempotency). Tests: [`TestALostResponseAndARestartDeliverOnce`](../internal/mockprovider/journal_test.go#L56), [`TestAReportUnsentAtARestartIsSentAfterItOnce`](../internal/mockprovider/journal_test.go#L119), [`TestALineCutOffByACrashIsDroppedAndTheFileStaysUsable`](../internal/mockprovider/journal_test.go#L77), and the `outage-40s` [load scenario](../tests/verify/README.md#load-scenarios), which restarts the provider in the middle of a send.
+
 ## How calls count against the limit
 
 The limit is 100 calls a second per channel, as the provider counts them. The worker asks a sliding window in Redis for permits before it claims messages, and every call counts:
