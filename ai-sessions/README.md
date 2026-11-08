@@ -8,7 +8,7 @@ These are the Claude Code (desktop app) sessions run in this repository. The wor
 |---|---|---|
 | [01-2026-11-03](01-2026-11-03/session.md) | 3 Nov – 5 Nov | The first build: services, the LLM providers, segments, content generation, pre-send checks, delivery and the limiter, the web app, chaos tests |
 | [02-2026-11-05](02-2026-11-05/session.md) | 5 Nov – 8 Nov | Hardening: outage and restart tests, archived campaigns, delivery metrics, security probes and load runs, docs brought up to date |
-| [03-2026-11-08](03-2026-11-08/session.md) | 8 Nov – 9 Nov | Performance runs, the list preview fix, a fresh install with Claude, ten browser scenarios, a two-hour soak |
+| [03-2026-11-08](03-2026-11-08/session.md) | 8 Nov – 9 Nov | Performance runs, the list preview fix, a fresh install with Claude, ten browser scenarios, a two-hour soak, the session exports, the analytics fix, and the fixes for a link read as a condition and a brief naming one channel |
 
 `subagents/` holds the short helper conversations a session started, mostly reading outside documentation.
 
