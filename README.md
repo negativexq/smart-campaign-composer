@@ -8,6 +8,8 @@ The full path works with the mock AI or a real model: brief, validated audience,
 
 To run it yourself, follow [Install from scratch](#install-from-scratch). It needs only Docker and no API key.
 
+Reviewing the code? The five-minute [reviewer guide](docs/reviewer-guide.md) shows how Claude's output is checked, why nothing goes out without approval, how the 100-a-second limit holds, and the tests that prove each.
+
 ## Demo video
 
 https://github.com/user-attachments/assets/d169511f-34e8-4be2-bf88-85162cee3cb8
@@ -270,7 +272,7 @@ CI runs on every push to `main` and every pull request: formatting, vet and the 
 | `migrations/` | SQL schema |
 | `frontend/` | Vue 3 and TypeScript UI |
 | `tests/` | Acceptance, chaos, benchmark and verification tests |
-| `docs/` | [Architecture](docs/architecture.md), [flows](docs/flows.md), [state machines](docs/state-machines.md), [errors and retries](docs/errors-and-retries.md), the [performance profile](docs/performance.md) and the images in this file |
+| `docs/` | The [reviewer guide](docs/reviewer-guide.md), [architecture](docs/architecture.md), [flows](docs/flows.md), [state machines](docs/state-machines.md), [errors and retries](docs/errors-and-retries.md), the [performance profile](docs/performance.md) and the images in this file |
 | `ai-sessions/` | Exported AI working sessions |
 
 See [docs/architecture.md](docs/architecture.md) for how the system is put together, [docs/flows.md](docs/flows.md) for how a campaign moves through it, [docs/state-machines.md](docs/state-machines.md) for every state it can be in and what guards each change, [DECISIONS.md](DECISIONS.md) for the reasoning behind it, [docs/security.md](docs/security.md) for what protects it and how it was checked, and [DESIGN.md](DESIGN.md) for the Signal design language.
