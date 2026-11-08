@@ -371,6 +371,7 @@ func (a *api) create(w http.ResponseWriter, r *http.Request) {
 		Channels []string `json:"channels"`
 		Tone     string   `json:"tone"`
 		Offer    *int     `json:"offer_percent"`
+		Code     *string  `json:"discount_code"`
 		Skip     *int     `json:"not_messaged_within_days"`
 		ABTest   bool     `json:"ab_test"`
 		Share    *int     `json:"variant_a_percent"`
@@ -381,7 +382,7 @@ func (a *api) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, err := a.campaigns.CreateWith(r.Context(), campaign.NewCampaign{
-		Brief: body.Brief, Channels: body.Channels, Tone: body.Tone, OfferPercent: body.Offer, NotMessagedWithinDays: body.Skip, ABTest: body.ABTest, VariantAPercent: body.Share, EmailTemplate: body.Template, SavedAudienceID: body.Audience,
+		Brief: body.Brief, Channels: body.Channels, Tone: body.Tone, OfferPercent: body.Offer, DiscountCode: body.Code, NotMessagedWithinDays: body.Skip, ABTest: body.ABTest, VariantAPercent: body.Share, EmailTemplate: body.Template, SavedAudienceID: body.Audience,
 	})
 	if err != nil {
 		writeError(w, r, err)
@@ -971,6 +972,8 @@ func describeError(r *http.Request, err error) (int, string) {
 		status, message = http.StatusConflict, "These messages changed after you opened them, in another tab or by a new draft. Reload to see them, then make your change again."
 	case errors.Is(err, campaign.ErrOfferConflict):
 		status, message = http.StatusBadRequest, "The brief mentions a different discount than the one you entered. Change one of them."
+	case errors.Is(err, campaign.ErrCodeConflict):
+		status, message = http.StatusBadRequest, "The brief names a different discount code than the one you entered, or more than one. Keep one code."
 	case errors.Is(err, campaign.ErrInvalidName):
 		status, message = http.StatusBadRequest, "Write a campaign name of up to 80 characters."
 	case errors.Is(err, campaign.ErrSegmentNotFound):

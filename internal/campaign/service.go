@@ -64,6 +64,7 @@ var (
 	ErrInvalidLanguages = errors.New("only languages we write in, other than English, can be left out")
 	ErrInvalidOptions   = errors.New("tone, offer or exclusion is not valid")
 	ErrOfferConflict    = errors.New("brief mentions a different discount than the offer")
+	ErrCodeConflict     = errors.New("brief names a different discount code than the form, or more than one")
 	ErrInvalidName      = errors.New("campaign name is empty or too long")
 	ErrNotFound         = errors.New("campaign not found")
 	ErrNotEditable      = errors.New("campaign can no longer be edited")
@@ -99,6 +100,11 @@ type View struct {
 	ABTest            bool     `json:"ab_test"`
 	VariantAPercent   int      `json:"variant_a_percent"`
 	OfferPercent      *int     `json:"offer_percent"`
+	// FormDiscountCode is the code chosen on the form, if one was.
+	FormDiscountCode *string `json:"form_discount_code"`
+	// DiscountCode is the code every message carries: the form's, or the one the brief
+	// names. Empty when there is none.
+	DiscountCode string `json:"discount_code"`
 	// NotMessagedWithinDays is what the form asked for; the audience rule that
 	// applies is in Proposal.
 	NotMessagedWithinDays *int                `json:"not_messaged_within_days"`
@@ -157,10 +163,12 @@ func (s *Service) Create(ctx context.Context, brief string, chosen ...string) (s
 
 // NewCampaign is what a marketer fills in. Only the brief is required.
 type NewCampaign struct {
-	Brief                 string
-	Channels              []string
-	Tone                  string
-	OfferPercent          *int
+	Brief        string
+	Channels     []string
+	Tone         string
+	OfferPercent *int
+	// DiscountCode goes into every message as written. Letters are made capitals.
+	DiscountCode          *string
 	NotMessagedWithinDays *int
 	ABTest                bool
 	// VariantAPercent is who gets version A, from 1 to 99. Half when left out.
@@ -182,21 +190,52 @@ func (n NewCampaign) validate() error {
 	if n.OfferPercent != nil && (*n.OfferPercent < 1 || *n.OfferPercent > 100) {
 		return ErrInvalidOptions
 	}
+	if n.DiscountCode != nil && !content.ValidCode(*n.DiscountCode) {
+		return ErrInvalidOptions
+	}
 	if n.NotMessagedWithinDays != nil && (*n.NotMessagedWithinDays < 1 || *n.NotMessagedWithinDays > 365) {
 		return ErrInvalidOptions
 	}
 	if n.VariantAPercent != nil && (!n.ABTest || *n.VariantAPercent < 1 || *n.VariantAPercent > 99) {
 		return ErrInvalidOptions
 	}
-	return checkOffer(n.Brief, n.OfferPercent)
+	return checkOffer(n.Brief, n.OfferPercent, n.DiscountCode)
 }
 
-// checkOffer refuses two different offers rather than guessing which one is meant.
-func checkOffer(brief string, offer *int) error {
+// checkOffer refuses two different offers rather than guessing which one is meant,
+// and the same for codes, where sending the wrong one is worse than sending none.
+func checkOffer(brief string, offer *int, code *string) error {
 	if offer != nil && !content.OfferAgrees(brief, *offer) {
 		return ErrOfferConflict
 	}
+	codes := content.BriefCodes(brief)
+	if len(codes) > 1 || (code != nil && len(codes) == 1 && codes[0] != *code) {
+		return ErrCodeConflict
+	}
 	return nil
+}
+
+// cleanCode makes a code's letters capitals and treats a blank one as none.
+func cleanCode(code *string) *string {
+	if code == nil {
+		return nil
+	}
+	cleaned := strings.ToUpper(strings.TrimSpace(*code))
+	if cleaned == "" {
+		return nil
+	}
+	return &cleaned
+}
+
+// discountCode is the code the messages carry: the form's, or the brief's own.
+func discountCode(brief string, form *string) string {
+	if form != nil {
+		return *form
+	}
+	if codes := content.BriefCodes(brief); len(codes) == 1 {
+		return codes[0]
+	}
+	return ""
 }
 
 // CreateWith stores a new draft with the choices made on the form.
@@ -209,6 +248,7 @@ func (s *Service) CreateWith(ctx context.Context, campaign NewCampaign) (string,
 	if err != nil {
 		return "", err
 	}
+	campaign.DiscountCode = cleanCode(campaign.DiscountCode)
 	if err := campaign.validate(); err != nil {
 		return "", err
 	}
@@ -253,12 +293,12 @@ func (s *Service) CreateWith(ctx context.Context, campaign NewCampaign) (string,
 
 	var id string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO campaigns (brief, name, created_by, channels, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, email_design)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::int, 50), $10, $11) RETURNING id::text`,
-		brief, provisionalName(brief), personFrom(ctx), chosen, campaign.Tone, campaign.OfferPercent, campaign.NotMessagedWithinDays, campaign.ABTest, campaign.VariantAPercent, campaign.EmailTemplate, design).Scan(&id); err != nil {
+		INSERT INTO campaigns (brief, name, created_by, channels, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, email_design, discount_code)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::int, 50), $10, $11, $12) RETURNING id::text`,
+		brief, provisionalName(brief), personFrom(ctx), chosen, campaign.Tone, campaign.OfferPercent, campaign.NotMessagedWithinDays, campaign.ABTest, campaign.VariantAPercent, campaign.EmailTemplate, design, campaign.DiscountCode).Scan(&id); err != nil {
 		return "", fmt.Errorf("insert campaign: %w", err)
 	}
-	if err := recordAudit(ctx, tx, id, eventCreated, map[string]any{"brief_characters": utf8.RuneCountInString(brief), "channels": chosen, "tone": campaign.Tone, "offer_percent": campaign.OfferPercent, "not_messaged_within_days": campaign.NotMessagedWithinDays, "email_template": campaign.EmailTemplate}); err != nil {
+	if err := recordAudit(ctx, tx, id, eventCreated, map[string]any{"brief_characters": utf8.RuneCountInString(brief), "channels": chosen, "tone": campaign.Tone, "offer_percent": campaign.OfferPercent, "discount_code": campaign.DiscountCode, "not_messaged_within_days": campaign.NotMessagedWithinDays, "email_template": campaign.EmailTemplate}); err != nil {
 		return "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -395,8 +435,8 @@ func (s *Service) Duplicate(ctx context.Context, id string, rule *int) (View, er
 
 	var copied string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO campaigns (tags, brief, name, name_source, created_by, channels, excluded_languages, tone, offer_percent, not_messaged_within_days, ab_test, variant_a_percent, email_template, email_design, status)
-		SELECT tags, brief, $2, name_source, $3, channels, excluded_languages, tone, offer_percent, COALESCE($5, not_messaged_within_days), ab_test, variant_a_percent, email_template, email_design, $4
+		INSERT INTO campaigns (tags, brief, name, name_source, created_by, channels, excluded_languages, tone, offer_percent, discount_code, not_messaged_within_days, ab_test, variant_a_percent, email_template, email_design, status)
+		SELECT tags, brief, $2, name_source, $3, channels, excluded_languages, tone, offer_percent, discount_code, COALESCE($5, not_messaged_within_days), ab_test, variant_a_percent, email_template, email_design, $4
 		FROM campaigns WHERE id = $1
 		RETURNING id::text`, id, name, personFrom(ctx), status, rule).Scan(&copied); err != nil {
 		return View{}, fmt.Errorf("copy campaign: %w", err)
@@ -550,10 +590,14 @@ func (s *Service) Unsubscribe(ctx context.Context, userID int64) error {
 // writingBrief is the brief as a message writer and its checks see it, with the
 // offer from the form stated like any other.
 func (v View) writingBrief() string {
-	if v.OfferPercent == nil {
-		return v.Brief
+	brief := v.Brief
+	if v.OfferPercent != nil {
+		brief = fmt.Sprintf("%s\n\nOffer set by the marketer: %d%% discount.", brief, *v.OfferPercent)
 	}
-	return fmt.Sprintf("%s\n\nOffer set by the marketer: %d%% discount.", v.Brief, *v.OfferPercent)
+	if v.DiscountCode != "" {
+		brief = fmt.Sprintf("%s\n\nDiscount code set by the marketer: %s. Write {{%s}} where the code goes; the code is filled in when the message is sent.", brief, v.DiscountCode, content.CodeVariable)
+	}
+	return brief
 }
 
 // normalizeChannels puts a choice in the product's order. Saying nothing means
@@ -623,7 +667,7 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 			if brief, err = cleanBrief(*input.Brief); err != nil {
 				return View{}, err
 			}
-			if err := checkOffer(brief, stored.OfferPercent); err != nil {
+			if err := checkOffer(brief, stored.OfferPercent, stored.FormDiscountCode); err != nil {
 				return View{}, err
 			}
 		}
@@ -638,7 +682,7 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 		if request.Brief, err = cleanBrief(*input.Brief); err != nil {
 			return View{}, err
 		}
-		if err := checkOffer(request.Brief, stored.OfferPercent); err != nil {
+		if err := checkOffer(request.Brief, stored.OfferPercent, stored.FormDiscountCode); err != nil {
 			return View{}, err
 		}
 		request.Refinement = ""
@@ -660,7 +704,7 @@ func (s *Service) ProposeSegment(ctx context.Context, id string, input ProposeIn
 	brief := request.Brief
 	if request.Refinement != "" {
 		brief = proposal.UpdatedBrief
-		if err := checkOffer(brief, stored.OfferPercent); err != nil {
+		if err := checkOffer(brief, stored.OfferPercent, stored.FormDiscountCode); err != nil {
 			return View{}, err
 		}
 	}
@@ -1000,7 +1044,7 @@ func (s *Service) get(ctx context.Context, q segment.Querier, id string) (View, 
 			return View{}, err
 		}
 	}
-	view.ContentLimits = content.Limits{SkipSMS: !slices.Contains(view.Channels, "sms"), SkipEmail: !slices.Contains(view.Channels, "email")}
+	view.ContentLimits = content.Limits{SkipSMS: !slices.Contains(view.Channels, "sms"), SkipEmail: !slices.Contains(view.Channels, "email"), Code: view.DiscountCode}
 	for i := range view.Languages {
 		view.ContentLimits.SMSName = max(view.ContentLimits.SMSName, view.Languages[i].SMSName)
 		view.ContentLimits.EmailName = max(view.ContentLimits.EmailName, view.Languages[i].EmailName)
@@ -1019,6 +1063,7 @@ func (s *Service) get(ctx context.Context, q segment.Querier, id string) (View, 
 	}
 	if view.Content != nil {
 		view.ContentWarnings = append(view.ContentWarnings, content.CheckDiscounts(view.Content.Content, view.writingBrief())...)
+		view.ContentWarnings = append(view.ContentWarnings, content.CheckCode(view.Content.Content, view.limitsFor(view.Content.Language))...)
 		view.ContentWarnings = append(view.ContentWarnings, view.Content.NotApplied...)
 		for _, root := range view.Content.variants() {
 			for index, version := range root.all() {
@@ -1026,6 +1071,7 @@ func (s *Service) get(ctx context.Context, q segment.Querier, id string) (View, 
 					continue
 				}
 				issues := append(content.CheckDiscounts(version.Content, view.writingBrief()), version.NotApplied...)
+				issues = append(issues, content.CheckCode(version.Content, view.limitsFor(version.Language))...)
 				for _, issue := range issues {
 					issue.Message = versionLabel(version, index > 0) + ": " + issue.Message
 					view.ContentWarnings = append(view.ContentWarnings, issue)
@@ -1072,18 +1118,19 @@ func (s *Service) loadFrom(ctx context.Context, q segment.Querier, id string) (V
 		snapshot     []byte
 	)
 	err := q.QueryRow(ctx, `
-		SELECT c.name, c.name_source, c.email_template, c.email_design, c.brief, c.status, c.tags, c.archived_at, c.channels, c.excluded_languages, c.tone, c.ab_test, c.variant_a_percent, c.offer_percent, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
+		SELECT c.name, c.name_source, c.email_template, c.email_design, c.brief, c.status, c.tags, c.archived_at, c.channels, c.excluded_languages, c.tone, c.ab_test, c.variant_a_percent, c.offer_percent, c.discount_code, c.not_messaged_within_days, c.created_by, c.created_at, c.updated_at, v.version, v.llm_provider, v.llm_model, v.segment, v.content, v.audience_as_of, v.approved_at, v.audience_snapshot
 		FROM campaigns c
 		LEFT JOIN LATERAL (
 			SELECT * FROM campaign_versions WHERE campaign_id = c.id ORDER BY version DESC LIMIT 1
 		) v ON true
-		WHERE c.id = $1 AND c.deleted_at IS NULL`, parsed).Scan(&view.Name, &view.NameSource, &view.EmailTemplate, &view.EmailDesign, &view.Brief, &view.Status, &view.Tags, &view.ArchivedAt, &view.Channels, &view.ExcludedLanguages, &view.Tone, &view.ABTest, &view.VariantAPercent, &view.OfferPercent, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt, &snapshot)
+		WHERE c.id = $1 AND c.deleted_at IS NULL`, parsed).Scan(&view.Name, &view.NameSource, &view.EmailTemplate, &view.EmailDesign, &view.Brief, &view.Status, &view.Tags, &view.ArchivedAt, &view.Channels, &view.ExcludedLanguages, &view.Tone, &view.ABTest, &view.VariantAPercent, &view.OfferPercent, &view.FormDiscountCode, &view.NotMessagedWithinDays, &view.CreatedBy, &view.CreatedAt, &view.UpdatedAt, &version, &provider, &model, &encoded, &storedText, &audienceAsOf, &approvedAt, &snapshot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return View{}, ErrNotFound
 	}
 	if err != nil {
 		return View{}, fmt.Errorf("load campaign: %w", err)
 	}
+	view.DiscountCode = discountCode(view.Brief, view.FormDiscountCode)
 	if version == nil {
 		return view, nil
 	}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { countCharacters, findUnknownVariables, reachHint, renderMessage, smsSegments, campaignDiscount } from "./message";
+import { briefCodes, campaignDiscount, countCharacters, findUnknownVariables, hasCode, longestRenderedLength, reachHint, renderMessage, smsSegments, validCode } from "./message";
 
 describe("countCharacters", () => {
   it("counts Turkish letters as one character each", () => {
@@ -88,5 +88,34 @@ describe("a missing first name", () => {
     expect(renderMessage("Hi {{first_name}}", { first_name: "" }, "tr")).toBe("Hi müşterimiz");
     expect(renderMessage("Hi {{first_name}}", { first_name: "" }, "en")).toBe("Hi there");
     expect(renderMessage("Hi {{first_name}}", { first_name: "" })).toBe("Hi there");
+  });
+});
+
+describe("discount code", () => {
+  it("is filled in and counted as the code", () => {
+    expect(renderMessage("Use {{discount_code}}, {{first_name}}", { first_name: "Ayşe", discount_code: "SONBAHAR15" })).toBe("Use SONBAHAR15, Ayşe");
+    expect(longestRenderedLength("x{{discount_code}}", 0, "SONBAHAR15")).toBe(11);
+  });
+
+  it("stays a variable, and is refused, without a code", () => {
+    expect(renderMessage("Use {{discount_code}}", { first_name: "Ayşe" })).toBe("Use {{discount_code}}");
+    expect(findUnknownVariables("Use {{discount_code}}")).toEqual(["discount_code"]);
+    expect(findUnknownVariables("Use {{discount_code}}", "SONBAHAR15")).toEqual([]);
+    expect(hasCode("Use {{ discount_code }}")).toBe(true);
+  });
+
+  it("is read from a brief next to a word for one, as the backend reads it", () => {
+    expect(briefCodes("%15 indirim kodu SONBAHAR15 ver.")).toEqual(["SONBAHAR15"]);
+    expect(briefCodes("SONBAHAR15 kodunu kullan.")).toEqual(["SONBAHAR15"]);
+    expect(briefCodes("Promo code: SPRING-10 for everyone.")).toEqual(["SPRING-10"]);
+    expect(briefCodes("Kodu A1B ya da kodu C2D olsun.")).toEqual(["A1B", "C2D"]);
+    expect(briefCodes("%15 indirim, 15 kodu yok. SONBAHAR15 koleksiyonunu duyur.")).toEqual([]);
+  });
+
+  it("is capitals, digits and hyphens", () => {
+    expect(validCode("SPRING-10")).toBe(true);
+    expect(validCode("spring10")).toBe(false);
+    expect(validCode("AB")).toBe(false);
+    expect(validCode("SALE 10")).toBe(false);
   });
 });

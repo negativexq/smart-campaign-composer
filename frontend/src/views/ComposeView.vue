@@ -8,6 +8,7 @@ import ValidationNotice from "../components/ValidationNotice.vue";
 import { ruleText } from "../lib/audience";
 import { defaultChannels } from "../lib/preferences";
 import { EMAIL_TEMPLATES, isCustomTemplate } from "../lib/emailTemplates";
+import { briefCodes, validCode } from "../lib/message";
 import { navigate } from "../lib/navigation";
 import { requestAudience } from "../lib/pendingAudience";
 
@@ -18,6 +19,9 @@ const hasOffer = ref(false);
 const abTest = ref(false);
 const firstShare = ref<number | "">(50);
 const offer = ref<number | "">("");
+const code = ref("");
+const typedCode = computed(() => code.value.trim().toUpperCase());
+const codesInBrief = computed(() => briefCodes(brief.value));
 const quietDays = ref("");
 // Set by "Use template". It needs a channel to apply to, so email must stay chosen.
 const namedTemplate = new URLSearchParams(window.location.search).get("template") ?? "";
@@ -62,6 +66,9 @@ const unavailableReason = computed(() => {
   if (busy.value) return "Finding your audience...";
   if (!channels.value.length) return "Choose at least one channel.";
   if (hasOffer.value && (offer.value === "" || !Number.isInteger(offer.value) || offer.value < 1 || offer.value > 100)) return "Enter a discount from 1 to 100.";
+  if (typedCode.value && !validCode(typedCode.value)) return "Enter a discount code of 3 to 30 capital letters, digits or hyphens.";
+  if (codesInBrief.value.length > 1) return `The brief names more than one code: ${codesInBrief.value.join(", ")}. Keep one.`;
+  if (typedCode.value && codesInBrief.value.length === 1 && codesInBrief.value[0] !== typedCode.value) return `The brief names the code ${codesInBrief.value[0]}. Use the same code here, or leave this empty.`;
   if (abTest.value && !validShare.value) return "Enter a share for version A from 1 to 99.";
   return undefined;
 });
@@ -71,6 +78,7 @@ const optionsSummary = computed(() => {
   const chosen = [
     tone.value && tone.value[0].toUpperCase() + tone.value.slice(1),
     hasOffer.value && offer.value !== "" && `${offer.value}% discount`,
+    typedCode.value && `Code ${typedCode.value}`,
     quietDays.value && `Leaves out people messaged in the last ${quietDays.value} days`,
   ].filter(Boolean);
   return chosen.length ? chosen.join(" · ") : "Optional";
@@ -83,6 +91,7 @@ async function findAudience() {
     const id = await createCampaign(brief.value, channels.value, {
       ...(tone.value ? { tone: tone.value } : {}),
       ...(hasOffer.value && offer.value !== "" ? { offer_percent: offer.value } : {}),
+      ...(typedCode.value ? { discount_code: typedCode.value } : {}),
       ...(quietDays.value ? { not_messaged_within_days: Number(quietDays.value) } : {}),
       ...(abTest.value ? { ab_test: true, variant_a_percent: Number(firstShare.value) } : {}),
       ...(template.value && channels.value.includes("email") ? { email_template: template.value.id } : {}),
@@ -165,6 +174,22 @@ async function findAudience() {
             <div v-if="hasOffer" class="option">
               <label class="small muted" for="campaign-offer">Discount (%)</label>
               <input id="campaign-offer" v-model.number="offer" class="field control" type="number" min="1" max="100" step="1" />
+            </div>
+            <div class="option">
+              <label class="small muted" for="campaign-code">Discount code</label>
+              <input
+                id="campaign-code"
+                v-model="code"
+                class="field control mono"
+                type="text"
+                maxlength="30"
+                autocapitalize="characters"
+                spellcheck="false"
+                :placeholder="codesInBrief.length === 1 ? codesInBrief[0] : 'SPRING15'"
+                data-testid="discount-code"
+              />
+              <p v-if="!typedCode && codesInBrief.length === 1" class="small muted" data-testid="code-from-brief">From the brief: <span class="mono">{{ codesInBrief[0] }}</span>. Every message will carry it.</p>
+              <p v-else-if="typedCode" class="small muted">Every SMS and email will carry it exactly as written.</p>
             </div>
           </fieldset>
           <fieldset class="options" :disabled="busy" data-testid="audience-options">

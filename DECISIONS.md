@@ -110,6 +110,29 @@ Generation is tied to the request: closing the page or pressing Stop cancels the
 
 The model may not invent or drop an offer: a percentage that differs from the brief fails validation and goes through repair. An instruction such as "make it 40%" becomes the source for that run, because the marketer asked for it. A marketer's own edit can also change the offer, since they are the authority on it, so it passes with a visible warning and stays visible until the brief and message agree. Length, variable and empty-field rules are hard for both, because a person editing cannot make an SMS fit by intent.
 
+## A discount code is filled in, never written
+
+A brief that asked for 15% off with the code `SONBAHAR15` produced messages with the 15% and without the code, and the review page passed them, because a discount was only ever a percentage ([#27](https://github.com/negativexq/smart-campaign-composer/issues/27)). A real model may drop a code the same way, and a missing or mistyped code costs the marketer the campaign's point.
+
+**Where the code comes from.** The form has a `Discount code` field next to the percentage. Without it, a code the brief names next to a word for one ("kodu SONBAHAR15", "SONBAHAR15 kodunu", "code SPRING10") counts. A form code and a different brief code, or two codes in the brief, are refused, as with percentages, because sending the wrong code is worse than sending none. A code is 3 to 30 capital letters, digits and hyphens, so it reads the same in every language and cannot break an SMS; the form makes letters capitals. A brief edit or refinement is checked the same way, and a refinement may not bring in a code nobody gave.
+
+**How it gets into a message.** The model writes `{{discount_code}}`, like `{{first_name}}`, and the backend fills in the code in previews and at send time. So the code cannot be mistyped or translated, and a code the model or a person types out is turned into the variable before the checks run. The code is stored on each version of the messages, set by the backend from the campaign and never from a model or a request, so approval freezes it with the text.
+
+**What is checked.**
+
+| Case | Model output | A person's edit |
+|---|---|---|
+| A code is set and an SMS has no `{{discount_code}}` | Repaired like any invalid output | Not saved, with the reason on the field |
+| `{{discount_code}}` without a code | Repaired | Not saved |
+| Messages written for another code, or before the campaign had one | — | Shown on the review page; approval is refused until they are written again |
+| SMS length | Counted with the real code | Counted with the real code |
+
+The email does not depend on the text at all: whenever a code is set, every design shows it in a box of its own below the body and above the button, labelled in the reader's language, and the plain text version has the same line. A marketer's own design gets the box right after its body block. Without a code nothing changes: no box, no row on the review page, and `{{discount_code}}` is refused.
+
+This is strict for a person too, unlike a percentage. Changing the offer is a pricing decision the marketer may make; deleting the code from an SMS is a mistake, and a campaign that should go without a code drops it from the form.
+
+**Not covered.** One-time codes per person need a pool of codes and tracking of which were used, and are left for later. Whether a code works in the shop is for the shop to know; we only make sure the code given is the code sent. A campaign has one code, like one discount. Reading a code from the brief needs a word for a code next to it, so a code written any other way has to go in the form field.
+
 ## Changing the audience clears the content
 
 Messages are written for a specific audience, and its longest name sets the limits. Keeping them after a change would leave text checked against limits that no longer apply, so a new proposal puts the campaign back to a draft without content, and the page says so before it happens.
@@ -134,7 +157,7 @@ Every email has its own link, signed with HMAC-SHA256, so it needs no session an
 
 The brief can still say all of this, so the fields stay optional and a marketer who writes everything in the brief loses nothing.
 
-A discount on the form is added to the brief that the writer and the discount check read, so it follows the same rules as one in the text. A brief naming another percentage is refused, because guessing which offer is meant could send the wrong price.
+A discount on the form is added to the brief that the writer and the discount check read, so it follows the same rules as one in the text. A brief naming another percentage is refused, because guessing which offer is meant could send the wrong price. A discount code is a field of its own and is filled in rather than written (see [A discount code is filled in, never written](#a-discount-code-is-filled-in-never-written)).
 
 Tone goes to the model separately and changes wording only. It has no validation beyond the allowed values, since whether a text sounds formal is for the person reviewing it.
 

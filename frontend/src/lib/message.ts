@@ -1,8 +1,9 @@
-export const SUPPORTED_VARIABLES = ["first_name"] as const;
+export const SUPPORTED_VARIABLES = ["first_name", "discount_code"] as const;
 
-export type MessageValues = Record<(typeof SUPPORTED_VARIABLES)[number], string>;
+// discount_code is filled only for a campaign that has a code; without one it stays a variable.
+export type MessageValues = { first_name: string; discount_code?: string };
 
-const FALLBACKS: MessageValues = { first_name: "there" };
+const FALLBACKS = { first_name: "there" };
 const NAME_FALLBACKS: Record<string, string> = { tr: "müşterimiz", en: "there", de: "Kundschaft", fr: "cher client", es: "cliente" };
 const VARIABLE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
 
@@ -14,17 +15,22 @@ export function countCharacters(text: string): number {
 
 // The length once sent to the person with the longest name, or to someone whose
 // name is replaced by the fallback. It matches the limit the backend enforces.
-export function longestRenderedLength(template: string, longestName: number): number {
+export function longestRenderedLength(template: string, longestName: number, code = ""): number {
   const fill = Math.max(longestName, FALLBACKS.first_name.length);
   return countCharacters(
-    template.replace(VARIABLE, (placeholder, name: string) => (isSupported(name) ? "x".repeat(fill) : placeholder)),
+    template.replace(VARIABLE, (placeholder, name: string) => {
+      if (name === "first_name") return "x".repeat(fill);
+      if (name === "discount_code" && code) return code;
+      return placeholder;
+    }),
   );
 }
 
 export function renderMessage(template: string, values: MessageValues, language = ""): string {
   return template.replace(VARIABLE, (placeholder, name: string) => {
-    if (!isSupported(name)) return placeholder;
-    return values[name] || fallbackName(language);
+    if (name === "first_name") return values.first_name || fallbackName(language);
+    if (name === "discount_code" && values.discount_code) return values.discount_code;
+    return placeholder;
   });
 }
 
@@ -33,12 +39,18 @@ export function fallbackName(language: string): string {
   return NAME_FALLBACKS[language] ?? FALLBACKS.first_name;
 }
 
-export function findUnknownVariables(template: string): string[] {
+/** Variables the backend will refuse: any it does not know, and discount_code without a code. */
+export function findUnknownVariables(template: string, code = ""): string[] {
   const names = [...template.matchAll(VARIABLE)].map((match) => match[1]);
-  return [...new Set(names.filter((name) => !isSupported(name)))];
+  return [...new Set(names.filter((name) => !isSupported(name) || (name === "discount_code" && !code)))];
 }
 
-function isSupported(name: string): name is keyof MessageValues {
+/** Whether a message carries the discount code. */
+export function hasCode(template: string): boolean {
+  return [...template.matchAll(VARIABLE)].some((match) => match[1] === "discount_code");
+}
+
+function isSupported(name: string): boolean {
   return (SUPPORTED_VARIABLES as readonly string[]).includes(name);
 }
 
@@ -68,6 +80,36 @@ export function smsSegments(text: string): SmsSegments {
 export function campaignDiscount(campaign: { offer_percent?: number | null; brief: string }): string {
   if (campaign.offer_percent) return `${campaign.offer_percent}%`;
   return campaign.brief.match(/%\s*\d+|\d+\s*%/)?.[0] ?? "";
+}
+
+const CODE_SHAPE = /^[A-Z0-9][A-Z0-9-]{2,29}$/;
+const CODE_WORDS = new Set(["kod", "kodu", "kodunu", "koduyla", "kodlu", "kupon", "kuponu", "kuponunu", "code", "coupon", "promo"]);
+
+/** Whether text can be a discount code: capitals, digits and hyphens, 3 to 30 of them. */
+export function validCode(code: string): boolean {
+  return CODE_SHAPE.test(code);
+}
+
+/**
+ * The codes a brief names next to a word for one, as in "kodu SONBAHAR15" or "code SPRING10".
+ * The backend reads the brief the same way and has the last word.
+ */
+export function briefCodes(brief: string): string[] {
+  const words = brief.split(/[\s:"'“”’]+/).filter(Boolean);
+  const found: string[] = [];
+  words.forEach((word, index) => {
+    const bare = word.replace(/[.,;!?)]+$/, "");
+    if (!validCode(bare) || !/[A-Z]/.test(bare)) return;
+    // A word for a code joined to it, not across a comma or the end of a sentence.
+    const joined = (other: string | undefined) => Boolean(other) && !/[.,;!?]$/.test(other!) && CODE_WORDS.has(other!.toLocaleLowerCase("tr"));
+    const before = words[index - 1];
+    const named =
+      joined(before) ||
+      (["code", "kodu"].includes(before?.toLocaleLowerCase("tr") ?? "") && joined(words[index - 2])) ||
+      (bare === word && CODE_WORDS.has(words[index + 1]?.toLocaleLowerCase("tr").replace(/[.,;!?]+$/, "") ?? ""));
+    if (named && !found.includes(bare)) found.push(bare);
+  });
+  return found;
 }
 
 /** Says how many people a channel misses and why, since consent is the only reason. */

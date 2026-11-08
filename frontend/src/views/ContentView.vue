@@ -117,12 +117,14 @@ const designChoices = computed(() => {
   const own = campaign.value?.email_design;
   return own && !designLibrary.value.some((design) => design.id === own.id) ? [...designLibrary.value, own] : designLibrary.value;
 });
+// The code comes from the campaign: a save takes it from there too, never from the page.
+const code = computed(() => campaign.value?.discount_code ?? "");
 const previewMessage = computed(() => {
   const chosen = template.value;
-  if (!isCustomTemplate(chosen)) return messages;
+  if (!isCustomTemplate(chosen)) return { ...messages, discount_code: code.value };
   const own = campaign.value?.email_design;
   const design = own && customTemplateName(own.id) === chosen ? own : designLibrary.value.find((item) => customTemplateName(item.id) === chosen);
-  return { ...messages, email_design: design ?? null };
+  return { ...messages, email_design: design ?? null, discount_code: code.value };
 });
 const template = computed({
   get: () => messages.email_template || campaign.value?.email_template || EMAIL_TEMPLATES[0].id,
@@ -428,21 +430,22 @@ onBeforeUnmount(() => controller?.abort());
             :state="editorState('sms')"
             origin="ai"
             :longest-name="nameLength"
+            :code="code"
             :problem="issueFor('sms')"
           />
           <template v-else>
             <EmailTemplatePicker v-model="template" :designs="designChoices" :disabled="generating" />
-            <MessageEditor v-model="messages.email_subject" plain no-variables label="Subject" :limit="80" :rows="1" :state="editorState('email_subject')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_subject')" />
-            <MessageEditor v-model="messages.email_preheader" plain no-variables label="Preview text" :limit="120" :rows="2" :state="editorState('email_preheader')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_preheader')" />
-            <MessageEditor v-model="messages.email_headline" plain no-variables label="Headline" :limit="80" :rows="1" :state="editorState('email_headline')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_headline')" />
-            <MessageEditor v-model="messages.email_body" plain label="Body" :limit="5000" :rows="8" :state="editorState('email_body')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_body')" />
+            <MessageEditor v-model="messages.email_subject" plain no-variables label="Subject" :limit="80" :rows="1" :state="editorState('email_subject')" origin="ai" :longest-name="nameLength" :code="code" :problem="issueFor('email_subject')" />
+            <MessageEditor v-model="messages.email_preheader" plain no-variables label="Preview text" :limit="120" :rows="2" :state="editorState('email_preheader')" origin="ai" :longest-name="nameLength" :code="code" :problem="issueFor('email_preheader')" />
+            <MessageEditor v-model="messages.email_headline" plain no-variables label="Headline" :limit="80" :rows="1" :state="editorState('email_headline')" origin="ai" :longest-name="nameLength" :code="code" :problem="issueFor('email_headline')" />
+            <MessageEditor v-model="messages.email_body" plain label="Body" :limit="5000" :rows="8" :state="editorState('email_body')" origin="ai" :longest-name="nameLength" :code="code" :problem="issueFor('email_body')" />
             <details class="more" :open="buttonHasProblem || noButton || undefined" data-testid="email-button">
               <summary class="more-toggle">
                 <span>Button</span>
                 <span class="muted small">{{ messages.email_cta_label || "None" }}</span>
               </summary>
               <div class="more-fields">
-                <MessageEditor v-model="messages.email_cta_label" plain no-variables label="Label" :limit="30" :rows="1" :state="editorState('email_cta_label')" origin="ai" :longest-name="nameLength" :problem="issueFor('email_cta_label')" />
+                <MessageEditor v-model="messages.email_cta_label" plain no-variables label="Label" :limit="30" :rows="1" :state="editorState('email_cta_label')" origin="ai" :longest-name="nameLength" :code="code" :problem="issueFor('email_cta_label')" />
                 <MessageEditor v-model="messages.email_cta_url" plain label="Link" :rows="1" no-variables :state="editorState('email_cta_url')" origin="ai" :problem="issueFor('email_cta_url')" />
               </div>
             </details>
@@ -474,7 +477,7 @@ onBeforeUnmount(() => controller?.abort());
       </div>
 
       <aside v-if="recipients.length" class="previews" aria-label="Message preview">
-        <PhonePreview v-if="channel === 'sms'" :key="selectedVariant + selectedLanguage" :message="messages.sms" :recipients="shownRecipients" :language="selectedLanguage" />
+        <PhonePreview v-if="channel === 'sms'" :key="selectedVariant + selectedLanguage" :message="messages.sms" :recipients="shownRecipients" :language="selectedLanguage" :code="code" />
         <EmailPreview v-else :key="selectedVariant + selectedLanguage" :message="previewMessage" :recipients="shownRecipients" :language="selectedLanguage" />
       </aside>
     </div>

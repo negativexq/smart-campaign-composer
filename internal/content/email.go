@@ -22,6 +22,9 @@ var EmailTemplates = []string{"classic", "banner", "offer"}
 
 const defaultPage = "#F5F7FA"
 
+// codeInks colour the code box like each built-in design's button.
+var codeInks = map[string]string{"classic": "#315BE8", "banner": "#172F86", "offer": "#C2410C"}
+
 var (
 	emailTemplate = template.Must(template.New("email").Parse(emailSource))
 	blankLine     = regexp.MustCompile(`\n\s*\n`)
@@ -56,7 +59,8 @@ func RenderEmail(c Content, firstName, unsubscribeURL string) (Email, error) {
 func RenderEmailWith(c Content, firstName, unsubscribeURL string, options RenderOptions) (Email, error) {
 	firstName = NameFor(c.Language, firstName)
 	footer := footerFor(c.Language)
-	body := Render(c.EmailBody, firstName)
+	code := c.DiscountCode
+	body := Render(c.EmailBody, firstName, code)
 	data := struct {
 		Subject, Preheader, Headline string
 		Paragraphs                   [][]string
@@ -69,12 +73,15 @@ func RenderEmailWith(c Content, firstName, unsubscribeURL string, options Render
 		Editing                      bool
 		Details                      string
 		PadTop, PadBottom            bool
+		Code                         emailCode
+		CodeInk                      string
 	}{
-		Subject:     Render(c.EmailSubject, firstName),
-		Preheader:   Render(c.EmailPreheader, firstName),
-		Headline:    Render(c.EmailHeadline, firstName),
+		Subject:     Render(c.EmailSubject, firstName, code),
+		Preheader:   Render(c.EmailPreheader, firstName, code),
+		Headline:    Render(c.EmailHeadline, firstName, code),
 		Paragraphs:  paragraphs(body),
-		CTALabel:    Render(c.EmailCTALabel, firstName),
+		CTALabel:    Render(c.EmailCTALabel, firstName, code),
+		Code:        emailCode{Value: code, Label: footer.codeLabel},
 		CTAURL:      c.EmailCTAURL,
 		Unsubscribe: unsubscribeURL,
 		Lang:        footer.lang,
@@ -84,11 +91,13 @@ func RenderEmailWith(c Content, firstName, unsubscribeURL string, options Render
 		Editing:     options.Editing,
 	}
 	name := templateName(c.EmailTemplate)
+	data.CodeInk = codeInks[name]
 	parts := []string{}
 	if renderableDesign(c) {
 		name = customTemplate
 		data.Page = c.EmailDesign.Page
 		data.Design = lookOf(*c.EmailDesign)
+		data.CodeInk = data.Design.AccentInk
 		data.Details = c.EmailDesign.Footer
 		data.Blocks = emailBlocks(c, firstName, options.AssetBase, options.Editing)
 		if len(data.Blocks) > 0 {
@@ -96,7 +105,7 @@ func RenderEmailWith(c Content, firstName, unsubscribeURL string, options Render
 			data.PadTop = !first.Full && first.Style != "band"
 			data.PadBottom = !last.Full && last.Style != "band"
 		}
-		parts = blocksAsText(data.Blocks)
+		parts = blocksAsText(data.Blocks, data.Code)
 		if data.Details != "" {
 			parts = append(parts, data.Details)
 		}
@@ -105,6 +114,9 @@ func RenderEmailWith(c Content, firstName, unsubscribeURL string, options Render
 			parts = append(parts, data.Headline)
 		}
 		parts = append(parts, strings.TrimSpace(body))
+		if code != "" {
+			parts = append(parts, data.Code.Text())
+		}
 		if data.CTAURL != "" {
 			parts = append(parts, data.CTALabel+": "+data.CTAURL)
 		}
@@ -124,11 +136,20 @@ func RenderEmailWith(c Content, firstName, unsubscribeURL string, options Render
 	return Email{Subject: data.Subject, HTML: html.String(), Text: strings.Join(parts, "\n\n")}, nil
 }
 
+// emailCode is the box every email shows when its campaign has a discount code, below
+// the body and above the button, so the code never depends on how the text was written.
+type emailCode struct{ Value, Label string }
+
+// Text is the box in the plain version.
+func (c emailCode) Text() string { return c.Label + ": " + c.Value }
+
 // blocksAsText is the plain version, in the order the marketer laid the blocks out.
-func blocksAsText(blocks []emailBlock) []string {
+func blocksAsText(blocks []emailBlock, code emailCode) []string {
 	parts := []string{}
 	for _, block := range blocks {
 		switch block.Type {
+		case blockCode:
+			parts = append(parts, code.Text())
 		case blockHeading, blockText:
 			if block.Text != "" {
 				parts = append(parts, block.Text)
@@ -140,14 +161,14 @@ func blocksAsText(blocks []emailBlock) []string {
 	return parts
 }
 
-type emailFooter struct{ lang, received, unsubscribe, linkLater string }
+type emailFooter struct{ lang, received, unsubscribe, linkLater, codeLabel string }
 
 func footerFor(code string) emailFooter {
 	known, ok := language.Get(code)
 	if !ok {
 		known, _ = language.Get(language.Fallback)
 	}
-	return emailFooter{known.Code, known.Received, known.Unsubscribe, known.LinkLater}
+	return emailFooter{known.Code, known.Received, known.Unsubscribe, known.LinkLater, known.CodeLabel}
 }
 
 // EmailTemplateVersion identifies a design as it stands now and changes only when that

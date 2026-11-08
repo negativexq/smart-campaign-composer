@@ -424,6 +424,25 @@ describe("content page", () => {
     expect(JSON.parse(init!.body as string).email_template).toBe("banner");
   });
 
+  it("previews the email with the campaign's code and offers the code in the SMS editor", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const withCode = { ...ready, discount_code: "SONBAHAR15", content: { ...stored, sms: "Hi {{first_name}}, use {{discount_code}}", discount_code: "SONBAHAR15" } };
+    const fetchMock = stub(withCode);
+    const email = open("email");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    const previews = fetchMock.mock.calls.filter(([url]) => url.endsWith("/api/email-preview"));
+    expect(JSON.parse(previews.at(-1)![1]!.body as string).discount_code).toBe("SONBAHAR15");
+    email.unmount();
+    vi.useRealTimers();
+
+    const sms = open("sms");
+    await flushPromises();
+    expect(sms.find("[data-testid=insert-code]").exists()).toBe(true);
+    expect(sms.find("[data-testid=phone-frame]").text()).toContain("use SONBAHAR15");
+  });
+
   it("keeps a template picked just now when the text is regenerated", async () => {
     const newText = { ...ready, content: { ...stored, email_subject: "New" } };
     stub(ready, async () => ({ ok: true, status: 200, body: streamOf(event("done", newText)) }));
