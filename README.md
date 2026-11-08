@@ -16,7 +16,7 @@ The 2:42 video is also in the repository as [docs/media/demo-claude.mp4](docs/me
 
 ## Product tour
 
-Every screenshot below is a real run: an OpenAI model wrote the audiences and messages, the seeded fake customers received them, and the mock provider accepted them. Select one to open it at full size.
+Every screenshot below is a real run: a real model, Claude Haiku 5.5 or an OpenAI model, wrote the audiences and messages, the seeded fake customers received them, and the mock provider accepted them. Select one to open it at full size.
 
 ### 1. Set up how your email looks
 
