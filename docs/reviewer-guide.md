@@ -1,11 +1,13 @@
 # Reviewer guide
 
-A five-minute path through the three claims a reviewer should check first. For each one this page says what the claim is, where it is enforced in the code, and which tests prove it, so you can open the code and the test side by side. The reasons behind each choice are in [DECISIONS.md](../DECISIONS.md).
+A short path through the four claims a reviewer should check first. For each one this page says what the claim is, where it is enforced in the code, and which tests prove it, so you can open the code and the test side by side. The reasons behind each choice are in [DECISIONS.md](../DECISIONS.md).
 
 1. [Claude's output is checked, not trusted](#1-claudes-output-is-checked-not-trusted)
 2. [Nothing is sent that a person did not approve](#2-nothing-is-sent-that-a-person-did-not-approve)
 3. [Rate limiting across workers and failures](#3-rate-limiting-across-workers-and-failures)
-4. [Run the checks yourself](#4-run-the-checks-yourself)
+4. [A message is accepted once and not lost](#4-a-message-is-accepted-once-and-not-lost)
+5. [Beyond these four](#5-beyond-these-four)
+6. [Run the checks yourself](#6-run-the-checks-yourself)
 
 ## 1. Claude's output is checked, not trusted
 
@@ -102,7 +104,43 @@ The [24 load scenarios](../tests/verify/README.md#load-scenarios) send about 15,
 
 Two mutation cases break the limiter on purpose: one removes the clock margin, the other skips the hold after Redis loses its window. The tests have to catch both ([`mutation/cases.go`](../tests/verify/mutation/cases.go)).
 
-## 4. Run the checks yourself
+## 4. A message is accepted once and not lost
+
+**Claim:** each message the campaign plans is accepted by the provider at most once, through retries, lost answers, crashed workers and restarts of the provider, the database and Redis. A message that cannot be settled is kept and marked, not dropped. When the outcome cannot be known, it says `UNKNOWN` instead of guessing `FAILED`.
+
+**How:**
+
+- **One delivery per message.** The database allows one delivery per run, recipient and channel ([`UNIQUE (run_id, user_id, channel)`](../migrations/00027_campaign_runs.sql#L42)), and each delivery has its own idempotency key, sent with every retry of it.
+- **The provider remembers the key.** The mock writes each accepted key to a journal on its own volume before it answers ([`journal.add`](../internal/mockprovider/journal.go#L82) from [`Server.accept`](../internal/mockprovider/mockprovider.go#L337)) and replays the journal when it starts, so a retry after a restart is recognised as the same message.
+- **A crashed worker's messages come back.** A message being sent holds a lease. [`RecoverExpired`](../internal/delivery/worker.go#L1153) takes back messages whose lease ran out, with the same key, and counts the lost call as an attempt, so a message that keeps crashing workers ends instead of looping.
+- **No answer is not a failure.** A call that timed out may have gone through, so a message that runs out of attempts after one ends as `UNKNOWN`.
+- **The queue is the database.** Claiming, sending state and attempts change in one transaction, so there is no second store to fall out of step with.
+
+**Tests:**
+
+| What | Test |
+|---|---|
+| One delivery per recipient and channel, unique keys | [`TestDeliveryAllowsOnePerRecipientAndChannel`](../internal/db/schema_test.go#L134), [`TestDeliveryIdempotencyKeyIsUnique`](../internal/db/schema_test.go#L186) |
+| A retry after a provider restart is the same message | [`TestARetryAfterARestartIsNotANewMessage`](../internal/mockprovider/journal_test.go#L34), [`TestALostResponseAndARestartDeliverOnce`](../internal/mockprovider/journal_test.go#L56) |
+| A crashed worker's messages are sent again, once, with their key | [`TestMessagesLeftByACrashedWorkerAreSentAgain`](../internal/delivery/worker_test.go#L923), [`TestARecoveredMessageKeepsItsIdempotencyKey`](../internal/delivery/worker_test.go#L993), [`TestParallelRecoveryCountsEachMessageOnce`](../internal/delivery/worker_test.go#L1016) |
+| A timeout ends as unknown, not failed | [`TestTimeoutsEndAsUnknownNotFailed`](../internal/delivery/worker_test.go#L688), [`TestALostResponseIsNotCalledNotSent`](../internal/delivery/client_test.go#L25) |
+| A killed or stopped worker, a provider outage, a database outage | [`tests/chaos`](../tests/chaos/chaos_test.go#L241), against a running stack |
+| Repeated and reordered delivery reports | [`TestReportsThatRepeatOrArriveOutOfOrderGiveTheSameResult`](../internal/campaign/events_test.go#L482) |
+
+**Under load:** every one of the [24 load scenarios](../tests/verify/README.md#load-scenarios) checks that no delivery has two accepted attempts and that the provider accepted no more messages than the campaign counts as sent.
+
+**The limit:** "at most once" holds only as long as the provider honours the key. The mock does; a real provider has to be checked for it. See [Retrying depends on the provider's idempotency](../DECISIONS.md#retrying-depends-on-the-providers-idempotency).
+
+## 5. Beyond these four
+
+- [Errors and retries](errors-and-retries.md): backoff, the 429 pause, the 401 credential lock, the circuit breaker and channel alerts, with measured behaviour.
+- [State machines](state-machines.md): every state and what guards each change.
+- [Security](security.md): 19 probes from outside a running stack, scans in CI, and the open items.
+- [Mutation check](../tests/verify/mutation/cases.go): deliberate faults the tests must catch.
+- [Performance profile](performance.md): a measured baseline and each optimization step measured the same way.
+- [FINDINGS.md](../tests/verify/FINDINGS.md): what the verification suites found and what was fixed.
+
+## 6. Run the checks yourself
 
 ```bash
 make test        # Go and frontend tests in containers, including the benchmark checks without a model

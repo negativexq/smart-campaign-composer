@@ -8,7 +8,25 @@ The full path works with the mock AI or a real model: brief, validated audience,
 
 To run it yourself, follow [Install from scratch](#install-from-scratch). It needs only Docker and no API key.
 
-Reviewing the code? The five-minute [reviewer guide](docs/reviewer-guide.md) shows how Claude's output is checked, why nothing goes out without approval, how the 100-a-second limit holds and where it can slip, and the tests that prove each.
+Reviewing the code? The [reviewer guide](docs/reviewer-guide.md) shows how Claude's output is checked, why nothing goes out without approval, how the 100-a-second limit holds and where it can slip, and how a message is accepted once and not lost, with the tests that prove each. [Under the hood](#under-the-hood) maps the rest of the engineering.
+
+## Under the hood
+
+Behind the product screens is the engineering that keeps a model's output and a send of thousands of messages safe. Each row links to where it is explained and to what checks it.
+
+| Area | What it does | Explained and checked in |
+|---|---|---|
+| Claude's output | A schema shapes the answer, then the backend checks every rule and message against the brief, sends invalid output back with the reasons, and stores nothing that never validates. | [Reviewer guide §1](docs/reviewer-guide.md#1-claudes-output-is-checked-not-trusted), the [247-case benchmark](tests/benchmark/results/README.md) and the [known gaps](tests/benchmark/known_gaps.txt) it tracks |
+| Approval | Nothing is sent without an approved version, and a database trigger keeps an approved version from changing. | [Reviewer guide §2](docs/reviewer-guide.md#2-nothing-is-sent-that-a-person-did-not-approve) |
+| Rate limit | A Redis sliding window keeps each channel at 100 calls a second across workers, retries, crashes and the loss of Redis. | [Reviewer guide §3](docs/reviewer-guide.md#3-rate-limiting-across-workers-and-failures), [24 load scenarios](tests/verify/README.md#load-scenarios) |
+| Delivery | One delivery per run, recipient and channel, one idempotency key for all its retries, a provider journal that survives restarts, leases that take back a crashed worker's messages, and `UNKNOWN` when the outcome cannot be known. | [Reviewer guide §4](docs/reviewer-guide.md#4-a-message-is-accepted-once-and-not-lost), [chaos tests](tests/chaos/chaos_test.go) |
+| Failures | Backoff with jitter, a pause on 429, a credential lock on 401, a circuit breaker, a stop after 10 minutes without progress, and channel alerts. | [Errors and retries](docs/errors-and-retries.md) |
+| State | Every state of a campaign, a writing claim, a messages document and a delivery, with what guards each change. | [State machines](docs/state-machines.md) |
+| Security | 19 probes from outside against a running stack, image and secret scans in CI, and the open items written down. | [Security](docs/security.md) |
+| Tests that fail | 24 deliberate faults, each of which a named test must catch. The latest run caught all 24. | [Mutation check](tests/verify/README.md) |
+| Performance | A measured baseline, then each optimization step measured the same way. | [Performance profile](docs/performance.md#optimization-log) |
+| Observability | Prometheus metrics, JSON logs with the trace ID, OpenTelemetry traces and a business audit table. | [Telemetry](#telemetry) |
+| Decisions | Each trade-off with its reason, grouped by area, and a log of what the verification suites found and how it was fixed. | [DECISIONS.md](DECISIONS.md), [FINDINGS.md](tests/verify/FINDINGS.md) |
 
 ## Demo video
 
@@ -250,7 +268,7 @@ make test        # Go and frontend tests in containers, no API key needed
 make test-local  # Go tests with the local toolchain, for faster iteration
 make test-e2e    # acceptance test against a stack started with `make up`
 make test-chaos  # kills and stops services under a running stack, takes a few minutes
-make benchmark   # measures the system's limits in a single pass
+make benchmark   # scores 247 hard cases; on the mock unless LLM_PROVIDER is set, and a real model costs money
 ```
 
 Integration tests use real PostgreSQL and fail, rather than skip, when it is missing.
@@ -272,7 +290,7 @@ CI runs on every push to `main` and every pull request: formatting, vet and the 
 | `migrations/` | SQL schema |
 | `frontend/` | Vue 3 and TypeScript UI |
 | `tests/` | Acceptance, chaos, benchmark and verification tests |
-| `docs/` | The [reviewer guide](docs/reviewer-guide.md), [architecture](docs/architecture.md), [flows](docs/flows.md), [state machines](docs/state-machines.md), [errors and retries](docs/errors-and-retries.md), the [performance profile](docs/performance.md) and the images in this file |
+| `docs/` | The [reviewer guide](docs/reviewer-guide.md), [architecture](docs/architecture.md), [flows](docs/flows.md), [state machines](docs/state-machines.md), [errors and retries](docs/errors-and-retries.md), the [performance profile](docs/performance.md), [security](docs/security.md) and the images in this file |
 | `ai-sessions/` | Exported AI working sessions |
 
 See [docs/architecture.md](docs/architecture.md) for how the system is put together, [docs/flows.md](docs/flows.md) for how a campaign moves through it, [docs/state-machines.md](docs/state-machines.md) for every state it can be in and what guards each change, [DECISIONS.md](DECISIONS.md) for the reasoning behind it, [docs/security.md](docs/security.md) for what protects it and how it was checked, and [DESIGN.md](DESIGN.md) for the Signal design language.

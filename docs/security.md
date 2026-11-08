@@ -49,7 +49,7 @@ The first pass caught 20 of the 23. The three misses were weak tests, not broken
 - **The alert lock** was tested by five checks racing each other, which usually passed without the lock too. The test now holds the lock itself, checks that the worker waits for it, and checks that the alert is written once.
 - **A 401 during a breaker probe** went through the test either way, because without its own handling it counted as a passed probe and closed the breaker. The test now checks that the breaker stays open after the 401 and closes only after an accepted call.
 
-After these changes all 23 faults are caught. A 24th was added with the 1.1 s limiter window: setting it back to 1 s must fail its test. The latest run catches all 24.
+After these changes all 23 faults are caught. A 24th was added with the 1.1 s limiter window: setting it back to 1 s must fail its test. The latest run, on 2026-11-08, catches all 24. Two cases had to be pointed at code that had moved since, a query rewritten and a label moved to its own file, because the check refuses to run when the code it breaks is not found.
 
 ### Probes from outside and full sends under faults
 
