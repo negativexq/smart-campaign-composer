@@ -74,6 +74,10 @@ The report follows each message from plan to arrival, separates provider accepta
 
 ![Deliveries report: results by channel, provider calls over time and the reasons messages did not go out](docs/screenshots/delivery-report.png)
 
+When the brief has a link, every SMS carries a short link of its own, and opening it counts a click. The report's **Short link opened** card shows how many SMS had their link opened at least once, out of those accepted with one, and a test shows the same per version. To try it in the demo, copy a short link's code from an SMS in the test inbox and open `http://localhost:8080/api/l/<code>`: it redirects to the brief's link and the card counts it. Opening the same link again adds to that message's clicks but not to the card, and a link preview's HEAD request is not counted.
+
+![Short link opened card: 37 of 403 SMS had their short link opened](docs/screenshots/short-link-opened.png)
+
 The test inbox shows each message the mock provider accepted, as the customer would get it: here the Winter campaigns template in Turkish, with the name filled in. Nothing leaves your machine.
 
 ![Test inbox: a list of accepted emails in several languages and one open winter sale email in Turkish](docs/screenshots/test-inbox.png)
