@@ -8,6 +8,7 @@ import ValidationNotice from "../components/ValidationNotice.vue";
 import { ruleText } from "../lib/audience";
 import { defaultChannels } from "../lib/preferences";
 import { EMAIL_TEMPLATES, isCustomTemplate } from "../lib/emailTemplates";
+import { BRIEF_EXAMPLES as suggestions } from "../lib/briefExamples";
 import { briefCodes, briefLinks, validCode } from "../lib/message";
 import { navigate } from "../lib/navigation";
 import { requestAudience } from "../lib/pendingAudience";
@@ -53,13 +54,6 @@ onMounted(async () => {
     error.value = errorMessage(failure);
   }
 });
-
-const suggestions = [
-  "Remind customers in İstanbul who added to their cart in the last 7 days and did not buy. Link: https://example.com/cart",
-  "Send a 10% discount to customers who have not purchased in the last 60 days. Link: https://example.com/offer",
-  "Tell customers who purchased in the last 30 days about our new collection. Link: https://example.com/new",
-  "Tell customers in Ankara about free shipping this weekend. Link: https://example.com/shipping",
-];
 
 const validShare = computed(() => Number.isInteger(firstShare.value) && Number(firstShare.value) >= 1 && Number(firstShare.value) <= 99);
 
