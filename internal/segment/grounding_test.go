@@ -366,9 +366,8 @@ func TestLengthsOfTimeWithHalvesAndHours(t *testing.T) {
 func TestListedWordsCanBeSaidToBeAboutTheMessage(t *testing.T) {
 	t.Parallel()
 	for brief, word := range map[string]string{
-		"Alışveriş sepeti özelliğimizi tanıtan duyuru, Bursa müşterilerine": "sepeti",
-		"Tüm Bursa müşterilerine, yaş fark etmeksizin":                      "yaş",
-		"Erkek kadın fark etmeksizin tüm Bursa müşterileri":                 "kadın",
+		"Kadın koleksiyonumuzu Bursa müşterilerine duyurun": "kadın",
+		"Gençler için yeni seri, Bursa müşterilerine":       "gençler",
 	} {
 		proposal := proposalOf(segment.Spec{City: text("Bursa")})
 		if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems != nil {
@@ -378,7 +377,7 @@ func TestListedWordsCanBeSaidToBeAboutTheMessage(t *testing.T) {
 			t.Fatalf("%s: nothing held without the claim", brief)
 		}
 		proposal = proposalOf(segment.Spec{City: text("Bursa")})
-		proposal.NotAudience = []string{"Erkek kadın fark etmeksizin", word + " özelliği"}
+		proposal.NotAudience = []string{word + " koleksiyonu"}
 		if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems != nil {
 			t.Fatal(problems)
 		}

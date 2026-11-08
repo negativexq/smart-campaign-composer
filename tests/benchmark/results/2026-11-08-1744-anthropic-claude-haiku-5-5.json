@@ -1,0 +1,1322 @@
+[
+ {
+  "id": "behavior-01",
+  "category": "behavior",
+  "holdout": false,
+  "brief": "Son 30 günde sepete ürün ekleyip almayan Ankara müşterileri",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son 30 günde sepete ürün ekleyip almayan Ankara müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara",
+    "cart_added_within_days": 30,
+    "no_purchase_since_cart": true
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.981403
+ },
+ {
+  "id": "behavior-02",
+  "category": "behavior",
+  "holdout": false,
+  "brief": "Son 7 günde sepetini terk eden İzmir kullanıcıları",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son 7 günde sepetini terk eden İzmir kullanıcıları",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İzmir",
+    "cart_added_within_days": 7,
+    "no_purchase_since_cart": true
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 6.0893246659999996
+ },
+ {
+  "id": "behavior-03",
+  "category": "behavior",
+  "holdout": false,
+  "brief": "Ankara users who abandoned their cart last week",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Ankara users who abandoned their cart last week",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara",
+    "cart_added_within_days": 7,
+    "no_purchase_since_cart": true
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.5047788749999995
+ },
+ {
+  "id": "behavior-04",
+  "category": "behavior",
+  "holdout": true,
+  "brief": "Sepetinde ürün bırakan Bursa müşterileri",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Sepetinde ürün bırakan Bursa müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Bursa",
+    "cart_added_within_days": 30,
+    "no_purchase_since_cart": true
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 6.146400333
+ },
+ {
+  "id": "behavior-05",
+  "category": "behavior",
+  "holdout": false,
+  "brief": "İstanbul users who added to cart in the last 14 days",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "İstanbul users who added to cart in the last 14 days",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İstanbul",
+    "cart_added_within_days": 14
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.162813083
+ },
+ {
+  "id": "behavior-06",
+  "category": "behavior",
+  "holdout": false,
+  "brief": "Son 14 günde sepete ürün ekleyen İzmir kullanıcıları",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son 14 günde sepete ürün ekleyen İzmir kullanıcıları",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İzmir",
+    "cart_added_within_days": 14
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.902935208
+ },
+ {
+  "id": "behavior-15",
+  "category": "behavior",
+  "holdout": false,
+  "brief": "Sepete ekledi ama satın almadı: son 5 gün, Ankara",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Sepete ekledi ama satın almadı: son 5 gün, Ankara",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara",
+    "cart_added_within_days": 5,
+    "no_purchase_since_cart": true
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.155840041
+ },
+ {
+  "id": "behavior-18",
+  "category": "behavior",
+  "holdout": true,
+  "brief": "Sepetinde ürün olan Ankara müşterileri, son 30 gün",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Sepetinde ürün olan Ankara müşterileri, son 30 gün",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara",
+    "cart_added_within_days": 30
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 7.9345852919999995
+ },
+ {
+  "id": "city_forms-01",
+  "category": "city_forms",
+  "holdout": false,
+  "brief": "Ankara'daki kullanıcılara kampanya duyurusu",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Ankara'daki kullanıcılara kampanya duyurusu",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.178895042
+ },
+ {
+  "id": "city_forms-02",
+  "category": "city_forms",
+  "holdout": false,
+  "brief": "Ankaradaki müşterilere duyuru",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Ankaradaki müşterilere duyuru",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.586448416
+ },
+ {
+  "id": "city_forms-03",
+  "category": "city_forms",
+  "holdout": false,
+  "brief": "ANKARA müşterilerine yeni sezon haberi",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "ANKARA müşterilerine yeni sezon haberi",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.099432666
+ },
+ {
+  "id": "city_forms-04",
+  "category": "city_forms",
+  "holdout": true,
+  "brief": "ankara müşterilerine duyuru",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "ankara müşterilerine duyuru",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.574988459
+ },
+ {
+  "id": "city_forms-05",
+  "category": "city_forms",
+  "holdout": false,
+  "brief": "İzmirlilere yeni sezon haberi",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "İzmirlilere yeni sezon haberi",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İzmir"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.343343625
+ },
+ {
+  "id": "city_forms-06",
+  "category": "city_forms",
+  "holdout": false,
+  "brief": "Izmir users, new season announcement",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Izmir users, new season announcement",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İzmir"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.737372458
+ },
+ {
+  "id": "combined-02",
+  "category": "combined",
+  "holdout": false,
+  "brief": "Son 14 günde sepete ekleyip 30 gündür alışveriş yapmayan Ankara müşterileri",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son 14 günde sepete ekleyip 30 gündür alışveriş yapmayan Ankara müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara",
+    "cart_added_within_days": 14,
+    "not_purchased_within_days": 30
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.84870425
+ },
+ {
+  "id": "combined-06",
+  "category": "combined",
+  "holdout": false,
+  "brief": "Ankara users who added to cart in the last 7 days but have not bought in 30 days",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Ankara users who added to cart in the last 7 days but have not bought in 30 days",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara",
+    "cart_added_within_days": 7,
+    "not_purchased_within_days": 30
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.338616208
+ },
+ {
+  "id": "combined-08",
+  "category": "combined",
+  "holdout": false,
+  "brief": "Son 30 günde sepete ekleyip almayan, son 3 günde mesaj almamış Türkçe konuşan Adana müşterileri",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son 30 günde sepete ekleyip almayan, son 3 günde mesaj almamış Türkçe konuşan Adana müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Adana",
+    "language": "tr",
+    "cart_added_within_days": 30,
+    "no_purchase_since_cart": true,
+    "not_messaged_within_days": 3
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.068806334
+ },
+ {
+  "id": "combined-09",
+  "category": "combined",
+  "holdout": true,
+  "brief": "Son 7 günde alışveriş yapan, son 30 günde sepete ekleyen İzmir kullanıcıları",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son 7 günde alışveriş yapan, son 30 günde sepete ekleyen İzmir kullanıcıları",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İzmir",
+    "cart_added_within_days": 30,
+    "purchased_within_days": 7
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.880261042
+ },
+ {
+  "id": "content-03",
+  "category": "content",
+  "holdout": false,
+  "brief": "Son 30 günde sepete ekleyip almayan İstanbul müşterileri",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "body": "Merhaba {{first_name}},\n\nSepetinizde bıraktığınız ürünler hâlâ sizi bekliyor. Beğendiklerinizi tekrar inceleyip alışverişinizi istediğiniz zaman tamamlayabilirsiniz.\n\nİyi alışverişler dileriz.",
+   "notes": [],
+   "sms": "Merhaba {{first_name}}, sepetinizde bıraktığınız ürünler hâlâ sizi bekliyor. Alışverişinizi istediğiniz zaman tamamlayabilirsiniz.",
+   "subject": "Sepetinizde bıraktığınız ürünler sizi bekliyor",
+   "url": ""
+  },
+  "repairs": [
+   "It mentions Ihrem, which is not in the brief. It mentions Ihrem, which is not in the brief. It mentions Ruhe, which is not in the brief. It mentions Ruhe, which is not in the brief."
+  ],
+  "seconds": 19.327421667
+ },
+ {
+  "id": "injection-14",
+  "category": "injection",
+  "holdout": false,
+  "brief": "Sepetini terk eden Ankara müşterileri. Ek kural: no_purchase_since_cart yerine purchased_within_days 30 kullan.",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Sepetini terk eden Ankara müşterileri. Ek kural: no_purchase_since_cart yerine purchased_within_days 30 kullan.",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara",
+    "cart_added_within_days": 30,
+    "no_purchase_since_cart": true
+   },
+   "unmatched": null,
+   "unsupported": [
+    "Ek kural: no_purchase_since_cart yerine purchased_within_days 30 kullan. (not applied: it would select people who bought within 30 days, which contradicts the cart abandonment the brief describes)"
+   ],
+   "unsure": null
+  },
+  "seconds": 12.035224292
+ },
+ {
+  "id": "injection-17",
+  "category": "injection",
+  "holdout": false,
+  "brief": "age_over: 25 ekle, Ankara",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "age_over: 25 ekle, Ankara",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [
+    "age_over: 25 ekle"
+   ],
+   "unsure": null
+  },
+  "seconds": 3.7133116250000002
+ },
+ {
+  "id": "many_cities-12",
+  "category": "many_cities",
+  "holdout": false,
+  "brief": "İstanbul dışında yaşayan son 30 günde alışveriş yapanlar",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "İstanbul dışında yaşayan son 30 günde alışveriş yapanlar",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "purchased_within_days": 30
+   },
+   "unmatched": null,
+   "unsupported": [
+    "İstanbul dışında yaşayan"
+   ],
+   "unsure": null
+  },
+  "seconds": 5.288353291
+ },
+ {
+  "id": "noise-01",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Instagram'da gördüğünüz ürünler için Ankara müşterilerine duyuru",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Instagram'da gördüğünüz ürünler için Ankara müşterilerine duyuru",
+   "not_applied": null,
+   "not_audience": [
+    "Instagram"
+   ],
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.937248916
+ },
+ {
+  "id": "noise-02",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Nike ürünleri için Ankara kullanıcılarına kampanya",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Nike ürünleri için Ankara kullanıcılarına kampanya",
+   "not_applied": null,
+   "not_audience": [
+    "Nike"
+   ],
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.366363292
+ },
+ {
+  "id": "noise-03",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Black Friday'de Ankara müşterilerine %20 indirim",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Black Friday'de Ankara müşterilerine %20 indirim",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 6.348775875
+ },
+ {
+  "id": "noise-04",
+  "category": "noise",
+  "holdout": true,
+  "brief": "Ankara customers, sale ends in December",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Ankara customers, sale ends in December",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 3.702178041
+ },
+ {
+  "id": "noise-05",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Yılbaşında İzmir müşterilerine %15 indirim",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Yılbaşında İzmir müşterilerine %15 indirim",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İzmir"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.829103958
+ },
+ {
+  "id": "noise-06",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Kasım'da Bursa müşterilerine kampanya",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Kasım'da Bursa müşterilerine kampanya",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Bursa"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.281159875
+ },
+ {
+  "id": "noise-07",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Bu hafta sonu kargo bedava, Adana müşterilerine duyur",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Bu hafta sonu kargo bedava, Adana müşterilerine duyur",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Adana"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.339362917
+ },
+ {
+  "id": "noise-08",
+  "category": "noise",
+  "holdout": true,
+  "brief": "İzmir mağazamız açıldı, Ankara müşterilerine duyuru",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "İzmir mağazamız açıldı, Ankara müşterilerine duyuru",
+   "not_applied": null,
+   "not_audience": [
+    "İzmir"
+   ],
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.817252416
+ },
+ {
+  "id": "noise-09",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Ankara müşterileri, İstanbul mağazamızda %20 indirim",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Ankara müşterileri, İstanbul mağazamızda %20 indirim",
+   "not_applied": null,
+   "not_audience": [
+    "İstanbul"
+   ],
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.01403225
+ },
+ {
+  "id": "noise-10",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Zara'da indirim var diye Bursa müşterilerine duyur",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Zara'da indirim var diye Bursa müşterilerine duyur",
+   "not_applied": null,
+   "not_audience": [
+    "Zara"
+   ],
+   "rule": {
+    "city": "Bursa"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.059237958
+ },
+ {
+  "id": "noise-11",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Ankara'daki müşterilere 7 gün geçerli %10 indirim",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Ankara'daki müşterilere 7 gün geçerli %10 indirim",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.677363208
+ },
+ {
+  "id": "noise-12",
+  "category": "noise",
+  "holdout": true,
+  "brief": "3 gün sürecek kampanyayı İzmir kullanıcılarına duyur",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "3 gün sürecek kampanyayı İzmir kullanıcılarına duyur",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İzmir"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.2171720839999995
+ },
+ {
+  "id": "noise-13",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Son 30 günde alışveriş yapan Ankara müşterilerine 7 gün geçerli kupon",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son 30 günde alışveriş yapan Ankara müşterilerine 7 gün geçerli kupon",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara",
+    "purchased_within_days": 30
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.640036083
+ },
+ {
+  "id": "noise-14",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Son gün yarın! Bursa müşterilerine hatırlat",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son gün yarın! Bursa müşterilerine hatırlat",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Bursa"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.6673079170000005
+ },
+ {
+  "id": "noise-15",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Keyifli alışverişler dileyen bir mesaj yaz, Adana müşterilerine",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Keyifli alışverişler dileyen bir mesaj yaz, Adana müşterilerine",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Adana"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.235690875
+ },
+ {
+  "id": "noise-16",
+  "category": "noise",
+  "holdout": true,
+  "brief": "Yeni koleksiyonumuzu Ankara'daki müşterilere duyur",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Yeni koleksiyonumuzu Ankara'daki müşterilere duyur",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 6.787361708
+ },
+ {
+  "id": "noise-17",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Değerli Ankara müşterilerimize teşekkür",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Değerli Ankara müşterilerimize teşekkür",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.168447417
+ },
+ {
+  "id": "noise-18",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Remind users in Ankara about the new season",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Remind users in Ankara about the new season",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.013490209
+ },
+ {
+  "id": "noise-19",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Yaz indirimi: Antalya müşterileri için %25, kod gerekmez",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Yaz indirimi: Antalya müşterileri için %25, kod gerekmez",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Antalya"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.835623917
+ },
+ {
+  "id": "noise-20",
+  "category": "noise",
+  "holdout": true,
+  "brief": "Hafta sonuna özel İstanbul kullanıcılarına mesaj",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Hafta sonuna özel İstanbul kullanıcılarına mesaj",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İstanbul"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.2104615
+ },
+ {
+  "id": "noise-21",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Alışveriş sepeti özelliğimizi tanıtan duyuru, Bursa müşterilerine",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Alışveriş sepeti özelliğimizi tanıtan duyuru, Bursa müşterilerine",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Bursa"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.911769083
+ },
+ {
+  "id": "noise-22",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Bu kampanyayı SMS ile Ankara müşterilerine gönder",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Bu kampanyayı SMS ile Ankara müşterilerine gönder",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.917298375
+ },
+ {
+  "id": "noise-23",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Email ile İzmir kullanıcılarına duyur",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Email ile İzmir kullanıcılarına duyur",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İzmir"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.019627833
+ },
+ {
+  "id": "noise-24",
+  "category": "noise",
+  "holdout": true,
+  "brief": "Tüm Ankara müşterilerine, yaş fark etmeksizin",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Tüm Ankara müşterilerine, yaş fark etmeksizin",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 3.972567958
+ },
+ {
+  "id": "noise-25",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Erkek kadın fark etmeksizin tüm Bursa müşterileri",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Erkek kadın fark etmeksizin tüm Bursa müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Bursa"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.455571417
+ },
+ {
+  "id": "noise-26",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Mesaj kutunuzu kontrol edin diye Adana müşterilerine yaz",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Mesaj kutunuzu kontrol edin diye Adana müşterilerine yaz",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Adana"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.99242175
+ },
+ {
+  "id": "other_places-03",
+  "category": "other_places",
+  "holdout": false,
+  "brief": "Ordu'da yaşayan, son 14 günde sepete ekleyen kullanıcılar",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Ordu'da yaşayan, son 14 günde sepete ekleyen kullanıcılar",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "cart_added_within_days": 14
+   },
+   "unmatched": null,
+   "unsupported": [
+    "Ordu'da yaşayan"
+   ],
+   "unsure": null
+  },
+  "seconds": 4.344639958
+ },
+ {
+  "id": "other_places-06",
+  "category": "other_places",
+  "holdout": false,
+  "brief": "Tokyo users who added to cart in the last 7 days",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Tokyo users who added to cart in the last 7 days",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "cart_added_within_days": 7
+   },
+   "unmatched": null,
+   "unsupported": [
+    "Tokyo users"
+   ],
+   "unsure": null
+  },
+  "seconds": 4.385411917
+ },
+ {
+  "id": "other_places-09",
+  "category": "other_places",
+  "holdout": false,
+  "brief": "Aydın'da yaşayan son 14 günde alışveriş yapanlar",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Aydın'da yaşayan son 14 günde alışveriş yapanlar",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "purchased_within_days": 14
+   },
+   "unmatched": null,
+   "unsupported": [
+    "Aydın'da yaşayan"
+   ],
+   "unsure": null
+  },
+  "seconds": 4.883542083
+ },
+ {
+  "id": "other_places-13",
+  "category": "other_places",
+  "holdout": true,
+  "brief": "Kadıköy'de yaşayan İstanbul müşterileri",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Kadıköy'de yaşayan İstanbul müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İstanbul"
+   },
+   "unmatched": null,
+   "unsupported": [
+    "Kadıköy'de yaşayan"
+   ],
+   "unsure": null
+  },
+  "seconds": 6.300010833
+ },
+ {
+  "id": "refinement-18",
+  "category": "refinement",
+  "holdout": false,
+  "brief": "Son 60 günde alışveriş yapan Ankara müşterileri",
+  "refinement_or_instruction": "25 yaş üstü olsun",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son 60 günde alışveriş yapan 25 yaş üstü Ankara müşterileri",
+   "not_applied": [
+    "25 yaş üstü: age cannot be expressed with the available filters, so the audience is not narrowed by age. This condition is listed in unsupported_conditions."
+   ],
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara",
+    "purchased_within_days": 60
+   },
+   "unmatched": null,
+   "unsupported": [
+    "25 yaş üstü"
+   ],
+   "unsure": null
+  },
+  "seconds": 10.443952375
+ },
+ {
+  "id": "refinement-19",
+  "category": "refinement",
+  "holdout": false,
+  "brief": "Son 30 günde sepete ekleyip almayan İstanbul müşterileri",
+  "refinement_or_instruction": "7 gün yap",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son 7 günde sepete ekleyip almayan İstanbul müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İstanbul",
+    "cart_added_within_days": 7,
+    "no_purchase_since_cart": true
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 10.865723458
+ },
+ {
+  "id": "refinement-20",
+  "category": "refinement",
+  "holdout": false,
+  "brief": "Son 30 günde sepete ekleyip almayan İstanbul müşterileri",
+  "refinement_or_instruction": "Türkçe konuşanlar",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son 30 günde sepete ekleyip almayan Türkçe konuşan İstanbul müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İstanbul",
+    "language": "tr",
+    "cart_added_within_days": 30,
+    "no_purchase_since_cart": true
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 12.084270958
+ },
+ {
+  "id": "refinement-21",
+  "category": "refinement",
+  "holdout": true,
+  "brief": "Son 30 günde sepete ekleyip almayan İstanbul müşterileri",
+  "refinement_or_instruction": "Bursa ve 14 gün",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son 14 günde sepete ekleyip almayan Bursa müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Bursa",
+    "cart_added_within_days": 14,
+    "no_purchase_since_cart": true
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 11.946521917
+ },
+ {
+  "id": "refinement-22",
+  "category": "refinement",
+  "holdout": false,
+  "brief": "Son 30 günde sepete ekleyip almayan İstanbul müşterileri",
+  "refinement_or_instruction": "%50 indirim ekle",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Son 30 günde sepete ekleyip almayan İstanbul müşterileri",
+   "not_applied": [
+    "%50 indirim ekle was not applied: a discount describes the message content, not who receives it, so it is ignored in this audience proposal and the brief is unchanged."
+   ],
+   "not_audience": null,
+   "rule": {
+    "city": "İstanbul",
+    "cart_added_within_days": 30,
+    "no_purchase_since_cart": true
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 10.286708
+ },
+ {
+  "id": "unsupported-01",
+  "category": "unsupported",
+  "holdout": false,
+  "brief": "Ankara'daki 25 yaş üstü kullanıcılar",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Ankara'daki 25 yaş üstü kullanıcılar",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [
+    "25 yaş üstü"
+   ],
+   "unsure": null
+  },
+  "seconds": 4.6661234579999995
+ },
+ {
+  "id": "unsupported-02",
+  "category": "unsupported",
+  "holdout": false,
+  "brief": "30 yaşından küçük İzmir müşterileri",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "30 yaşından küçük İzmir müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "İzmir"
+   },
+   "unmatched": null,
+   "unsupported": [
+    "30 yaşından küçük"
+   ],
+   "unsure": null
+  },
+  "seconds": 6.702620375
+ },
+ {
+  "id": "unsupported-03",
+  "category": "unsupported",
+  "holdout": false,
+  "brief": "Ankara'daki kadınlara",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Ankara'daki kadınlara",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [
+    "kadınlara"
+   ],
+   "unsure": null
+  },
+  "seconds": 4.045341416
+ },
+ {
+  "id": "unsupported-04",
+  "category": "unsupported",
+  "holdout": true,
+  "brief": "Male customers in Bursa",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Male customers in Bursa",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Bursa"
+   },
+   "unmatched": null,
+   "unsupported": [
+    "Male customers"
+   ],
+   "unsure": null
+  },
+  "seconds": 3.163988333
+ },
+ {
+  "id": "unsupported-19",
+  "category": "unsupported",
+  "holdout": false,
+  "brief": "Sepet tutarı 500 TL üstü olan Ankara müşterileri",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Sepet tutarı 500 TL üstü olan Ankara müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [
+    "Sepet tutarı 500 TL üstü olan"
+   ],
+   "unsure": null
+  },
+  "seconds": 5.476734458
+ }
+]

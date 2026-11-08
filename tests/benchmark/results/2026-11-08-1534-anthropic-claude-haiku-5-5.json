@@ -1,0 +1,182 @@
+[
+ {
+  "id": "noise-21",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Alışveriş sepeti özelliğimizi tanıtan duyuru, Bursa müşterilerine",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Alışveriş sepeti özelliğimizi tanıtan duyuru, Bursa müşterilerine",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Bursa"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.977716333
+ },
+ {
+  "id": "noise-21",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Alışveriş sepeti özelliğimizi tanıtan duyuru, Bursa müşterilerine",
+  "run": 2,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Alışveriş sepeti özelliğimizi tanıtan duyuru, Bursa müşterilerine",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Bursa"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 5.275565666
+ },
+ {
+  "id": "noise-21",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Alışveriş sepeti özelliğimizi tanıtan duyuru, Bursa müşterilerine",
+  "run": 3,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Alışveriş sepeti özelliğimizi tanıtan duyuru, Bursa müşterilerine",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Bursa"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.564720166
+ },
+ {
+  "id": "noise-24",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Tüm Ankara müşterilerine, yaş fark etmeksizin",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Tüm Ankara müşterilerine, yaş fark etmeksizin",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.481488084
+ },
+ {
+  "id": "noise-24",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Tüm Ankara müşterilerine, yaş fark etmeksizin",
+  "run": 2,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Tüm Ankara müşterilerine, yaş fark etmeksizin",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 4.393213375
+ },
+ {
+  "id": "noise-24",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Tüm Ankara müşterilerine, yaş fark etmeksizin",
+  "run": 3,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Tüm Ankara müşterilerine, yaş fark etmeksizin",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Ankara"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 3.976879792
+ },
+ {
+  "id": "noise-25",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Erkek kadın fark etmeksizin tüm Bursa müşterileri",
+  "run": 1,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Erkek kadın fark etmeksizin tüm Bursa müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Bursa"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 6.858468291
+ },
+ {
+  "id": "noise-25",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Erkek kadın fark etmeksizin tüm Bursa müşterileri",
+  "run": 2,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Erkek kadın fark etmeksizin tüm Bursa müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Bursa"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 6.786258292
+ },
+ {
+  "id": "noise-25",
+  "category": "noise",
+  "holdout": false,
+  "brief": "Erkek kadın fark etmeksizin tüm Bursa müşterileri",
+  "run": 3,
+  "outcome": "ok",
+  "detail": {
+   "brief": "Erkek kadın fark etmeksizin tüm Bursa müşterileri",
+   "not_applied": null,
+   "not_audience": null,
+   "rule": {
+    "city": "Bursa"
+   },
+   "unmatched": null,
+   "unsupported": [],
+   "unsure": null
+  },
+  "seconds": 6.07253575
+ }
+]
