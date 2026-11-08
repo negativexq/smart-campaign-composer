@@ -54,6 +54,22 @@ describe("choosing channels", () => {
     return fetchMock;
   }
 
+  it("says when the brief names one channel and the other is chosen too", async () => {
+    const fetchMock = composeStub();
+    const wrapper = mount(ComposeView);
+    await wrapper.find("#brief").setValue("Kış koleksiyonumuz geldi. Sadece e-posta ile duyur.");
+    expect(wrapper.find("[data-testid=channel-conflict]").text()).toContain("email only, but SMS is chosen too");
+
+    // The form still decides: the note does not hold the campaign back.
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/campaigns") as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string).channels).toEqual(["sms", "email"]);
+
+    await wrapper.find("[data-testid=channel-sms]").setValue(false);
+    expect(wrapper.find("[data-testid=channel-conflict]").exists()).toBe(false);
+  });
+
   it("starts with both and sends what was chosen", async () => {
     const fetchMock = composeStub();
     const wrapper = mount(ComposeView);

@@ -4,14 +4,14 @@ Each run of `make benchmark` writes a report here (`.md`) and its raw data (`.js
 
 ## Current
 
-One run of all 247 cases on each model, with the same prompt and cases.
+One run of all 247 cases on each model. The Claude run is newer: it has the noise fixes, the brief read without its links and the rule that the form decides the channels, which the gpt-6-luna run predates.
 
 | Model | Report | As expected | Blocked without need | Shown as unsure | Silently wrong | Forbidden text |
 |---|---|---|---|---|---|---|
-| claude-haiku-5-5 | [2026-11-07-0451](2026-11-07-0451-anthropic-claude-haiku-5-5.md) | 241 | 5 | 1 | 0 | 0 |
+| claude-haiku-5-5 | [2026-11-09-0220](2026-11-09-0220-anthropic-claude-haiku-5-5.md) | 243 | 2 | 2 | 0 | 0 |
 | gpt-6-luna | [2026-11-07-0447](2026-11-07-0447-openai-gpt-6-luna.md) | 242 | 5 | 0 | 0 | 0 |
 
-Three of the Claude run's five blocked cases (noise-21, noise-24 and noise-25) were fixed after it; a partial run of those three passed all 9 times, and a regression run of 62 related cases had all 62 as expected (both listed below). One clean run says little about the next one, and these are cases we wrote ourselves, not real traffic. See [DECISIONS.md](../../../DECISIONS.md#the-benchmark-draws-the-limits-it-is-not-a-target).
+Against Claude's previous full run (2026-11-07-0451 under History: 241, 5, 1, 0, 0), noise-21, noise-24 and noise-25 no longer block. city_forms-14 blocked in both. refinement-16 and unseen_negation-08 blocked in one of the two full runs of 2026-11-09 and not the other, and refinement-05 was shown as unsure in both of them, so one run is not enough to call these changes. One clean run says little about the next one, and these are cases we wrote ourselves, not real traffic. See [DECISIONS.md](../../../DECISIONS.md#the-benchmark-draws-the-limits-it-is-not-a-target).
 
 ## History
 
@@ -19,6 +19,8 @@ Each of these is superseded. They are kept because DECISIONS.md cites them as th
 
 | Report | Cases | Why it is not current |
 |---|---|---|
+| [2026-11-09-0215 claude-haiku-5-5](2026-11-09-0215-anthropic-claude-haiku-5-5.md) | 247 | Same code as the current run, scored by a check that still wanted the link itself in the SMS rather than {{link}} |
+| [2026-11-07-0451 claude-haiku-5-5](2026-11-07-0451-anthropic-claude-haiku-5-5.md) | 247 | Before the noise fixes and before an SMS carried {{link}} |
 | [2026-11-08-1744 claude-haiku-5-5](2026-11-08-1744-anthropic-claude-haiku-5-5.md) | 62 | Partial regression run after those fixes: cases with cart, age or gender words, noise, and some city cases |
 | [2026-11-08-1534 claude-haiku-5-5](2026-11-08-1534-anthropic-claude-haiku-5-5.md) | 3 × 3 | Partial run to check the noise-21, noise-24 and noise-25 fixes |
 | [2026-11-07-0441 gpt-6-luna](2026-11-07-0441-openai-gpt-6-luna.md) | 4 | Partial run to check two prompt rules |

@@ -108,6 +108,8 @@ When the brief has a link, every SMS carries a short link of its own, and openin
 
 The test inbox shows each message the mock provider accepted, as the customer would get it: here the Cart Reminder email in English, with the name and the code filled in, among the Turkish ones. Nothing leaves your machine.
 
+The inbox has fewer messages than the campaign accepted. The mock provider bounces about 3% of messages at random (`MOCK_BOUNCE_RATE`, [mock-provider/main.go](cmd/mock-provider/main.go)), as a real one would for a wrong address. A bounced message reached nobody, so it is reported as bounced and is not in the inbox ([`TestABouncedMessageIsReportedAndNeverReachesTheInbox`](internal/mockprovider/inbox_test.go)). The report counts it under **Bounced**.
+
 ![Test inbox: accepted emails in several languages, and one open English cart reminder with the SONBAHAR15 code box and its button](docs/screenshots/test-inbox.png)
 
 Each SMS carries the code and a short link of its own.

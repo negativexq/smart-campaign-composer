@@ -1,6 +1,6 @@
 # Benchmark: anthropic claude-haiku-5-5
 
-> **Superseded.** Kept as history, not a current result. A partial regression run of 62 cases: every case with a cart, age or gender word, all noise cases and six city cases, after the noise-21, noise-24 and noise-25 fixes. The current report is [2026-11-07-0451-anthropic-claude-haiku-5-5.md](2026-11-07-0451-anthropic-claude-haiku-5-5.md); see the [index](README.md).
+> **Superseded.** Kept as history, not a current result. A partial regression run of 62 cases: every case with a cart, age or gender word, all noise cases and six city cases, after the noise-21, noise-24 and noise-25 fixes. The current report is [2026-11-09-0220-anthropic-claude-haiku-5-5.md](2026-11-09-0220-anthropic-claude-haiku-5-5.md); see the [index](README.md).
 
 2026-11-08 17:44, 1 runs of 62 cases.
 

@@ -1,5 +1,7 @@
 # Benchmark: anthropic claude-haiku-5-5
 
+> **Superseded.** Kept as history, not a current result. The last full run before the noise-21, noise-24 and noise-25 fixes and before an SMS carried the brief's link as {{link}}. The current report is [2026-11-09-0220-anthropic-claude-haiku-5-5.md](2026-11-09-0220-anthropic-claude-haiku-5-5.md); see the [index](README.md).
+
 2026-11-07 04:51, 1 runs of 247 cases.
 
 ## Overall

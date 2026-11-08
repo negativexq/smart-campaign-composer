@@ -551,3 +551,66 @@ func TestAPartReadsOneFilterOrSeveral(t *testing.T) {
 		}
 	}
 }
+
+// A link names a page, not the people: its path is not read as a condition, while
+// the same word in the brief's own text still is.
+func TestALinksPathIsNotACondition(t *testing.T) {
+	t.Parallel()
+	izmir := proposalOf(segment.Spec{City: text("İzmir")})
+	for name, tt := range map[string]struct {
+		brief string
+		want  string
+	}{
+		"cart in the path":             {"İzmir'deki müşterilere yeni sezonu duyur. Link: https://shop.example.com/sepet", ""},
+		"cart in an English path":      {"Tell customers in İzmir about the new season: https://shop.example.com/cart?ref=sms", ""},
+		"a city in the path":           {"İzmir'deki müşterilere yeni sezonu duyur: www.shop.example.com/antalya-kampanyasi", ""},
+		"a duration in a bare address": {"İzmir'deki müşterilere yeni sezon. shop.example.com/son-7-gun", ""},
+		"cart in the text and a link":  {"İzmir'de sepete ürün ekleyenlere hatırlat: https://shop.example.com/yenilikler", "cart"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			proposal := izmir
+			if problems := segment.CheckAgainstBrief(&proposal, tt.brief, groundingCities, nil); problems != nil {
+				t.Fatalf("rejected: %v", problems)
+			}
+			left := strings.Join(proposal.Unmatched, "; ")
+			if tt.want == "" && left != "" {
+				t.Fatalf("left out %q, want nothing", left)
+			}
+			if tt.want != "" && !strings.Contains(left, tt.want) {
+				t.Fatalf("left out %q, want %s", left, tt.want)
+			}
+		})
+	}
+}
+
+// The model's split of the brief still shows the link as written, and a link no part
+// covers is not left for a person to check.
+func TestALinkStaysInTheBriefsParts(t *testing.T) {
+	t.Parallel()
+	brief := "İzmir'deki müşterilere yeni sezonu duyur. Link: https://shop.example.com/sepet"
+	parts := []segment.BriefPart{
+		{Text: "İzmir'deki müşterilere", Kind: segment.PartAudience, UsedAs: segment.FilterList{"city"}},
+		{Text: "yeni sezonu duyur.", Kind: segment.PartMessage},
+	}
+	for name, given := range map[string][]segment.BriefPart{
+		"with the link as a part": append(slices.Clone(parts), segment.BriefPart{Text: "Link: https://shop.example.com/sepet", Kind: segment.PartOther}),
+		"with only the address":   append(slices.Clone(parts), segment.BriefPart{Text: "https://shop.example.com/sepet", Kind: segment.PartOther}),
+		"without the link":        parts,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			proposal := proposalOf(segment.Spec{City: text("İzmir")})
+			proposal.BriefParts = slices.Clone(given)
+			if problems := segment.CheckAgainstBrief(&proposal, brief, groundingCities, nil); problems != nil {
+				t.Fatalf("rejected: %v", problems)
+			}
+			if len(proposal.BriefParts) != len(given) {
+				t.Fatalf("parts %+v, want all %d kept", proposal.BriefParts, len(given))
+			}
+			if len(proposal.Unmatched) != 0 || len(proposal.Unsure) != 0 {
+				t.Fatalf("unmatched %v, unsure %v", proposal.Unmatched, proposal.Unsure)
+			}
+		})
+	}
+}

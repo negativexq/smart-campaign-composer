@@ -18,6 +18,17 @@ var folder = strings.NewReplacer(
 	"Ü", "u", "ü", "u", "Ö", "o", "ö", "o", "Ç", "c", "ç", "c",
 )
 
+// link is a web address as a brief gives one: with a scheme, starting with www., or
+// a domain ending in letters followed by a path, so 3.5/5 or 1.11/30 stay words. A
+// label right before it, as in "Link:", goes with it.
+var link = regexp.MustCompile(`(?i)(?:\b(?:link|linki|bağlantı|url)\s*:?\s*)?(?:(?:\bhttps?://|\bwww\.)\S+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}/\S*)`)
+
+// WithoutLinks drops the web addresses from text. A link's path is a page name, not
+// a word about the audience: /sepet or /izmir says nothing about who should get it.
+func WithoutLinks(text string) string {
+	return link.ReplaceAllString(text, " ")
+}
+
 // Key makes spellings comparable: İzmir, IZMIR and izmir are one word here.
 func Key(text string) string {
 	return strings.ToLower(folder.Replace(text))

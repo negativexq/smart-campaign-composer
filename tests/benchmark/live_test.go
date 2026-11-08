@@ -22,6 +22,7 @@ import (
 
 	"github.com/negativexq/smart-campaign-composer/internal/ai"
 	"github.com/negativexq/smart-campaign-composer/internal/campaign"
+	"github.com/negativexq/smart-campaign-composer/internal/content"
 	"github.com/negativexq/smart-campaign-composer/internal/matching"
 	"github.com/negativexq/smart-campaign-composer/internal/seed"
 	"github.com/negativexq/smart-campaign-composer/internal/segment"
@@ -281,8 +282,13 @@ func runContent(ctx context.Context, service *campaign.Service, c Case) (string,
 		}
 	}
 	noted := len(notes(view)) > 0
-	for _, text := range texts {
+	for channel, text := range texts {
 		for _, word := range c.Must {
+			// An SMS carries the brief's link as {{link}}, which becomes a short link
+			// of its own when it is sent.
+			if channel == "sms" && slices.Contains(content.BriefLinks(c.Brief), word) && strings.Contains(text, "{{link}}") {
+				continue
+			}
 			if !strings.Contains(matching.Key(text), matching.Key(word)) {
 				if noted {
 					return outcomeVisibleMiss, detail
