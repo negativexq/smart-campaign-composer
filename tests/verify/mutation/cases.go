@@ -23,7 +23,7 @@ var cases = []Case{
 	{
 		Name:    "cancel reads real sends",
 		File:    "internal/campaign/schedule.go",
-		Find:    "EXISTS (SELECT 1 FROM campaign_runs r WHERE r.campaign_id = $1)",
+		Find:    "EXISTS (SELECT 1 FROM campaign_runs WHERE campaign_id = $1)",
 		Replace: "runs > 0",
 		Go:      &GoTest{Package: "./internal/campaign/", Run: "^TestAFinishedCampaignCanBeScheduledAgain$"},
 	},
@@ -162,9 +162,9 @@ var cases = []Case{
 	},
 	{
 		Name:     "UI list says schedule stopped",
-		File:     "frontend/src/components/CampaignTable.vue",
-		Find:     "const kind = campaign.schedule?.stopped",
-		Replace:  "const kind = false",
+		File:     "frontend/src/lib/campaignRow.ts",
+		Find:     "if (campaign.schedule?.stopped) return \"Schedule stopped\";",
+		Replace:  "if (false) return \"Schedule stopped\";",
 		Frontend: &FrontendTest{File: "src/views/workspace.test.ts", Name: "shows what each campaign is"},
 	},
 	{
