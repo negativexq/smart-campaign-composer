@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App.vue";
 import type { Campaign } from "../api/campaigns";
 import { currentPath, navigate } from "../lib/navigation";
+import { assumedText } from "../lib/audience";
 
 const campaign: Campaign = {
   id: "c1",
@@ -170,6 +171,12 @@ describe("audience page", () => {
 
     expect(text.indexOf("İstanbul")).toBeLessThan(text.indexOf("1,284"));
     expect(wrapper.find("[data-testid=assumption-note]").text()).toContain("30 days is assumed");
+    expect(wrapper.find("[data-testid=assumption-note]").text()).not.toContain("Assumed:");
+  });
+
+  it("names a value the AI chose as assumed", () => {
+    expect(assumedText("No window given; used 30 days.")).toBe("Assumed: No window given; used 30 days.");
+    expect(assumedText("30 days is assumed.")).toBe("30 days is assumed.");
   });
 
   it("explains each condition in a sentence and how many people it leaves", async () => {

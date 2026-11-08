@@ -2,7 +2,7 @@
 import { computed } from "vue";
 
 import type { AudienceBreakdown, Campaign } from "../api/campaigns";
-import { sourceOf } from "../lib/audience";
+import { assumedText, sourceOf } from "../lib/audience";
 
 const props = defineProps<{ campaign: Campaign; breakdown: AudienceBreakdown | null; failed: boolean }>();
 
@@ -67,7 +67,7 @@ const otherNotes = computed(() => assumptions.value.filter((assumption) => !prop
                   <span class="found" aria-hidden="true">✓ </span><span data-testid="step-source">{{ step.source.quotes.join(", ") }}</span>
                 </template>
                 <span v-else-if="step.source.text" :class="step.source.text === 'From Options' ? 'muted' : 'assumption'" data-testid="step-source">{{ step.source.text }}</span>
-                <span v-for="note in step.notes" :key="note.note" class="assumption small" data-testid="assumption-note">{{ note.note }}</span>
+                <span v-for="note in step.notes" :key="note.note" class="assumption small" data-testid="assumption-note">{{ assumedText(note.note) }}</span>
               </td>
               <td class="number"><strong v-if="step.remaining !== undefined" class="count">{{ formatCount(step.remaining) }}</strong></td>
               <td class="number share muted"><template v-if="step.remaining !== undefined">{{ percentOfAll(step.remaining) }}</template></td>
@@ -76,7 +76,7 @@ const otherNotes = computed(() => assumptions.value.filter((assumption) => !prop
         </table>
       </div>
     </template>
-    <p v-for="note in otherNotes" :key="note.field" class="assumption small" data-testid="assumption-note">{{ note.note }}</p>
+    <p v-for="note in otherNotes" :key="note.field" class="assumption small" data-testid="assumption-note">{{ assumedText(note.note) }}</p>
     <p v-if="failed" class="muted small" data-testid="breakdown-unavailable">The counts could not be loaded. The rule above still applies.</p>
   </div>
 </template>

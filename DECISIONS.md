@@ -286,6 +286,8 @@ Counts used to be recalculated whenever a page opened, so a later consent change
 
 The model returns, for each filter, the exact words of the brief or refinement behind it. The backend keeps a quote only if it really appears in that text, ignoring case and spacing, and a filter without one is shown as added by the AI. A false quote costs only the explanation, so it does not reject the proposal. The check proves the words were written, not that the filter means the same thing, which is what human approval is for.
 
+An assumption is a value the model chose because the brief gave none, such as 30 days for a cart with no time, and it is shown in the warning color with `Assumed:` in front so a person checks it. Claude also wrote assumptions for values the brief gave ("Brief says İzmir; used as city filter"), so every condition looked like a problem while the quote beside it already said where it came from. The prompt now says a stated value is not an assumption, and the backend drops one about a city the brief names, a time it gives, a cart it ties to not buying, a language it asks for or a quiet period the marketer chose. What remains is a value nobody wrote.
+
 ## Regenerating replaces a channel, and a missing name uses the reader's language
 
 Regenerating a channel rewrites its messages in every language and leaves the other channel as it is, including the marketer's edits there. Each channel is checked against the same brief, so the offer stays the same across them. A person with no first name is greeted with their language's own word ("müşterimiz", "there", "Kundschaft"), and the email footer is written in the reader's language too.
