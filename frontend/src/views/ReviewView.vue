@@ -277,7 +277,7 @@ onMounted(async () => {
           <p v-if="'also' in shownEntry && shownEntry.also.length" class="muted small" :data-testid="`review-also-${shownEntry.language}`">Also read by those who read {{ listNames(shownEntry.also.map(languageName)) }}.</p>
           <article v-if="campaign.channels.includes('sms') && (shownEntry.sms || shownGroup.entries.length === 1)" class="message card" data-testid="review-sms">
             <h3 class="muted small">SMS</h3>
-            <PhonePreview :message="shownEntry.version.sms" :recipients="shownRecipients" :language="shownEntry.language" :code="shownEntry.version.discount_code" />
+            <PhonePreview :message="shownEntry.version.sms" :recipients="shownRecipients" :language="shownEntry.language" :code="shownEntry.version.discount_code" :link="shownEntry.version.link" />
           </article>
           <article v-if="campaign.channels.includes('email') && (shownEntry.email || shownGroup.entries.length === 1)" class="message card" data-testid="review-email">
             <h3 class="muted small">Email</h3>

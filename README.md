@@ -38,7 +38,9 @@ Images go through one library, which redraws each upload and removes its hidden 
 
 Say who the campaign is for and what it should say, choose SMS, email or both, and start from the template you picked. A link in the brief becomes the email's button, and every SMS carries it as a short link of its own.
 
-![New campaign: a brief, both channels selected and the Member Night template chosen](docs/screenshots/brief.png)
+A discount code in the brief, here `SONBAHAR15`, is read and shown under Options; it can also be typed there. Every message carries it.
+
+![New campaign: a brief with a discount code and a link, both channels selected, the Cart Reminder template chosen and the code read from the brief under Options](docs/screenshots/brief.png)
 
 ### 3. Check who will receive it
 
@@ -52,13 +54,19 @@ The same step lists the languages the audience reads, with counts. Choosing them
 
 The AI writes the SMS and email in each chosen language. Every field can be edited, the template can be changed, and the preview shows the email as a named customer would see it. You can also ask for a new version in your own words.
 
-![Email step: Turkish and English tabs, the template picker, the editable fields and a preview of the Member Night email](docs/screenshots/email-content.png)
+The SMS writes the code as `{{discount_code}}` and the link as `{{link}}`. The backend fills both in when it sends, and each SMS gets its own short link, counted at its short length.
+
+![SMS step: Turkish and English tabs, the message with its first_name, discount_code and link variables, and a phone preview with the code and a short link filled in](docs/screenshots/sms-content.png)
+
+The email shows the code in a box of its own, in the reader's language, and its button opens the brief's link.
+
+![Email step: the template picker with Cart Reminder chosen, the editable fields and a preview with the SONBAHAR15 code box above the button](docs/screenshots/email-content.png)
 
 ### 5. Approve what goes out
 
 Review shows the final audience, each language's messages, when to send and a last set of checks. A person has to approve, and review asks them to open each language first. After approval the rules and messages cannot change.
 
-![Review step: audience, SMS and email previews, send timing and the checks before approval](docs/screenshots/review.png)
+![Review step: audience, SMS and email previews with the code and short link filled in, send timing and the checks before approval, including the discount code and the link](docs/screenshots/review.png)
 
 ### 6. Follow the send live
 
@@ -78,9 +86,13 @@ When the brief has a link, every SMS carries a short link of its own, and openin
 
 ![Short link opened card: 37 of 403 SMS had their short link opened](docs/screenshots/short-link-opened.png)
 
-The test inbox shows each message the mock provider accepted, as the customer would get it: here the Winter campaigns template in Turkish, with the name filled in. Nothing leaves your machine.
+The test inbox shows each message the mock provider accepted, as the customer would get it: here the Cart Reminder email in English, with the name and the code filled in, among the Turkish ones. Nothing leaves your machine.
 
-![Test inbox: a list of accepted emails in several languages and one open winter sale email in Turkish](docs/screenshots/test-inbox.png)
+![Test inbox: accepted emails in Turkish and English, and one open English cart reminder with the SONBAHAR15 code box and its button](docs/screenshots/test-inbox.png)
+
+Each SMS carries the code and a short link of its own.
+
+![Test inbox: accepted SMS in Turkish and English, and one open English SMS with the code and its short link](docs/screenshots/test-inbox-sms.png)
 
 ### 8. See the whole workspace
 
