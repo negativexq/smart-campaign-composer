@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, useId, watch } from "vue";
 
-import { countCharacters, renderMessage, smsSegments } from "../lib/message";
+import { countCharacters, renderMessage, SAMPLE_SHORT_LINK, smsSegments } from "../lib/message";
 
 const props = defineProps<{
   message: string;
   recipients: { id: number; label: string; first_name: string }[];
   language?: string;
   code?: string;
+  // Whether the SMS's {{link}} has a link behind it; the preview shows a sample short link.
+  link?: string;
 }>();
 
 const id = useId();
@@ -20,7 +22,7 @@ watch(
   },
 );
 const selected = computed(() => props.recipients.find((recipient) => String(recipient.id) === selectedId.value));
-const rendered = computed(() => renderMessage(props.message, { first_name: selected.value?.first_name ?? "", discount_code: props.code }, props.language));
+const rendered = computed(() => renderMessage(props.message, { first_name: selected.value?.first_name ?? "", discount_code: props.code, link: props.link ? SAMPLE_SHORT_LINK : undefined }, props.language));
 const parts = computed(() => smsSegments(rendered.value));
 </script>
 

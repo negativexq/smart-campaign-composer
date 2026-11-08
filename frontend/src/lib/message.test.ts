@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { briefCodes, campaignDiscount, countCharacters, findUnknownVariables, hasCode, longestRenderedLength, reachHint, renderMessage, smsSegments, validCode } from "./message";
+import {
+  briefCodes,
+  campaignDiscount,
+  countCharacters,
+  findUnknownVariables,
+  hasCode,
+  hasLink,
+  longestRenderedLength,
+  reachHint,
+  renderMessage,
+  SHORT_LINK_LENGTH,
+  smsSegments,
+  validCode,
+} from "./message";
 
 describe("countCharacters", () => {
   it("counts Turkish letters as one character each", () => {
@@ -88,6 +101,20 @@ describe("a missing first name", () => {
     expect(renderMessage("Hi {{first_name}}", { first_name: "" }, "tr")).toBe("Hi müşterimiz");
     expect(renderMessage("Hi {{first_name}}", { first_name: "" }, "en")).toBe("Hi there");
     expect(renderMessage("Hi {{first_name}}", { first_name: "" })).toBe("Hi there");
+  });
+});
+
+describe("link", () => {
+  it("counts as a short link, as the backend counts it", () => {
+    expect(SHORT_LINK_LENGTH).toBe("https://url.short/".length + 8);
+    expect(longestRenderedLength("Shop: {{link}}", 0)).toBe(6 + SHORT_LINK_LENGTH);
+  });
+
+  it("is filled in with the short link and refused without a link in the brief", () => {
+    expect(renderMessage("Shop {{ link }}", { first_name: "Ayşe", link: "https://url.short/a1B2c3D4" })).toBe("Shop https://url.short/a1B2c3D4");
+    expect(findUnknownVariables("Shop {{link}}")).toEqual(["link"]);
+    expect(findUnknownVariables("Shop {{link}}", "", "https://shop.example.com")).toEqual([]);
+    expect(hasLink("Shop {{link}}")).toBe(true);
   });
 });
 

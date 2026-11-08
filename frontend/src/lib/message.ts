@@ -1,7 +1,14 @@
-export const SUPPORTED_VARIABLES = ["first_name", "discount_code"] as const;
+export const SUPPORTED_VARIABLES = ["first_name", "discount_code", "link"] as const;
 
 // discount_code is filled only for a campaign that has a code; without one it stays a variable.
-export type MessageValues = { first_name: string; discount_code?: string };
+// link is the SMS's short link, which the backend makes for each message when it is sent.
+export type MessageValues = { first_name: string; discount_code?: string; link?: string };
+
+// Mirrors content.ShortLinkBase: every SMS's {{link}} becomes this and eight characters.
+export const SHORT_LINK_BASE = "https://url.short/";
+export const SHORT_LINK_LENGTH = SHORT_LINK_BASE.length + 8;
+// What a preview shows for {{link}}: each person gets a code of their own when it is sent.
+export const SAMPLE_SHORT_LINK = `${SHORT_LINK_BASE}a1B2c3D4`;
 
 const FALLBACKS = { first_name: "there" };
 const NAME_FALLBACKS: Record<string, string> = { tr: "müşterimiz", en: "there", de: "Kundschaft", fr: "cher client", es: "cliente" };
@@ -21,6 +28,7 @@ export function longestRenderedLength(template: string, longestName: number, cod
     template.replace(VARIABLE, (placeholder, name: string) => {
       if (name === "first_name") return "x".repeat(fill);
       if (name === "discount_code" && code) return code;
+      if (name === "link") return "x".repeat(SHORT_LINK_LENGTH);
       return placeholder;
     }),
   );
@@ -30,6 +38,7 @@ export function renderMessage(template: string, values: MessageValues, language 
   return template.replace(VARIABLE, (placeholder, name: string) => {
     if (name === "first_name") return values.first_name || fallbackName(language);
     if (name === "discount_code" && values.discount_code) return values.discount_code;
+    if (name === "link" && values.link) return values.link;
     return placeholder;
   });
 }
@@ -39,10 +48,18 @@ export function fallbackName(language: string): string {
   return NAME_FALLBACKS[language] ?? FALLBACKS.first_name;
 }
 
-/** Variables the backend will refuse: any it does not know, and discount_code without a code. */
-export function findUnknownVariables(template: string, code = ""): string[] {
+/**
+ * Variables the backend will refuse: any it does not know, discount_code without a code,
+ * and link outside an SMS whose brief has a link.
+ */
+export function findUnknownVariables(template: string, code = "", link = ""): string[] {
   const names = [...template.matchAll(VARIABLE)].map((match) => match[1]);
-  return [...new Set(names.filter((name) => !isSupported(name) || (name === "discount_code" && !code)))];
+  return [...new Set(names.filter((name) => !isSupported(name) || (name === "discount_code" && !code) || (name === "link" && !link)))];
+}
+
+/** Whether a message carries the link. */
+export function hasLink(template: string): boolean {
+  return [...template.matchAll(VARIABLE)].some((match) => match[1] === "link");
 }
 
 /** Whether a message carries the discount code. */

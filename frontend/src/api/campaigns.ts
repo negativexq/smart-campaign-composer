@@ -14,7 +14,7 @@ export type Messages = Record<MessageField, string>;
 export type ContentIssue = { field: string; reason: string; message: string };
 export type SampleRecipient = { id: number; label: string; first_name: string; language?: string };
 export type LanguageAudience = { language: string; total: number; sms: number; email: number; sms_name_length: number; email_name_length: number };
-export type MessageVersion = Messages & { edited: MessageField[]; language?: string; variant?: string; email_design?: EmailDesign | null; discount_code?: string };
+export type MessageVersion = Messages & { edited: MessageField[]; language?: string; variant?: string; email_design?: EmailDesign | null; discount_code?: string; link?: string };
 /** One version of a test: its messages and their other languages. */
 export type VariantContent = MessageVersion & { translations?: MessageVersion[] };
 
@@ -104,6 +104,8 @@ export type Campaign = {
   discount_code?: string;
   /** The code chosen on the form, if one was. */
   form_discount_code?: string | null;
+  /** The brief's link: every SMS carries it as a short link, every email's button opens it. */
+  link?: string;
   not_messaged_within_days?: number | null;
   version: number;
   proposal?: { saved_audience?: string; brief_parts?: BriefPart[] | null; unsure?: string[] | null; not_applied?: string[] | null; not_audience?: string[] | null; assumptions: Assumption[]; evidence?: Evidence[] | null; unsupported_conditions: string[] };
@@ -628,6 +630,9 @@ export type ReportLifecycle = {
   bounced: number;
   waiting: number;
   arrived_unknown: number;
+  /** Accepted messages that carried a short link, and those whose link was opened. */
+  linked?: number;
+  clicked?: number;
 };
 
 export type ReportVariant = {
@@ -639,6 +644,7 @@ export type ReportVariant = {
   bounced: number;
   waiting: number;
   opened: number;
+  clicked?: number;
 };
 
 export type Report = {

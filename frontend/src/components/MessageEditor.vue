@@ -20,6 +20,8 @@ const props = defineProps<{
   noVariables?: boolean;
   // The campaign's discount code. With one, {{discount_code}} is allowed and counted as the code.
   code?: string;
+  // The brief's link, for the SMS only. With one, {{link}} is allowed and counted as a short link.
+  link?: string;
   problem?: string;
   // One field among others in a step that shows state and origin once for all of them.
   plain?: boolean;
@@ -33,7 +35,7 @@ const length = computed(() =>
   countsRendered.value ? longestRenderedLength(props.modelValue, props.longestName ?? 0, props.code ?? "") : countCharacters(props.modelValue),
 );
 const overBy = computed(() => (props.limit ? length.value - props.limit : 0));
-const unknownVariables = computed(() => findUnknownVariables(props.modelValue, props.code ?? ""));
+const unknownVariables = computed(() => findUnknownVariables(props.modelValue, props.code ?? "", props.link ?? ""));
 const streaming = computed(() => props.state === "streaming");
 const hasLocalProblem = computed(() => overBy.value > 0 || unknownVariables.value.length > 0);
 
@@ -102,6 +104,17 @@ function insert(variable: string) {
         @click="insert('discount_code')"
       >
         + discount_code
+      </button>
+      <button
+        v-if="!noVariables && link"
+        type="button"
+        class="insert small mono"
+        data-testid="insert-link"
+        :disabled="streaming"
+        :title="`Becomes a short link to ${link} when sent`"
+        @click="insert('link')"
+      >
+        + link
       </button>
       <span v-if="!plain" class="state small" :class="`state--${display.tone}`" data-testid="message-state">
         <component :is="display.icon" :size="14" aria-hidden="true" />

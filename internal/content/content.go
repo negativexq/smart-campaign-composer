@@ -48,6 +48,17 @@ const (
 	// MinCodeLength and MaxCodeLength bound a discount code.
 	MinCodeLength = 3
 	MaxCodeLength = 30
+	// LinkVariable stands for the brief's link in an SMS. Each message gets a short link
+	// of its own in its place when it is sent, so the SMS stays short and a click can be
+	// counted.
+	LinkVariable = "link"
+	// ShortLinkBase starts every short link. A deployment points this domain at the API's
+	// /api/l/ path; the demo keeps it as a stand-in.
+	ShortLinkBase = "https://url.short/"
+	// ShortCodeLength is how many characters follow ShortLinkBase.
+	ShortCodeLength = 8
+	// ShortLinkLength is what {{link}} counts as in an SMS.
+	ShortLinkLength = len(ShortLinkBase) + ShortCodeLength
 	// VariantB marks the second version of a campaign that compares two.
 	VariantB = "B"
 )
@@ -82,6 +93,9 @@ type Content struct {
 	// DiscountCode fills {{discount_code}}. The backend sets it from the campaign, never
 	// from a model or a request, so approval freezes the code with the text.
 	DiscountCode string `json:"discount_code,omitempty"`
+	// Link is the address the SMS's short link opens and the email's button goes to. The
+	// backend sets it from the brief, so approval freezes it with the text.
+	Link string `json:"link,omitempty"`
 }
 
 // FallbackName is the word used for a person with no name in this language.
@@ -157,6 +171,8 @@ type Limits struct {
 	SkipEmail bool `json:"-"`
 	// Code is the campaign's discount code, or empty.
 	Code string `json:"-"`
+	// Link is the brief's link, or empty.
+	Link string `json:"-"`
 }
 
 // Keep clears text for channels the campaign does not use, whoever wrote it.
@@ -211,7 +227,7 @@ func ParseGenerated(raw []byte, limits Limits, offerSource string) (Content, err
 	generated := limits.Keep(decoded.Content)
 	generated.EmailTemplate, generated.Language, generated.Variant = "", "", ""
 	generated.EmailDesign = nil
-	generated = WithCode(generated, limits.Code)
+	generated = WithLink(WithCode(generated, limits.Code), limits.Link)
 	issues := append(CheckMessages(generated, limits), CheckDiscounts(generated, offerSource)...)
 	if len(issues) > 0 {
 		return Content{}, &ValidationError{Issues: issues}
@@ -257,10 +273,11 @@ func CheckMessages(c Content, limits Limits) []Issue {
 		{FieldEmailBody, "Email body", c.EmailBody, MaxEmailBody, limits.EmailName, limits.SkipEmail},
 	} {
 		if !rule.skip {
-			issues = append(issues, checkField(rule.field, rule.label, rule.text, rule.max, rule.nameLength, c.DiscountCode)...)
+			issues = append(issues, checkField(rule.field, rule.label, rule.text, rule.max, rule.nameLength, c.DiscountCode, rule.field == FieldSMS && c.Link != "")...)
 		}
 	}
 	issues = append(issues, CheckCode(c, limits)...)
+	issues = append(issues, CheckLink(c, limits)...)
 	if !limits.SkipEmail {
 		if c.EmailTemplate != "" && !usableTemplate(c) {
 			issues = append(issues, Issue{FieldEmailTemplate, "unknown_template", "This email template does not exist."})
@@ -273,7 +290,7 @@ func CheckMessages(c Content, limits Limits) []Issue {
 	return issues
 }
 
-func checkField(field, label, text string, limit, nameLength int, code string) []Issue {
+func checkField(field, label, text string, limit, nameLength int, code string, link bool) []Issue {
 	if strings.TrimSpace(text) == "" {
 		return []Issue{{field, "empty", label + " is empty."}}
 	}
@@ -289,6 +306,13 @@ func checkField(field, label, text string, limit, nameLength int, code string) [
 		case match[1] == CodeVariable:
 			issues = append(issues, Issue{field, "unknown_variable", fmt.Sprintf(
 				"%s uses {{%s}}, but this campaign has no discount code.", label, CodeVariable)})
+		case match[1] == LinkVariable && link:
+		case match[1] == LinkVariable && field != FieldSMS:
+			issues = append(issues, Issue{field, "unknown_variable", fmt.Sprintf(
+				"%s uses {{%s}}, which is only for the SMS. The email's button carries the link.", label, LinkVariable)})
+		case match[1] == LinkVariable:
+			issues = append(issues, Issue{field, "unknown_variable", fmt.Sprintf(
+				"%s uses {{%s}}, but the brief has no link.", label, LinkVariable)})
 		default:
 			issues = append(issues, Issue{field, "unknown_variable", fmt.Sprintf(
 				"%s uses {{%s}}; only {{first_name}} and {{discount_code}} are available.", label, match[1])})
@@ -313,7 +337,7 @@ func checkEmailDesign(c Content, limits Limits) []Issue {
 		{FieldEmailCTALabel, "Button label", c.EmailCTALabel, MaxEmailCTALabel},
 	} {
 		if strings.TrimSpace(rule.text) != "" {
-			issues = append(issues, checkField(rule.field, rule.label, rule.text, rule.max, limits.EmailName, c.DiscountCode)...)
+			issues = append(issues, checkField(rule.field, rule.label, rule.text, rule.max, limits.EmailName, c.DiscountCode, false)...)
 		}
 	}
 	label, link := strings.TrimSpace(c.EmailCTALabel), strings.TrimSpace(c.EmailCTAURL)
@@ -343,6 +367,32 @@ func CheckLinks(c Content, source string) []Issue {
 	return []Issue{{FieldEmailCTAURL, "invented_link", "The button link is not in the brief. Leave it out or use a link from the brief."}}
 }
 
+// Links lists the links in text, each once, in order.
+func Links(text string) []string {
+	found := []string{}
+	for _, link := range linkPattern.FindAllString(text, -1) {
+		if !slices.Contains(found, link) {
+			found = append(found, link)
+		}
+	}
+	return found
+}
+
+// CheckTextLinks refuses a link in generated text that nobody gave, as CheckLinks does
+// for the button: a model must not make up where people are sent.
+func CheckTextLinks(c Content, source string) []Issue {
+	issues := []Issue{}
+	for _, field := range textFields(c) {
+		for _, link := range linkPattern.FindAllString(field.text, -1) {
+			if !strings.Contains(source, link) {
+				issues = append(issues, Issue{field.name, "invented_link", fmt.Sprintf("It links to %s, which is not in the brief. Use a link from the brief.", link)})
+				break
+			}
+		}
+	}
+	return issues
+}
+
 // RenderedLength is the length in characters once variables are filled with a
 // name of nameLength characters, or the fallback if that is longer, and the code.
 func RenderedLength(template string, nameLength int, code string) int {
@@ -354,6 +404,8 @@ func RenderedLength(template string, nameLength int, code string) int {
 			length += fill - utf8.RuneCountInString(match[0])
 		case match[1] == CodeVariable && code != "":
 			length += utf8.RuneCountInString(code) - utf8.RuneCountInString(match[0])
+		case match[1] == LinkVariable:
+			length += ShortLinkLength - utf8.RuneCountInString(match[0])
 		}
 	}
 	return length
@@ -374,6 +426,79 @@ func Render(template, firstName, code string) string {
 		}
 		return variable
 	})
+}
+
+// RenderSMS fills in an SMS for one person: their name, the code and their short link.
+func RenderSMS(c Content, firstName, shortLink string) string {
+	text := Render(c.SMS, firstName, c.DiscountCode)
+	if shortLink == "" {
+		return text
+	}
+	return variablePattern.ReplaceAllStringFunc(text, func(variable string) string {
+		if variablePattern.FindStringSubmatch(variable)[1] == LinkVariable {
+			return shortLink
+		}
+		return variable
+	})
+}
+
+// ShortLink is the address a message's short code stands for in an SMS.
+func ShortLink(code string) string {
+	return ShortLinkBase + code
+}
+
+// BriefLinks lists the links a brief names, each once, in order.
+func BriefLinks(text string) []string {
+	return Links(text)
+}
+
+// WithLink sets a version's link and turns the link written out in the SMS into
+// {{link}}, so every SMS gets a short link in its place. The email keeps the link on
+// its button, where its length does not matter.
+func WithLink(c Content, link string) Content {
+	c.Link = link
+	if link == "" {
+		return c
+	}
+	c.SMS = linkPattern.ReplaceAllStringFunc(c.SMS, func(found string) string {
+		if found == link {
+			return "{{" + LinkVariable + "}}"
+		}
+		return found
+	})
+	return c
+}
+
+// HasLink says whether text carries {{link}}.
+func HasLink(text string) bool {
+	for _, match := range variablePattern.FindAllStringSubmatch(text, -1) {
+		if match[1] == LinkVariable {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckLink holds a version to the brief's link: every SMS carries it as a short link,
+// and every email's button opens it. A version written for another link, or for none,
+// cannot go out with this one.
+func CheckLink(c Content, limits Limits) []Issue {
+	var issues []Issue
+	if c.Link != limits.Link {
+		issues = append(issues, Issue{FieldSMS, "link_changed", "These messages were written for another link. Write them again."})
+	}
+	if limits.Link == "" {
+		return issues
+	}
+	if !limits.SkipSMS && strings.TrimSpace(c.SMS) != "" && !HasLink(c.SMS) {
+		issues = append(issues, Issue{FieldSMS, "missing_link", fmt.Sprintf(
+			"SMS does not carry the link %s from the brief. Add {{%s}} where it goes; it becomes a short link when sent.", limits.Link, LinkVariable)})
+	}
+	if !limits.SkipEmail && strings.TrimSpace(c.EmailBody) != "" && strings.TrimSpace(c.EmailCTAURL) != limits.Link {
+		issues = append(issues, Issue{FieldEmailCTAURL, "missing_link", fmt.Sprintf(
+			"The email's button must open %s from the brief.", limits.Link)})
+	}
+	return issues
 }
 
 // ValidCode says whether code can be a discount code: capital letters, digits and

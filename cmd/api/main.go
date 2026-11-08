@@ -89,6 +89,7 @@ func run(logger *slog.Logger) error {
 	if dir := os.Getenv("ASSET_DIR"); dir != "" {
 		httpapi.RegisterAssets(mux, campaigns, asset.DiskStore{Dir: dir})
 	}
+	httpapi.RegisterShortLinks(mux, campaigns)
 	if secret := os.Getenv("UNSUBSCRIBE_SECRET"); secret != "" {
 		httpapi.RegisterUnsubscribe(mux, campaigns, secret)
 	}
