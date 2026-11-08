@@ -40,7 +40,7 @@ Say who the campaign is for and what it should say, choose SMS, email or both, a
 
 A discount code in the brief, here `SONBAHAR15`, is read and shown under Options; it can also be typed there. Every message carries it.
 
-![New campaign: a brief with a discount code and a link, both channels selected, the Cart Reminder template chosen and the code read from the brief under Options](docs/screenshots/brief.png)
+![New campaign: a brief with a discount code and a link, both channels selected, the Cart Reminder template chosen and the code read from the brief under Options, with the four examples below](docs/screenshots/brief.png)
 
 ### 3. Check who will receive it
 
@@ -58,7 +58,7 @@ The SMS writes the code as `{{discount_code}}` and the link as `{{link}}`. The b
 
 ![SMS step: Turkish and English tabs, the message with its first_name, discount_code and link variables, and a phone preview with the code and a short link filled in](docs/screenshots/sms-content.png)
 
-The email shows the code in a box of its own, in the reader's language, and its button opens the brief's link.
+The email shows the code in a box of its own, in the reader's language, so the text written for it leaves the code out, and its button opens the brief's link.
 
 ![Email step: the template picker with Cart Reminder chosen, the editable fields and a preview with the SONBAHAR15 code box above the button](docs/screenshots/email-content.png)
 
@@ -88,11 +88,11 @@ When the brief has a link, every SMS carries a short link of its own, and openin
 
 The test inbox shows each message the mock provider accepted, as the customer would get it: here the Cart Reminder email in English, with the name and the code filled in, among the Turkish ones. Nothing leaves your machine.
 
-![Test inbox: accepted emails in Turkish and English, and one open English cart reminder with the SONBAHAR15 code box and its button](docs/screenshots/test-inbox.png)
+![Test inbox: accepted emails in several languages, and one open English cart reminder with the SONBAHAR15 code box and its button](docs/screenshots/test-inbox.png)
 
 Each SMS carries the code and a short link of its own.
 
-![Test inbox: accepted SMS in Turkish and English, and one open English SMS with the code and its short link](docs/screenshots/test-inbox-sms.png)
+![Test inbox: accepted SMS in several languages, and one open English SMS with the code and its short link](docs/screenshots/test-inbox-sms.png)
 
 ### 8. See the whole workspace
 
@@ -167,18 +167,21 @@ You should see an empty Overview with a `Mock AI` badge at the top and Database,
 
 ### 5. Send your first campaign
 
-1. Open **Templates**, find **Flash Sale** and select **Use template**.
-2. Paste this brief, then select **Find audience**:
+1. Open **Templates**, find **Cart Reminder** and select **Use template**.
+2. Under **Start from an example**, select the first one. It fills in this brief:
 
    ```text
-   Send a 30% discount reminder to customers in Istanbul who added to their cart in the last 30 days and did not buy. Link: https://example.com/sale
+   Remind customers in İzmir who added to their cart in the last 14 days and did not buy. Give them 15% off with the code SEPET15. Link: https://shop.example.com/cart
    ```
 
-3. Read the conditions and the audience count, about 570 people, then select **Continue to SMS**.
-4. Check the SMS, select **Continue to email**, check the email, and select **Continue to review**.
-5. On review, open each language's tab. Then select **Approve and send**. No real message is sent.
+   Open **Options** to see the code `SEPET15` read from the brief. Then select **Find audience**.
+3. Read the conditions: city is İzmir, added to cart in the last 14 days, no purchase after. They match about 110 people; fewer can be reached, since some did not consent to SMS or email. Select **Continue to SMS**.
+4. Check the SMS: it carries the code and a short link in place of the brief's link. Select **Continue to email**, check that the email shows the code in a box above its button, and select **Continue to review**.
+5. On review, open each language's tab, then select **Approve and send**; the button says how many messages go out, about 170. No real message is sent.
 6. The campaign page shows progress live. A send this size finishes in about 20 seconds. Open its **Deliveries** tab for the report.
-7. Open the test inbox at http://localhost:8083 to read the messages as customers would get them.
+7. Open the test inbox at http://localhost:8083 to read the messages as customers would get them. Each SMS has a short link of its own; opening one redirects to the brief's link and counts a click.
+
+The other examples show a Turkish brief with its percent in words, a win-back offer to everyone who has not bought in 60 days, and a link without a code.
 
 The test inbox shows each SMS and email the mock provider accepted, with names filled in. Opening one there sends a signed event back to the app, and the campaign's Deliveries report counts it as opened or read. The inbox is kept in the provider's journal with the messages, up to the last 5,000, so it comes back after a restart. Removing the provider's volume empties it, while the opens already reported stay in the database.
 

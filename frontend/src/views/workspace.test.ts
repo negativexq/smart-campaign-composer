@@ -1000,3 +1000,22 @@ describe("activity wording", () => {
     expect(describeActivity(entry).detail).toContain("2 unsupported conditions");
   });
 });
+
+describe("a brief with more than one link", () => {
+  it("says so before anything is saved, but takes the same link twice", async () => {
+    window.history.replaceState({}, "", "/campaigns/new");
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ audiences: [], notifications: [], designs: [] }) }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(ComposeView);
+    await flushPromises();
+    const submit = () => wrapper.find("button[type=submit]");
+
+    await wrapper.find("textarea").setValue("Remind Bursa about their cart: https://shop.example.com/a and https://shop.example.com/b.");
+    expect(wrapper.text()).toContain("The brief has more than one link.");
+    expect(submit().attributes("disabled")).toBeDefined();
+
+    await wrapper.find("textarea").setValue("Remind Bursa about their cart: https://shop.example.com/a, again https://shop.example.com/a.");
+    expect(wrapper.text()).not.toContain("more than one link");
+    expect(submit().attributes("disabled")).toBeUndefined();
+  });
+});

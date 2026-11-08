@@ -8,7 +8,8 @@ import ValidationNotice from "../components/ValidationNotice.vue";
 import { ruleText } from "../lib/audience";
 import { defaultChannels } from "../lib/preferences";
 import { EMAIL_TEMPLATES, isCustomTemplate } from "../lib/emailTemplates";
-import { briefCodes, validCode } from "../lib/message";
+import { BRIEF_EXAMPLES as suggestions } from "../lib/briefExamples";
+import { briefCodes, briefLinks, validCode } from "../lib/message";
 import { navigate } from "../lib/navigation";
 import { requestAudience } from "../lib/pendingAudience";
 
@@ -22,6 +23,7 @@ const offer = ref<number | "">("");
 const code = ref("");
 const typedCode = computed(() => code.value.trim().toUpperCase());
 const codesInBrief = computed(() => briefCodes(brief.value));
+const linksInBrief = computed(() => briefLinks(brief.value));
 const quietDays = ref("");
 // Set by "Use template". It needs a channel to apply to, so email must stay chosen.
 const namedTemplate = new URLSearchParams(window.location.search).get("template") ?? "";
@@ -53,13 +55,6 @@ onMounted(async () => {
   }
 });
 
-const suggestions = [
-  "Remind customers in İstanbul who added to their cart in the last 7 days and did not buy. Link: https://example.com/cart",
-  "Send a 10% discount to customers who have not purchased in the last 60 days. Link: https://example.com/offer",
-  "Tell customers who purchased in the last 30 days about our new collection. Link: https://example.com/new",
-  "Tell customers in Ankara about free shipping this weekend. Link: https://example.com/shipping",
-];
-
 const validShare = computed(() => Number.isInteger(firstShare.value) && Number(firstShare.value) >= 1 && Number(firstShare.value) <= 99);
 
 const unavailableReason = computed(() => {
@@ -69,6 +64,7 @@ const unavailableReason = computed(() => {
   if (typedCode.value && !validCode(typedCode.value)) return "Enter a discount code of 3 to 30 capital letters, digits or hyphens.";
   if (codesInBrief.value.length > 1) return `The brief names more than one code: ${codesInBrief.value.join(", ")}. Keep one.`;
   if (typedCode.value && codesInBrief.value.length === 1 && codesInBrief.value[0] !== typedCode.value) return `The brief names the code ${codesInBrief.value[0]}. Use the same code here, or leave this empty.`;
+  if (linksInBrief.value.length > 1) return "The brief has more than one link. Every SMS carries one short link, so keep the one people should open.";
   if (abTest.value && !validShare.value) return "Enter a share for version A from 1 to 99.";
   return undefined;
 });

@@ -289,6 +289,20 @@ describe("review", () => {
     expect(entered.wrapper.text()).toContain("Every message carries the 25% discount you entered.");
   });
 
+  it("says how each channel it sends on carries the code", async () => {
+    const coded = { ...ready, discount_code: "KIS15", content: { ...ready.content!, sms: "Hi {{discount_code}}", discount_code: "KIS15" } };
+    const both = await open(coded);
+    expect(both.wrapper.text()).toContain("KIS15: every SMS carries it, and every email shows it in a box below the text.");
+
+    const smsOnly = await open({ ...coded, channels: ["sms"] });
+    expect(smsOnly.wrapper.text()).toContain("KIS15: every SMS carries it.");
+    expect(smsOnly.wrapper.text()).not.toContain("in a box");
+
+    const emailOnly = await open({ ...coded, channels: ["email"] });
+    expect(emailOnly.wrapper.text()).toContain("KIS15: every email shows it in a box below the text.");
+    expect(emailOnly.wrapper.text()).not.toContain("every SMS carries it");
+  });
+
   it("names the brief's link and says how each channel carries it", async () => {
     const link = "https://shop.example.com/sonbahar";
     const { wrapper } = await open({ ...ready, link, content: { ...ready.content!, sms: "Shop {{link}}", link } });
