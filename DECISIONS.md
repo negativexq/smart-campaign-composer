@@ -417,6 +417,8 @@ Work is skipped only where its answer cannot have changed. A finished run's tota
 
 The start of each version's SMS and email subject, which list rows show, is kept in two generated columns of `campaign_versions` rather than read out of `content` on every list request. Reading it there cut how many list requests a second the API served by 22–30% against the same code without previews, because each request held one of the pool's 8 connections longer. PostgreSQL fills generated columns on every write, so unlike the sort keys above they cannot fall behind and need no code on the write path. See step 8 of [the performance log](docs/performance.md#step-8-the-list-preview).
 
+The analytics channel totals read a window's events once, grouped by delivery, and join them in one pass, as the report does. Looking up each delivery's events took 86–93 ms over 36,525 deliveries and grew with every one; the single pass takes 33–40 ms ([step 9](docs/performance.md#step-9-analytics-channel-totals)). It still grows with the window, so a per-day summary stays the answer once there are months of history.
+
 ## Messages left in flight are taken back, and may stay unknown
 
 A worker that crashes after claiming a message leaves that row in SENDING with a lease. The worker loop checks for expired leases every second and takes those rows back. We cannot tell whether the provider received the message, so this counts as an attempt with the outcome `timeout`. If attempts run out, the delivery ends as UNKNOWN instead of being sent again or called failed. A stale worker cannot overwrite the result, because `claim_token` no longer matches.

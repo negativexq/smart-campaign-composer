@@ -64,7 +64,20 @@ func (s *Service) Analytics(ctx context.Context, days int) (Analytics, error) {
 	since := s.now().AddDate(0, 0, -days)
 	result := Analytics{Days: days}
 
+	// Arrival is read in one pass over the window's events and joined once, as the
+	// report does: a lookup per delivery made this query grow with every delivery
+	// in the window (docs/performance.md, step 9). An event is received after its
+	// delivery was created, so received_at bounds the events without missing one.
 	rows, err := s.db.Query(ctx, `
+		WITH arrival AS (
+			SELECT delivery_id,
+			       max(occurred_at) FILTER (WHERE event_type = 'bounced') AS bounced_at,
+			       CASE WHEN count(*) FILTER (WHERE event_type = 'bounced') = 0
+			            THEN min(occurred_at) FILTER (WHERE event_type IN ('delivered', 'opened')) END AS delivered_at,
+			       bool_or(event_type = 'opened') AS opened
+			FROM delivery_events WHERE received_at >= $1
+			GROUP BY delivery_id
+		)
 		SELECT d.channel, count(*),
 		       count(*) FILTER (WHERE d.status = 'SKIPPED'),
 		       count(*) FILTER (WHERE d.status = 'SENT'),
@@ -74,10 +87,9 @@ func (s *Service) Analytics(ctx context.Context, days int) (Analytics, error) {
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NOT NULL),
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.bounced_at IS NOT NULL),
 		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL),
-		       count(*) FILTER (WHERE opened.delivery_id IS NOT NULL)
+		       count(*) FILTER (WHERE arrival.opened)
 		FROM campaign_deliveries d
-		LEFT JOIN delivery_events opened ON opened.delivery_id = d.id AND opened.event_type = 'opened'
-		`+arrivalLateral+`
+		LEFT JOIN arrival ON arrival.delivery_id = d.id
 		WHERE d.created_at >= $1
 		GROUP BY d.channel ORDER BY d.channel`, since)
 	if err != nil {
