@@ -28,7 +28,7 @@ import { channelLabel, firstMessagePath } from "../lib/campaignSteps";
 import { isDraftStatus } from "../lib/campaignStatus";
 import { audienceLanguages, recipientsFor, listNames, languageName, longestNameFor, missingLanguages, missingSecondVersion, variantCount, variantPeople, variantShare, versionFor } from "../lib/languages";
 import { customTemplateName, EMAIL_TEMPLATES, isCustomTemplate } from "../lib/emailTemplates";
-import { warningTitle } from "../lib/message";
+import { warningTitle, warningTone } from "../lib/message";
 import { navigate } from "../lib/navigation";
 
 const EMAIL_FIELDS: MessageField[] = ["email_subject", "email_preheader", "email_headline", "email_body", "email_cta_label", "email_cta_url"];
@@ -361,7 +361,7 @@ onBeforeUnmount(() => controller?.abort());
     </ValidationNotice>
     <ValidationNotice v-if="saveError" tone="error" title="Your changes were not saved">{{ saveError }}</ValidationNotice>
     <template v-if="!generating && !dirty">
-      <ValidationNotice v-for="warning in warnings" :key="warning.field + warning.reason" tone="warning" :title="warningTitle(warning)">
+      <ValidationNotice v-for="warning in warnings" :key="warning.field + warning.reason" :tone="warningTone(warning)" :title="warningTitle(warning)">
         {{ warning.message }}
       </ValidationNotice>
     </template>

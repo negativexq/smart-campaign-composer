@@ -14,7 +14,8 @@ import (
 
 const shopLink = "https://shop.example.com/sonbahar"
 
-var shortLink = regexp.MustCompile(`https://url\.short/([A-Za-z0-9_-]{8})\b`)
+// A code may end in "-" or "_", so the end is not a word boundary.
+var shortLink = regexp.MustCompile(`https://url\.short/([A-Za-z0-9_-]{8})(?:[^A-Za-z0-9_-]|$)`)
 
 // Issue #29: the brief's link reached the email's button and no SMS.
 func TestEverySMSSentCarriesItsOwnShortLink(t *testing.T) {

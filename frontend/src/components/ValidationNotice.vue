@@ -58,7 +58,12 @@ const icon = computed(() => ({ success: CheckCircle2, warning: TriangleAlert, er
   background: color-mix(in srgb, var(--color-error) 6%, var(--color-surface));
 }
 
+.notice--info {
+  border-color: color-mix(in srgb, var(--color-primary) 25%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+}
+
 .notice--info .icon {
-  color: var(--color-text-muted);
+  color: var(--color-primary);
 }
 </style>

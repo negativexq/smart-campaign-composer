@@ -21,7 +21,7 @@ A focused professional tool, not an AI chatbot or a generic analytics template. 
 | `--color-border-input` | `#858FA1` | Input borders, 3:1 against the surface |
 | `--color-text` | `#172033` | Primary text |
 | `--color-text-muted` | `#5B6A80` | Secondary text |
-| `--color-primary` | `#315BE8` | Primary actions, active steps, key selections only |
+| `--color-primary` | `#315BE8` | Primary actions, active steps, key selections, and a light tint on info notes |
 | `--color-primary-soft` | `#EAF0FF` | Active navigation fill |
 | `--color-ai` | `#6658B8` | Small AI marker only, never a large area |
 | `--color-success` | `#047857` | Success |

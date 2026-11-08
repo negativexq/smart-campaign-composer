@@ -596,7 +596,7 @@ func CheckButton(c Content) []Issue {
 	if strings.TrimSpace(c.EmailBody) == "" || strings.TrimSpace(c.EmailCTALabel) != "" || strings.TrimSpace(c.EmailCTAURL) != "" {
 		return nil
 	}
-	return []Issue{{FieldEmailCTAURL, ReasonNoButton, "This email has no button, because the brief has no link. Add one in the email's Button section, or put a link in the brief and write it again."}}
+	return []Issue{{FieldEmailCTAURL, ReasonNoButton, "The brief has no link, so this email has no button. You can add one in the Button section, or put a link in the brief and write the messages again."}}
 }
 
 // CheckDiscounts compares percentages in the messages with those in source.
