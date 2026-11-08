@@ -2,7 +2,7 @@
 import { computed } from "vue";
 
 import type { AudienceBreakdown, Campaign } from "../api/campaigns";
-import { conditionSentence, sourceOf } from "../lib/audience";
+import { assumedText, conditionSentence, sourceOf } from "../lib/audience";
 
 const props = defineProps<{
   campaign: Campaign;
@@ -71,7 +71,7 @@ const rows = computed(() => {
             <span v-else-if="row.source.text" class="muted" data-testid="funnel-source">{{ row.source.text }}</span>
           </template>
         </div>
-        <span v-for="note in row.notes" :key="note" class="assumption small" data-testid="funnel-note">{{ note }}</span>
+        <span v-for="note in row.notes" :key="note" class="assumption small" data-testid="funnel-note">{{ assumedText(note) }}</span>
       </li>
     </ol>
   </section>

@@ -53,6 +53,11 @@ export function sourceOf(campaign: Campaign, condition: Condition): { quotes: st
   return { quotes, text: "Added by AI, not in your brief" };
 }
 
+/** An assumption names a value the AI chose, so it reads as one and not as a problem. */
+export function assumedText(note: string): string {
+  return /\bassum/i.test(note) ? note : `Assumed: ${note}`;
+}
+
 /** The rules an audience part of the brief became. */
 export function partRules(campaign: Campaign, part: BriefPart): string[] {
   return campaign.conditions.filter((condition) => part.used_as?.includes(condition.field)).map(ruleText);

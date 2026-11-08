@@ -51,10 +51,43 @@ func CheckAgainstBrief(proposal *Proposal, brief string, cities []string, chosen
 	checkBehavior(proposal, problems, reading)
 	checkLanguage(proposal, problems, reading)
 	checkLeftOut(proposal, reading)
+	dropStatedAssumptions(proposal, brief, cities, reading, chosenQuietDays)
 	if len(problems.Problems) == 0 {
 		return nil
 	}
 	return problems
+}
+
+// dropStatedAssumptions removes assumptions about values the brief states, or the
+// marketer chose. An assumption is shown as a value someone should check, so one that
+// only repeats the brief reads as a problem where there is none.
+func dropStatedAssumptions(proposal *Proposal, brief string, cities []string, reading briefReading, chosenQuietDays *int) {
+	spec := proposal.Segment
+	stated := func(field string) bool {
+		days := map[string]*int{
+			"cart_added_within_days":    spec.CartAddedWithinDays,
+			"purchased_within_days":     spec.PurchasedWithinDays,
+			"not_purchased_within_days": spec.NotPurchasedWithinDays,
+			"not_messaged_within_days":  spec.NotMessagedWithinDays,
+		}
+		switch field {
+		case "city":
+			return spec.City != nil && slices.ContainsFunc(matching.Cities(brief, cities), func(mention matching.CityMention) bool {
+				return mention.City == *spec.City && !mention.Excluded
+			})
+		case "language":
+			return spec.Language != nil && reading.languages[*spec.Language]
+		case "no_purchase_since_cart":
+			return spec.noPurchaseSinceCart() && reading.hasCart && reading.notBought
+		case "not_messaged_within_days":
+			if spec.NotMessagedWithinDays != nil && chosenQuietDays != nil && *chosenQuietDays == *spec.NotMessagedWithinDays {
+				return true
+			}
+		}
+		value, isWindow := days[field]
+		return isWindow && value != nil && saysDays(reading.durations, *value)
+	}
+	proposal.Assumptions = slices.DeleteFunc(proposal.Assumptions, func(assumption Assumption) bool { return stated(assumption.Field) })
 }
 
 func checkCity(proposal *Proposal, problems *ValidationError, brief string, cities []string) {
