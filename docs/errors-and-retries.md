@@ -140,7 +140,7 @@ The provider's 429 only keeps extra messages from being accepted. It does not sh
 
 ## Measured behavior
 
-Each scenario below sent the same campaign, 15,411 messages over email and SMS (8,198 and 7,213), on the profiling setup of [performance.md](performance.md#sending-with-the-new-limiter): one worker, the mock provider with the fault named, 100 calls a second per channel. Without faults the same send takes 88 s. Each scenario ran once. These runs counted each call for 1 s after its answer; with the 1.1 s window a send without faults takes about 9% longer.
+Each scenario below sent the same campaign, 15,411 messages over email and SMS (8,198 and 7,213), on the profiling setup of [performance.md](performance.md#sending-with-the-new-limiter): one worker, the mock provider with the fault named, 100 calls a second per channel. Without faults the same send takes 88 s. Each scenario ran once. These runs counted each call for 1 s after its answer; with the 1.1 s window a send without faults takes about 9% longer, 95.7–96.4 s when [measured again](performance.md#measured-again-on-2026-11-08).
 
 | Scenario | Send time | Final statuses | Calls per message | Highest calls in a second at the provider | Accepted twice |
 |---|---|---|---|---|---|

@@ -55,7 +55,7 @@ After these changes all 23 faults are caught. A 24th was added with the 1.1 s li
 
 The verification suites in [tests/verify](../tests/verify/README.md) run against a stack of their own and keep their results.
 
-**Security probes** ([2026-11-06-1939-security](../tests/verify/results/2026-11-06-1939-security.md)): 19 of 19 pass. Each probe has a control, a valid request that must work, so a refusal shows the check and not a malformed request.
+**Security probes** ([2026-11-08-1650-security](../tests/verify/results/2026-11-08-1650-security.md), on `main` at ed6f11a; earlier [2026-11-06-1939](../tests/verify/results/2026-11-06-1939-security.md)): 19 of 19 pass in both runs. Each probe has a control, a valid request that must work, so a refusal shows the check and not a malformed request.
 
 | Area | What was probed |
 |---|---|
@@ -67,11 +67,11 @@ The verification suites in [tests/verify](../tests/verify/README.md) run against
 | Exports | CSV cells that start a formula are escaped. |
 | Request size | 2 MB, deeply nested and broken bodies are refused. |
 | nginx | Six paths outside the app serve nothing. |
-| Logs and errors | 23,384 log lines held no email address, phone number or secret; error answers reveal no internals. |
+| Logs and errors | 23,423 log lines held no email address, phone number or secret; error answers reveal no internals. |
 
 Two known items are recorded rather than failed: the frontend sends no security headers, and the API's `/metrics` answers without a session (see [Open items](#open-items)).
 
-**Full sends under faults** ([latest full run](../tests/verify/results/2026-11-06-2254-load.md)): each scenario sends the same campaign of 15,411 messages. In the latest runs of all 24 scenarios no message was lost or accepted twice, and outside the scenarios that go over on purpose no channel went over 100 calls a second at the provider. They cover provider faults and outages, refused credentials, crashed and restarted workers, PostgreSQL and Redis lost, Redis's clock stepped forward, and workers set above the provider's limit. Two problems they found were fixed: Redis came back from an old snapshot after a crash and let a channel reach 123 calls in a second, and a forward clock step let one reach 119. The details are in [FINDINGS.md](../tests/verify/FINDINGS.md).
+**Full sends under faults** ([latest full run](../tests/verify/results/2026-11-08-1707-load.md), 2026-11-08): each scenario sends the same campaign of 15,411 messages. In the latest runs of all 24 scenarios no message was lost or accepted twice, and outside the scenarios that go over on purpose no channel went over 100 calls a second at the provider. They cover provider faults and outages, refused credentials, crashed and restarted workers, PostgreSQL and Redis lost, Redis's clock stepped forward, and workers set above the provider's limit. Two problems they found were fixed: Redis came back from an old snapshot after a crash and let a channel reach 123 calls in a second, and a forward clock step let one reach 119. The details are in [FINDINGS.md](../tests/verify/FINDINGS.md).
 
 ### Findings fixed
 

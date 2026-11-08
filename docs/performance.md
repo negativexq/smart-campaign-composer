@@ -247,6 +247,7 @@ Each step is measured with the same scenario as the baseline and compared with i
 | 5 | Checked the list redesign, runs tab, tags and archive against step 4, then fixed what they slowed: one count instead of two, sort keys joined once, group counts over grouped rows, only filters in use in the query, a run's deliveries read by run, JIT off for the app | — (new features) | Mix on 494k deliveries: 800 RPS served as with step 4. With 10k campaigns, the list takes 6.7 ms against 3.3 ms for step 4, after 19.9 ms before the fixes, and the mix holds 600 RPS rather than 800 |
 | 6 | Work done only when it changes something: a finished run's kept total instead of counting its deliveries; pages watching a campaign share one reading; hidden browser tabs stop asking | Step 5 | Deliveries tab 1.6 ms instead of 5.2 ms; 20 open pages of a campaign cost 4 queries a second instead of 80; at 800 RPS the top queries take 4.8 s of database time instead of 26–27 s, p95 2.0 ms instead of 6 ms |
 | 7 | A call counts against the limit until a second after its answer, instead of for 1.1 s from its grant; answers ride on the worker's next Redis call | Sending at the channel limit after step 6 | Send without faults 88.1–88.8 s instead of 94.0–94.7 s, about 95 messages/s per channel instead of 89; no second above 100 at the provider in 8 runs, against 106 and 125 in one run before |
+| 8 | The list's message preview is read from two generated columns instead of out of each version's content | Measured again on 2026-11-08 | Campaign list alone: 2,040–2,261 requests/s instead of 1,764–1,810, against 2,123–2,609 for step 6's code without previews on the same data |
 
 ### Step 1: the read path
 
@@ -525,3 +526,58 @@ What changed:
 - With the default faults the rate stays at 49–54 messages a second, as before: the pause after each 429 still takes most of the channel's time, and the new count does not change that.
 - Recording answers adds nothing measurable: they go with the Redis calls the worker makes anyway, and the worker used 0.05–0.11 CPU cores, as before.
 
+
+### Measured again on 2026-11-08
+
+The same two measurements as above, sending at the channel limit and the API ceiling, ran again on the code of `main` at ed6f11a. They ran on the verification stack (`tests/verify`) instead of a stack of their own, so the data differs: 116k users, 531k earlier deliveries when the sends began and 695k when the ceiling runs began, one worker, and a mock provider that refuses calls above 100 a second as a real one would. The send is the same Istanbul cart campaign as above, 8,198 emails and 7,213 SMS.
+
+| Case | Send time (s) | Email: span (s), msg/s | SMS: span (s), msg/s | Highest calls in a second at the provider | Retries the provider answered as duplicates |
+|---|---|---|---|---|---|
+| No faults | 95.8–96.4 | 93.7–94.2, 87.0–87.5 | 82.8–83.0, 86.9–87.1 | 100, 100 | 0 |
+| No faults, reads | 95.7–96.1 | 94.0–94.3, 86.9–87.2 | 83.0, 86.9 | 100, 100 | 0 |
+| Default faults | 161.2–163.0 | 158.8–161.2, 50.9–51.6 | 136.3–149.3, 48.3–52.9 | 100, 100 | 16–19 email, 17–18 SMS |
+| Default faults, reads | 154.9–165.8 | 153.4–164.0, 50.0–53.4 | 136.1–144.8, 49.8–53.0 | 100, 100 | 14–22 email, 18 SMS |
+
+Every run finished with every delivery sent, and no message was accepted twice. The provider call took 37–40 ms at the median and 90–94 ms at p95, the worker used 0.05–0.10 CPU cores, and the API answered the 500 RPS of reads in 3.8–3.9 ms at the median and 10–15 ms at p95.
+
+A send without faults takes about 96 s instead of step 7's 88 s. This is a later, deliberate change, not a regression: a call now counts until 1.1 s after its answer instead of 1 s, so that a forward step of Redis's clock cannot let calls in early ([DECISIONS.md](../DECISIONS.md#the-limit-is-counted-as-the-provider-sees-it)). The extra tenth of a second takes a channel from about 95 to about 87 messages a second. With the default faults the 429 pauses still take most of the time, and the sends stay within step 7's 153.9–166.2 s.
+
+The API ceiling, the six-endpoint mix at fixed rates for 40 s, twice:
+
+| Target RPS | Served RPS | Median (ms) | p95 (ms) | Not started |
+|---|---|---|---|---|
+| 1500 | 1,500.0–1,500.5 | 1.1–1.2 | 4.2–5.1 | 0 |
+| 2000 | 1,994.9–1,999.9 | 1.6–2.8 | 15–87 | 0–204 |
+| 3000 | 1,870–2,074 | 966–1,006 | 1,492–1,893 | 35,989–44,079 |
+| 4000 | 1,846–2,305 | 910–1,084 | 1,332–1,814 | 66,572–85,057 |
+
+Up to 2000 RPS this is as good as after step 6 or better: the p95 at 2000 RPS is 15–87 ms against 103–667 ms then. Above it, about 1,850–2,300 RPS is served against step 6's 3,100–3,400. As then, the limit is the pool of 8 connections: every request waited for one, while PostgreSQL used 2.9 of the 8 CPUs. `VACUUM ANALYZE` before a run did not change it (2,266 and 2,281 RPS).
+
+To tell the code from the machine and the data, step 6's code (b40add2) was built and run against the same database, taking turns with the current code, at 2000, 3000 and 4000 RPS, twice:
+
+| Target RPS | Step 6's code | Current code |
+|---|---|---|
+| 2000 | 1,999.2–1,999.9 | 1,971.8–1,997.7 |
+| 3000 | 2,540–2,990 | 2,196–2,664 |
+| 4000 | 2,560–2,973 | 2,174–2,212 |
+
+Step 6's code reached 2,540–2,990 RPS here, not the 3,100–3,400 it served on 2026-11-06, so part of the drop comes from the setup: more data and other stacks on the same Docker VM. The rest came from the code. Each endpoint was then loaded alone with 16 clients for 12 s. Only the campaign list differed beyond the spread between runs: 1,764–1,810 requests a second against 2,279–2,589 for step 6's code.
+
+### Step 8: the list preview
+
+Since step 6 each list row shows the start of the campaign's SMS or email subject (commit 8b7468b). The list query read it with a lateral join that took each campaign's latest version and pulled two fields out of its `content`. On its own, over the 35 campaigns of this database, that join took 0.86 ms with the two fields and 0.11 ms without. Each list request held a pooled connection that much longer, and with 8 connections that lowered how many requests a second the list served.
+
+The fix keeps the first 160 characters of both fields in two generated columns of `campaign_versions` ([migration 36](../migrations/00036_version_preview.sql)). PostgreSQL fills them on every write, so an edited draft shows its new text at once, and the list reads them instead of `content`. [`TestTheListPreviewFollowsEveryEditOfTheMessages`](../internal/campaign/list_preview_test.go) checks that an edit reaches the list and that the cut falls at 160 characters, not bytes. The rows, the API answer and the page are unchanged ([DECISIONS.md](../DECISIONS.md#indexes-and-query-shapes-follow-measured-plans)).
+
+The same endpoint test, three times each, taking turns:
+
+| Endpoint | Step 6's code | Before the fix | After the fix |
+|---|---|---|---|
+| Campaign list (requests/s) | 2,123–2,609 | 1,764–1,810 | 2,040–2,261 |
+
+After the fix the list is within the spread of step 6's code, whose own runs differ by about 500 requests a second here. The answer still carries the two previews, about a sixth of its bytes (5.0 of 29.6 kB for 39 campaigns); that cost was not measured apart and is left as it is.
+
+What these runs do not show:
+
+- The API, PostgreSQL and k6 share 8 CPUs, so runs of the same code differ by up to about 20% above 2000 RPS. Differences smaller than that are not findings.
+- The ceiling is still the pool of 8 connections, not PostgreSQL's CPU. A larger pool was not tried, for the reason given after step 6.

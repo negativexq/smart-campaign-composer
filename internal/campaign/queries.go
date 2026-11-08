@@ -128,14 +128,12 @@ type Summary struct {
 	Preview *Preview `json:"preview"`
 }
 
-// Preview is the start of a campaign's messages, for a row to show what it says.
+// Preview is the start of a campaign's messages, for a row to show what it says: the
+// first 160 characters of each, cut by PostgreSQL when the version is written.
 type Preview struct {
 	SMS          string `json:"sms"`
 	EmailSubject string `json:"email_subject"`
 }
-
-// previewLength is how much of each message a row is given.
-const previewLength = 160
 
 // ListSchedule is what a list row says about when a campaign sends.
 type ListSchedule struct {
@@ -337,8 +335,9 @@ func (s *Service) summaries(ctx context.Context, page, order string, args []any,
 			WHERE r.campaign_id = c.id
 		) d ON true
 		LEFT JOIN LATERAL (
-			SELECT left(COALESCE(v.content->>'sms', ''), `+fmt.Sprint(previewLength)+`) AS sms,
-			       left(COALESCE(v.content->>'email_subject', ''), `+fmt.Sprint(previewLength)+`) AS email_subject
+			-- Filled by PostgreSQL when a version is written (migration 36), so a list
+			-- request does not read every row's content.
+			SELECT v.preview_sms AS sms, v.preview_email_subject AS email_subject
 			FROM campaign_versions v WHERE v.campaign_id = c.id
 			ORDER BY v.version DESC LIMIT 1
 		) preview ON true

