@@ -1,6 +1,20 @@
-//go:build verify
-
 package mutation
+
+// Case is one deliberate fault and the test expected to catch it.
+type Case struct {
+	Name     string
+	File     string // relative to the repository root
+	Find     string
+	Replace  string
+	Go       *GoTest
+	Frontend *FrontendTest
+}
+
+// GoTest runs `go test -run Run Package`.
+type GoTest struct{ Package, Run string }
+
+// FrontendTest runs one vitest file, filtered by test name.
+type FrontendTest struct{ File, Name string }
 
 // Each case breaks one rule the code keeps and names the test written for that rule.
 // Find must appear exactly once in File. A case that no longer matches fails, so a
@@ -23,7 +37,7 @@ var cases = []Case{
 	{
 		Name:    "cancel reads real sends",
 		File:    "internal/campaign/schedule.go",
-		Find:    "EXISTS (SELECT 1 FROM campaign_runs r WHERE r.campaign_id = $1)",
+		Find:    "EXISTS (SELECT 1 FROM campaign_runs WHERE campaign_id = $1)",
 		Replace: "runs > 0",
 		Go:      &GoTest{Package: "./internal/campaign/", Run: "^TestAFinishedCampaignCanBeScheduledAgain$"},
 	},
@@ -162,9 +176,9 @@ var cases = []Case{
 	},
 	{
 		Name:     "UI list says schedule stopped",
-		File:     "frontend/src/components/CampaignTable.vue",
-		Find:     "const kind = campaign.schedule?.stopped",
-		Replace:  "const kind = false",
+		File:     "frontend/src/lib/campaignRow.ts",
+		Find:     "if (campaign.schedule?.stopped) return \"Schedule stopped\";",
+		Replace:  "if (false) return \"Schedule stopped\";",
 		Frontend: &FrontendTest{File: "src/views/workspace.test.ts", Name: "shows what each campaign is"},
 	},
 	{

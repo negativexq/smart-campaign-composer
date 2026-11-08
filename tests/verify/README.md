@@ -81,6 +81,8 @@ VERIFY_ONLY=healthy,5xx70-then-ok make verify-load
 
 The clock scenarios step the wall clock of Docker's VM with a privileged container. On Docker Desktop every container shares that clock, so a demo stack running at the same time sees the steps too. Docker Desktop sets the clock back later on its own.
 
+`make test` reads every mutation case without breaking anything: the code it breaks must still appear once, and the test it names must still exist (`TestEveryCaseStillPointsAtItsCodeAndTest`). So a refactor that moves the code fails at once instead of at the next mutation run.
+
 `make verify-mutation` changes source files while it runs and puts each one back afterwards, including on Ctrl-C. Don't edit the code while it runs. If a run is killed hard, the next run refuses to start until the file is restored, and `git diff` shows which one.
 
 ## Adding to them
