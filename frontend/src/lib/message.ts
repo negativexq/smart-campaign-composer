@@ -107,12 +107,13 @@ export function validCode(code: string): boolean {
   return CODE_SHAPE.test(code);
 }
 
-// Mirrors content.linkPattern: a link ends before trailing punctuation.
-const BRIEF_LINK = /https?:\/\/[^\s<>"]+[^\s<>".,;:!?)]/g;
+// Mirrors content.linkPattern: a link with its scheme, one starting with www., or a
+// domain followed by a path. A link ends before trailing punctuation.
+const BRIEF_LINK = /(?:\bhttps?:\/\/|\bwww\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/)[^\s<>"]*[^\s<>".,;:!?)]/gi;
 
-/** The links a brief names, each once, in order, as the backend reads them. */
+/** The links a brief names, each once, in order, as the backend reads them: one written without its scheme gets https:// in front. */
 export function briefLinks(brief: string): string[] {
-  return [...new Set(brief.match(BRIEF_LINK) ?? [])];
+  return [...new Set((brief.match(BRIEF_LINK) ?? []).map((link) => (/^https?:\/\//i.test(link) ? link : `https://${link}`)))];
 }
 
 /**

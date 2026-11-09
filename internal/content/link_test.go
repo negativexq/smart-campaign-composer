@@ -124,3 +124,45 @@ func TestAModelThatTypesTheLinkOrMakesOneUpIsHeldToTheRules(t *testing.T) {
 		t.Fatalf("made-up links in the text: %v", issues)
 	}
 }
+
+func TestABriefsLinkWithoutItsSchemeIsReadAsAFullAddress(t *testing.T) {
+	t.Parallel()
+	for brief, want := range map[string][]string{
+		"Duyur: www.shop.example.com/antalya-kampanyasi":                            {"https://www.shop.example.com/antalya-kampanyasi"},
+		"Link: shop.example.com/kis.":                                               {"https://shop.example.com/kis"},
+		"See https://shop.example.com/a and www.shop.example.com/a, or WWW.x.com/b": {"https://shop.example.com/a", "https://www.shop.example.com/a", "https://WWW.x.com/b"},
+		"Duyur: www.shop.example.com/a ve https://www.shop.example.com/a":           {"https://www.shop.example.com/a"},
+		"Puan 3.5/5, oran 1.11/30, ve/veya %20 indirim, info@example.com":           {},
+	} {
+		if got := content.BriefLinks(brief); strings.Join(got, " ") != strings.Join(want, " ") {
+			t.Errorf("BriefLinks(%q) = %q, want %q", brief, got, want)
+		}
+	}
+}
+
+func TestAModelCopyingALinkWithoutItsSchemeWritesValidMessages(t *testing.T) {
+	t.Parallel()
+	const written, link = "www.shop.example.com/kis", "https://www.shop.example.com/kis"
+	brief := "İzmir'deki müşterilere kışı duyur: " + written
+	limits := content.Limits{Link: content.BriefLinks(brief)[0]}
+	for _, button := range []string{written, link} {
+		raw := []byte(`{"sms":"Merhaba {{first_name}}, kış geldi: ` + written + `","email_subject":"Kış","email_body":"Kış geldi, ` + written + `","email_cta_label":"Gör","email_cta_url":"` + button + `"}`)
+		got, err := content.ParseGenerated(raw, limits, brief)
+		if err != nil {
+			t.Fatalf("button %q: %v", button, err)
+		}
+		if got.EmailCTAURL != link || got.SMS != "Merhaba {{first_name}}, kış geldi: {{link}}" {
+			t.Errorf("button %q: got button %q and SMS %q", button, got.EmailCTAURL, got.SMS)
+		}
+		if issues := append(content.CheckLinks(got, brief), content.CheckTextLinks(got, brief)...); len(issues) > 0 {
+			t.Errorf("button %q: the brief's own link was refused: %v", button, issues)
+		}
+	}
+	made := content.Content{SMS: "{{link}}", EmailBody: "Bak: www.evil.example.com/x", EmailCTAURL: "https://www.evil.example.com/kis"}
+	if issues := append(content.CheckLinks(made, brief), content.CheckTextLinks(made, brief)...); len(issues) != 2 {
+		t.Fatalf("made-up links without a scheme passed: %v", issues)
+	}
+	if !content.AddsOffersOrLinks("Yeni: shop.evil.example/x", brief) || content.AddsOffersOrLinks("Bak: https://"+written, brief) {
+		t.Fatal("AddsOffersOrLinks reads links without a scheme differently")
+	}
+}

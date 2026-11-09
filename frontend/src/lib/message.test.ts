@@ -139,6 +139,13 @@ describe("discount code", () => {
     expect(briefLinks("No link here.")).toEqual([]);
   });
 
+  it("reads a link written without its scheme as a full address, as the backend does", () => {
+    expect(briefLinks("Duyur: www.shop.example.com/antalya-kampanyasi")).toEqual(["https://www.shop.example.com/antalya-kampanyasi"]);
+    expect(briefLinks("Link: shop.example.com/kis.")).toEqual(["https://shop.example.com/kis"]);
+    expect(briefLinks("www.shop.example.com/a ve https://www.shop.example.com/a")).toEqual(["https://www.shop.example.com/a"]);
+    expect(briefLinks("Puan 3.5/5, oran 1.11/30, ve/veya %20, info@example.com")).toEqual([]);
+  });
+
   it("is read from a brief next to a word for one, as the backend reads it", () => {
     expect(briefCodes("%15 indirim kodu SONBAHAR15 ver.")).toEqual(["SONBAHAR15"]);
     expect(briefCodes("SONBAHAR15 kodunu kullan.")).toEqual(["SONBAHAR15"]);
