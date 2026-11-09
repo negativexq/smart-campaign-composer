@@ -365,21 +365,36 @@ func validLink(link string) bool {
 // CheckLinks refuses a generated link that nobody gave: a model must not make up
 // where people are sent. A person editing the message may set any valid link.
 func CheckLinks(c Content, source string) []Issue {
-	if c.EmailCTAURL == "" || strings.Contains(source, c.EmailCTAURL) {
+	if c.EmailCTAURL == "" || knownLink(c.EmailCTAURL, source) {
 		return nil
 	}
 	return []Issue{{FieldEmailCTAURL, "invented_link", "The button link is not in the brief. Leave it out or use a link from the brief."}}
 }
 
-// Links lists the links in text, each once, in order.
+// Links lists the links in text, each once, in order. A link written without its
+// scheme, as in www.shop.example.com/sale, is listed with https:// in front, since a
+// button and a short link need a full address.
 func Links(text string) []string {
 	found := []string{}
 	for _, link := range linkPattern.FindAllString(text, -1) {
-		if !slices.Contains(found, link) {
+		if link = FullLink(link); !slices.Contains(found, link) {
 			found = append(found, link)
 		}
 	}
 	return found
+}
+
+// FullLink puts https:// in front of a link written without a scheme.
+func FullLink(link string) string {
+	if scheme.MatchString(link) {
+		return link
+	}
+	return "https://" + link
+}
+
+// knownLink says whether source gives link, as written or with its scheme left out.
+func knownLink(link, source string) bool {
+	return strings.Contains(source, link) || slices.Contains(Links(source), FullLink(strings.TrimSpace(link)))
 }
 
 // CheckTextLinks refuses a link in generated text that nobody gave, as CheckLinks does
@@ -388,7 +403,7 @@ func CheckTextLinks(c Content, source string) []Issue {
 	issues := []Issue{}
 	for _, field := range textFields(c) {
 		for _, link := range linkPattern.FindAllString(field.text, -1) {
-			if !strings.Contains(source, link) {
+			if !knownLink(link, source) {
 				issues = append(issues, Issue{field.name, "invented_link", fmt.Sprintf("It links to %s, which is not in the brief. Use a link from the brief.", link)})
 				break
 			}
@@ -458,14 +473,18 @@ func BriefLinks(text string) []string {
 
 // WithLink sets a version's link and turns the link written out in the SMS into
 // {{link}}, so every SMS gets a short link in its place. The email keeps the link on
-// its button, where its length does not matter.
+// its button, where its length does not matter. A button that opens the link written
+// without its scheme, as the brief may have it, gets the full address.
 func WithLink(c Content, link string) Content {
 	c.Link = link
 	if link == "" {
 		return c
 	}
+	if button := strings.TrimSpace(c.EmailCTAURL); button != "" && FullLink(button) == link {
+		c.EmailCTAURL = link
+	}
 	c.SMS = linkPattern.ReplaceAllStringFunc(c.SMS, func(found string) string {
-		if found == link {
+		if FullLink(found) == link {
 			return "{{" + LinkVariable + "}}"
 		}
 		return found
@@ -632,7 +651,13 @@ func CheckDiscounts(c Content, source string) []Issue {
 	return issues
 }
 
-var linkPattern = regexp.MustCompile(`https?://[^\s<>"]+[^\s<>".,;:!?)]`)
+// linkPattern finds a link with its scheme, one starting with www., or a domain
+// followed by a path, as matching.WithoutLinks does for the audience. A number such
+// as 3.5/5 is not a domain, because a domain ends in letters.
+var (
+	linkPattern = regexp.MustCompile(`(?i)(?:\bhttps?://|\bwww\.|\b(?:[a-z0-9-]+\.)+[a-z]{2,}/)[^\s<>"]*[^\s<>".,;:!?)]`)
+	scheme      = regexp.MustCompile(`(?i)^https?://`)
+)
 
 // Discounts lists the percentages text mentions, each once, in order.
 func Discounts(text string) []int {
@@ -674,7 +699,7 @@ func AddsOffersOrLinks(text string, sources ...string) bool {
 	if slices.ContainsFunc(BriefCodes(text), func(code string) bool { return !slices.Contains(BriefCodes(source), code) }) {
 		return true
 	}
-	return slices.ContainsFunc(linkPattern.FindAllString(text, -1), func(link string) bool { return !strings.Contains(source, link) })
+	return slices.ContainsFunc(linkPattern.FindAllString(text, -1), func(link string) bool { return !knownLink(link, source) })
 }
 
 // CheckFacts refuses generated text that states a city or number the source does
