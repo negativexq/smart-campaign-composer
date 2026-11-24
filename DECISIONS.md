@@ -375,6 +375,8 @@ Status colors failed the palette check for color-blind readers: red and amber di
 
 On 1M deliveries and 900K calls the report's four queries took about 600 ms together on a table holding one campaign, with no new index. While sending, the page rereads the report at most every 5 seconds. We added no index for it, since each one slows sending.
 
+The report's counts join nothing. They read the campaign's deliveries, events and calls through its index, put them together and group them by delivery. Joining grouped events to deliveries was as fast while PostgreSQL's statistics knew the campaign, but statistics refresh after 10% of a table changes, so a campaign that has just finished is usually newer than they are. On that guess PostgreSQL compared every delivery with every event, and the report of a just-finished 12,192-delivery campaign took 31–47 s in a soak with 2.5M deliveries. Without a join there is no such plan to choose: 22–31 ms whatever the planner is allowed. A test fails on any join in these queries. See step 10 of [the performance log](docs/performance.md#step-10-plans-that-cannot-go-quadratic).
+
 ## The test inbox reports opens through a real webhook
 
 Someone testing the product needs to see what was sent, so the mock provider keeps recent accepted messages and serves a page at port 8083. Opening a message there marks it opened and posts an event to `POST /api/provider/events`, as a real provider's event webhook would. That keeps the path real and leaves the demo honest, because a count in the report is always a person's action.
@@ -409,7 +411,7 @@ The biggest gains came from rewriting queries, not adding indexes.
 
 The claim query mattered most: at 724 ms per batch of 32, the planner alone would have held sending under 100 messages a second.
 
-We left some out on purpose, because every index on the delivery table slows sending. An index for filtering deliveries by status took 206 MB and saved about 20 ms. Including `attempts` in the progress index took 177 MB rather than 26 MB without a clear gain, since rows change constantly during a send. An index on `user_id` or `sent_at` would speed up reports that no screen has yet (126 ms and 440 ms today).
+We left some out on purpose, because every index on the delivery table slows sending. An index for filtering deliveries by status took 206 MB and saved about 20 ms. One partial index is worth its write: the delivery monitor shows only deliveries still on their way or ended badly, a few dozen at rest, and without an index holding just those each of its counts read the whole table, 197 ms at 2.5M deliveries. It is 16 kB at rest, the monitor answers in 3.4–6 ms instead of 0.55 s, and sends without faults took as long as before. The query names those statuses itself, because a reused plan cannot see `$1` and would not use the index ([step 10](docs/performance.md#step-10-plans-that-cannot-go-quadratic)). Including `attempts` in the progress index took 177 MB rather than 26 MB without a clear gain, since rows change constantly during a send. An index on `user_id` or `sent_at` would speed up reports that no screen has yet (126 ms and 440 ms today).
 
 When dashboards need history across campaigns, a summary table updated when a campaign finishes will serve them better than more indexes on the queue. A filter that matches few rows late in a very large campaign can still take about 100 ms.
 

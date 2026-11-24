@@ -180,39 +180,74 @@ const arrivalLateral = `LEFT JOIN LATERAL (
 		FROM delivery_events WHERE delivery_id = d.id
 	) arrival ON true`
 
-// campaignArrivals reads the arrival of every delivery in campaign $1 at once. A
-// report counts every delivery, so reading the events once and joining them is far
-// cheaper than arrivalLateral's lookup per delivery.
-const campaignArrivals = `arrival AS (
-		SELECT delivery_id,
+// deliveryArrivals reads every delivery of campaign $1, or of its run $2, with its
+// arrival and whether the provider was called. It joins nothing: the deliveries, their
+// events and their calls are each read by the campaign's index, put together and
+// grouped by delivery, so the work follows the campaign's own rows and no join order
+// is left for PostgreSQL to choose. Joining grouped events to the deliveries was as
+// fast while the statistics knew the campaign, but on a new one they guessed a few
+// rows, picked a nested loop over the grouped result and compared every delivery with
+// every event: 18 to 47 s for 12,000 messages (docs/performance.md, step 10).
+const deliveryArrivals = `found AS (
+		SELECT d.id, d.channel, d.status, d.variant, d.link_code, d.link_clicked_at,
+		       NULL::text AS event_type, NULL::timestamptz AS occurred_at, false AS called
+		FROM campaign_deliveries d
+		WHERE d.campaign_id = $1 AND ($2::uuid IS NULL OR d.run_id = $2)
+		UNION ALL
+		SELECT e.delivery_id, NULL, NULL, NULL, NULL, NULL, e.event_type, e.occurred_at, false
+		FROM delivery_events e WHERE e.campaign_id = $1
+		UNION ALL
+		SELECT a.delivery_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL, true
+		FROM delivery_attempts a WHERE a.campaign_id = $1 AND ($2::uuid IS NULL OR a.run_id = $2)
+	),
+	arrival AS (
+		SELECT max(channel) AS channel, max(status) AS status, max(variant) AS variant,
+		       max(link_code) AS link_code, max(link_clicked_at) AS link_clicked_at,
 		       max(occurred_at) FILTER (WHERE event_type = 'bounced') AS bounced_at,
 		       CASE WHEN count(*) FILTER (WHERE event_type = 'bounced') = 0
 		            THEN min(occurred_at) FILTER (WHERE event_type IN ('delivered', 'opened')) END AS delivered_at,
-		       bool_or(event_type = 'opened') AS opened
-		FROM delivery_events WHERE campaign_id = $1
-		GROUP BY delivery_id
+		       COALESCE(bool_or(event_type = 'opened'), false) AS opened,
+		       bool_or(called) AS called
+		FROM found
+		GROUP BY id
+		-- Events and calls of a delivery outside the run have no delivery row here.
+		HAVING max(channel) IS NOT NULL
 	)`
 
+// lifecycleQuery counts each step a channel's messages reached.
+const lifecycleQuery = `
+		WITH ` + deliveryArrivals + `
+		SELECT channel, count(*),
+		       count(*) FILTER (WHERE status <> 'SKIPPED'),
+		       count(*) FILTER (WHERE called),
+		       count(*) FILTER (WHERE status = 'SENT'),
+		       count(*) FILTER (WHERE status = 'SENT' AND delivered_at IS NOT NULL),
+		       count(*) FILTER (WHERE status = 'SENT' AND bounced_at IS NOT NULL),
+		       count(*) FILTER (WHERE status = 'SENT' AND delivered_at IS NULL AND bounced_at IS NULL),
+		       count(*) FILTER (WHERE status = 'UNKNOWN' AND delivered_at IS NOT NULL),
+		       count(*) FILTER (WHERE status = 'SENT' AND link_code IS NOT NULL),
+		       count(*) FILTER (WHERE link_clicked_at IS NOT NULL)
+		FROM arrival
+		GROUP BY channel
+		ORDER BY channel DESC`
+
+// variantsQuery counts the same for each version of a test.
+const variantsQuery = `
+		WITH ` + deliveryArrivals + `
+		SELECT variant, channel, count(*),
+		       count(*) FILTER (WHERE status = 'SENT'),
+		       count(*) FILTER (WHERE status = 'SENT' AND delivered_at IS NOT NULL),
+		       count(*) FILTER (WHERE status = 'SENT' AND bounced_at IS NOT NULL),
+		       count(*) FILTER (WHERE status = 'SENT' AND delivered_at IS NULL AND bounced_at IS NULL),
+		       count(*) FILTER (WHERE status = 'SENT' AND opened),
+		       count(*) FILTER (WHERE link_clicked_at IS NOT NULL)
+		FROM arrival
+		WHERE variant IS NOT NULL
+		GROUP BY variant, channel
+		ORDER BY channel DESC, variant`
+
 func (s *Service) reportLifecycle(ctx context.Context, id string, run *string) ([]ReportLifecycle, error) {
-	rows, err := s.db.Query(ctx, `
-		WITH `+campaignArrivals+`,
-		called AS (SELECT DISTINCT delivery_id FROM delivery_attempts WHERE campaign_id = $1 AND ($2::uuid IS NULL OR run_id = $2))
-		SELECT d.channel, count(*),
-		       count(*) FILTER (WHERE d.status <> 'SKIPPED'),
-		       count(called.delivery_id),
-		       count(*) FILTER (WHERE d.status = 'SENT'),
-		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NOT NULL),
-		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.bounced_at IS NOT NULL),
-		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL),
-		       count(*) FILTER (WHERE d.status = 'UNKNOWN' AND arrival.delivered_at IS NOT NULL),
-		       count(*) FILTER (WHERE d.status = 'SENT' AND d.link_code IS NOT NULL),
-		       count(*) FILTER (WHERE d.link_clicked_at IS NOT NULL)
-		FROM campaign_deliveries d
-		LEFT JOIN arrival ON arrival.delivery_id = d.id
-		LEFT JOIN called ON called.delivery_id = d.id
-		WHERE d.campaign_id = $1 AND ($2::uuid IS NULL OR d.run_id = $2)
-		GROUP BY d.channel
-		ORDER BY d.channel DESC`, id, run)
+	rows, err := s.db.Query(ctx, lifecycleQuery, id, run)
 	if err != nil {
 		return nil, fmt.Errorf("read report lifecycle: %w", err)
 	}
@@ -224,20 +259,7 @@ func (s *Service) reportLifecycle(ctx context.Context, id string, run *string) (
 }
 
 func (s *Service) reportVariants(ctx context.Context, id string, run *string) ([]ReportVariant, error) {
-	rows, err := s.db.Query(ctx, `
-		WITH `+campaignArrivals+`
-		SELECT d.variant, d.channel, count(*),
-		       count(*) FILTER (WHERE d.status = 'SENT'),
-		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NOT NULL),
-		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.bounced_at IS NOT NULL),
-		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.delivered_at IS NULL AND arrival.bounced_at IS NULL),
-		       count(*) FILTER (WHERE d.status = 'SENT' AND arrival.opened),
-		       count(*) FILTER (WHERE d.link_clicked_at IS NOT NULL)
-		FROM campaign_deliveries d
-		LEFT JOIN arrival ON arrival.delivery_id = d.id
-		WHERE d.campaign_id = $1 AND d.variant IS NOT NULL AND ($2::uuid IS NULL OR d.run_id = $2)
-		GROUP BY d.variant, d.channel
-		ORDER BY d.channel DESC, d.variant`, id, run)
+	rows, err := s.db.Query(ctx, variantsQuery, id, run)
 	if err != nil {
 		return nil, fmt.Errorf("read report variants: %w", err)
 	}

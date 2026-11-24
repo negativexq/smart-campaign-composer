@@ -71,9 +71,16 @@ type Monitor struct {
 // ReasonNone asks for deliveries that have had no problem so far.
 const ReasonNone = "none"
 
+// monitorMatching names the monitored statuses in the query itself as well as in $1,
+// so every plan, including a reused one that cannot see $1, may read
+// campaign_deliveries_monitor_idx: it holds only those rows, a few thousand at most
+// while sending, where the table holds every message ever sent. Without it each count
+// read the whole table, 200 ms at 2.5M deliveries and growing (docs/performance.md,
+// step 10).
 const monitorMatching = `
 	FROM campaign_deliveries d
-	WHERE d.status = ANY($1) AND ($2 = '' OR d.channel = $2)
+	WHERE d.status IN ('QUEUED', 'SENDING', 'RETRYING', 'UNKNOWN', 'FAILED')
+	  AND d.status = ANY($1) AND ($2 = '' OR d.channel = $2)
 	  AND ($4::timestamptz IS NULL OR d.updated_at >= $4)
 	  AND ($5 = '' OR d.last_error = $5 OR ($5 = '` + ReasonNone + `' AND COALESCE(d.last_error, '') = ''))
 	  AND ($3 = '' OR EXISTS (

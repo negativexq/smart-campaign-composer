@@ -128,6 +128,18 @@ type scenario struct {
 func scenarios() []scenario {
 	return []scenario{
 		{name: "healthy", faults: healthy()},
+		{name: "healthy-1core", faults: with("VERIFY_WORKER_CPUS", "1")},
+		{name: "default-faults-1core", faults: func() faults {
+			f := with("VERIFY_WORKER_CPUS", "1")
+			f["VERIFY_429"], f["VERIFY_5XX"], f["VERIFY_LOST"] = "0.02", "0.03", "0.002"
+			return f
+		}()},
+		{name: "healthy-4workers", faults: healthy(), workers: 4},
+		{name: "default-faults-4workers", faults: func() faults {
+			f := healthy()
+			f["VERIFY_429"], f["VERIFY_5XX"], f["VERIFY_LOST"] = "0.02", "0.03", "0.002"
+			return f
+		}(), workers: 4},
 		{name: "default-faults", faults: func() faults {
 			f := healthy()
 			f["VERIFY_429"], f["VERIFY_5XX"], f["VERIFY_LOST"] = "0.02", "0.03", "0.002"
