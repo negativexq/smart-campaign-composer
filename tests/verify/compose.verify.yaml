@@ -20,6 +20,7 @@ services:
     <<: *image
     # No published port, so the load tests can run two workers.
     ports: !reset []
+    cpus: ${VERIFY_WORKER_CPUS:-0}
   mock-provider:
     <<: *image
     environment:

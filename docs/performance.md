@@ -249,6 +249,7 @@ Each step is measured with the same scenario as the baseline and compared with i
 | 7 | A call counts against the limit until a second after its answer, instead of for 1.1 s from its grant; answers ride on the worker's next Redis call | Sending at the channel limit after step 6 | Send without faults 88.1–88.8 s instead of 94.0–94.7 s, about 95 messages/s per channel instead of 89; no second above 100 at the provider in 8 runs, against 106 and 125 in one run before |
 | 8 | The list's message preview is read from two generated columns instead of out of each version's content | Measured again on 2026-11-08 | Campaign list alone: 2,040–2,261 requests/s instead of 1,764–1,810, against 2,123–2,609 for step 6's code without previews on the same data |
 | 9 | The analytics channel totals read the window's events once and join them, instead of looking up each delivery's events | The two-hour soak of 2026-11-08 | Channel totals over 36,525 deliveries: 33–40 ms instead of 86–93 ms |
+| 10 | The report's counts read the campaign's deliveries, events and calls without joining them; a partial index holds the deliveries the delivery monitor shows | The 2.5-hour soak of 2026-11-24 | Report of a just-finished 12,192-delivery campaign: 0.14–0.32 s instead of 31–47 s; monitor endpoint 3.4 ms instead of 0.55 s; under the same load PostgreSQL CPU 112% instead of 722% and API p95 19.6 ms instead of 4.28 s |
 
 ### Step 1: the read path
 
@@ -603,3 +604,38 @@ What this does not show:
 - The soak read the analytics page about 3 times a second, far more than people open it. The page was not slow for a person at this size; the change is for the growth.
 - Only the query was timed. The endpoint as a whole was not measured again after the change.
 
+### Step 10: plans that cannot go quadratic
+
+A 2.5-hour soak on 2026-11-24 sent 73 campaigns of 12,192 deliveries each, back to back, with the demo's provider faults and 20 clients reading the API. The database grew from 1.5M to 2.5M deliveries. Two reads got slow as it grew ([results of the runs](../tests/verify/results/)).
+
+**The report.** Since step 2 its lifecycle and variant counts grouped the campaign's events, then joined that result to the deliveries. With current statistics PostgreSQL hashed it and the query took about 20 ms. But autovacuum refreshes statistics after 10% of a table changes, about 150,000 rows here, so a campaign that has just finished is usually newer than they are. They then guessed a few rows for it, and PostgreSQL chose a nested loop that read the grouped events again for every delivery: 70 million comparisons for one campaign. The report of a just-finished campaign took 12–47 s in 9 of the first 11 soak campaigns, and 12 of the 73 took over 5 s. Running `ANALYZE` brought one from 18.4 s to 35 ms, which showed the cause. A query should not depend on when the statistics were last refreshed.
+
+Joining each delivery to its own events by key was tried first. With old statistics PostgreSQL still read all of the campaign's events for every delivery through the campaign index, and without the campaign condition it scanned every event ever received. The counts now join nothing: the deliveries, their events and their calls are each read through the campaign's index, put together with `UNION ALL` and grouped by delivery ([report.go](../internal/campaign/report.go)). No join is left to choose, and the work follows the campaign's own rows. [`TestReportCountsJoinNothingSoNoPlanCanCompareEveryRow`](../internal/campaign/plan_test.go) reads the plan with hash and merge joins and sequential scans off, the way old statistics on a large table plan it, and fails on any join; it failed on the old query.
+
+The lifecycle query alone, on the soak's database, for a 12,192-delivery campaign, warm:
+
+| Planner setting | Before | After |
+|---|---|---|
+| As chosen | 19–26 ms | 22–31 ms |
+| Only nested loops | 9,281–9,592 ms | 22–30 ms |
+| No hash aggregate, or no sequential and bitmap scans | 9,324–9,452 ms with nested loops and no sequential scans | 22–30 ms |
+
+Both return the same rows.
+
+**The delivery monitor.** It shows the deliveries still on their way or ended badly, a few dozen at rest, but no index held only those, so each of its four counts read the whole table: 197 ms at 2.5M deliveries, and 3.1 s when a reused plan picked a full index instead. Its 20 soak clients kept PostgreSQL at about 7 CPUs. A partial index now holds those statuses only ([migration 37](../migrations/00037_monitor_index.sql)), 16 kB at rest, and the query names the statuses itself, since a reused plan cannot see what `$1` holds and so could not prove the index applies. [`TestMonitorCountsReadOnlyMonitoredRowsInAnyPlan`](../internal/campaign/plan_test.go) checks that a reused plan reads it, and failed without the named statuses. Measured again with the index dropped in a transaction that was rolled back, the count query took 162–237 ms without it, 551–715 ms with a reused plan, and 1.8–2.0 ms with it either way. The endpoint takes 3.4–6 ms instead of 0.55 s.
+
+Two 15-minute soaks on the fixed build, with the same campaigns, faults and clients as the long one:
+
+| | Long soak | Fixed build, two 15-minute runs |
+|---|---|---|
+| Report right after each campaign, first 15 minutes | 31–47 s in 6 of 7 | 0.13–0.32 s in 18 of 18 |
+| PostgreSQL CPU, average over the first 15 minutes | 722% | 112% and 109% |
+| API p95 / requests a second, 20 clients, whole run | 4.28 s / 19 | 19.6 and 17.1 ms / 183 and 185 |
+| Campaign prepare / send, first 10 campaigns against all 9 of each run | 9.6 s / 101.7 s | 3.8 and 3.6 s / 95.6 and 96.5 s |
+
+The index adds a write to each status change of a message still sending. The load scenarios ran twice on the fixed build: without faults 56.9 and 57.4 s against 58.4 s the same morning, with the demo's faults 94.3 and 100.1 s against 92.1 s, with a crashed worker 90.3 and 81.4 s against 90.4 s, every peak at 100 and no message accepted twice ([first](../tests/verify/results/2026-11-24-1735-load.md), [second](../tests/verify/results/2026-11-24-1801-load.md)). The faults are drawn at random, so their scenario varies most; the send without faults, which shows the cost of the extra index write, did not slow down.
+
+What this does not change:
+
+- Analytics over 7 days of the soak's data, 1.25M deliveries, took 2.4 s with a correct hash plan. That is the window's size, as step 9 says, and a per-day summary remains the answer.
+- The soak's API load is higher than people make: the monitor refreshes every 10 s in the page, and the soak asked for it about every 1.6 s per client.

@@ -2,6 +2,23 @@
 
 Problems and wrong behaviour that the verification runs found, newest first. Each entry says how it showed up, what caused it and where it stands. Security items still open are listed in [docs/security.md](../../docs/security.md#open-items).
 
+## 2026-11-24
+
+### Fixed: the report of a just-finished campaign took up to 47 s
+
+A 2.5-hour soak sent 73 campaigns of 12,192 deliveries back to back, with the demo's faults and 20 clients reading the API, while the database grew from 1.5M to 2.5M deliveries. The report of a just-finished campaign took 31–47 s in 6 of the first 7 campaigns, and 12 of the 73 took over 5 s. The query joined the campaign's grouped events to its deliveries; with statistics older than the campaign, PostgreSQL guessed a few rows and chose a nested loop that compared every delivery with every event. `ANALYZE` brought one report from 18.4 s to 35 ms, which showed the cause. The counts now join nothing, so no plan can do that, and a test fails on any join in them. Two 15-minute soaks on the fix answered every report in 0.13–0.32 s. See step 10 of [the performance log](../../docs/performance.md#step-10-plans-that-cannot-go-quadratic).
+
+### Fixed: the delivery monitor read the whole delivery table
+
+The same soak kept PostgreSQL at about 7 CPUs. The delivery monitor's four counts each read every delivery ever sent to find the few dozen still on their way or failed: 162–237 ms each at 2.5M deliveries, 551–715 ms with a reused plan. A partial index now holds only those rows, and the query names their statuses so a reused plan can use it. The counts take 1.8–2.0 ms, and in the 15-minute soaks PostgreSQL used about 1.1 CPUs instead of 7.2. Sends without faults took 56.9 and 57.4 s against 58.4 s before the index.
+
+### Checked, nothing wrong found
+
+- **One CPU and four workers.** Four scenarios were added: `healthy` and `default-faults` with the worker held to one CPU, and with four workers ([2026-11-24-1315-load](results/2026-11-24-1315-load.md)). One CPU sent as fast as eight, since the limit and not the CPU sets the pace, and four workers kept every peak at 100 and accepted no message twice.
+- **The documented retry scenarios.** The 20 load scenarios other than the four clock steps ran again, across [1315](results/2026-11-24-1315-load.md) and [1342](results/2026-11-24-1342-load.md); every one passed, every peak was 100 outside `workers-at-120`, and no message was accepted twice. The clock steps were not run, because they step the clock of every container on the machine.
+- **The 2.5-hour soak.** 665,614 messages were sent, with 20,639 5xx, 14,107 429s and 1,536 lost answers along the way; none failed, none was accepted twice and none was left unfinished. The API and worker heaps stayed at 13–15 and 11–13 MB, their goroutines and open files stayed level, no container restarted, and the API answered no request with a 5xx.
+- **Security probes** ([2026-11-24-1338-security](results/2026-11-24-1338-security.md)) all passed, with the two known open items.
+
 ## 2026-11-08
 
 ### Fixed: the mutation check could not start

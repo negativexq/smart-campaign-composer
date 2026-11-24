@@ -1,0 +1,218 @@
+[
+  {
+    "name": "healthy",
+    "workers": 1,
+    "faults": {
+      "RATE_LIMIT_PER_SECOND": "100",
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0",
+      "VERIFY_SLOW": "0",
+      "VERIFY_SLOW_MAX_MS": "0",
+      "VERIFY_SLOW_MIN_MS": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 56.9,
+    "started": "2026-11-24T20:35:41.825647+03:00",
+    "expected": {
+      "email": 4831,
+      "sms": 4287
+    },
+    "final": {
+      "email": {
+        "SENT": 4831
+      },
+      "sms": {
+        "SENT": 4287
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 4831
+      },
+      "sms": {
+        "accepted": 4287
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 4831,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "late": 0,
+        "throttled": 0,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-24T17:35:43.214069555Z"
+      },
+      "sms": {
+        "accepted": 4287,
+        "duplicates": 0,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "late": 0,
+        "throttled": 0,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-24T17:35:43.216550096Z"
+      }
+    },
+    "events": null
+  },
+  {
+    "name": "default-faults",
+    "workers": 1,
+    "faults": {
+      "RATE_LIMIT_PER_SECOND": "100",
+      "VERIFY_401": "",
+      "VERIFY_429": "0.02",
+      "VERIFY_5XX": "0.03",
+      "VERIFY_LOST": "0.002",
+      "VERIFY_SLOW": "0",
+      "VERIFY_SLOW_MAX_MS": "0",
+      "VERIFY_SLOW_MIN_MS": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 94.3,
+    "started": "2026-11-24T20:36:53.21181+03:00",
+    "expected": {
+      "email": 4831,
+      "sms": 4287
+    },
+    "final": {
+      "email": {
+        "SENT": 4831
+      },
+      "sms": {
+        "SENT": 4287
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 4831,
+        "rate_limited": 107,
+        "server_error": 181,
+        "timeout": 7
+      },
+      "sms": {
+        "accepted": 4287,
+        "rate_limited": 83,
+        "server_error": 148,
+        "timeout": 10
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 4831,
+        "duplicates": 7,
+        "rate_limited": 107,
+        "server_errors": 181,
+        "unauthorized": 0,
+        "late": 0,
+        "throttled": 0,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-24T17:37:05.495025843Z"
+      },
+      "sms": {
+        "accepted": 4287,
+        "duplicates": 10,
+        "rate_limited": 83,
+        "server_errors": 148,
+        "unauthorized": 0,
+        "late": 0,
+        "throttled": 0,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-24T17:36:54.482813171Z"
+      }
+    },
+    "events": null
+  },
+  {
+    "name": "worker-crash",
+    "workers": 1,
+    "faults": {
+      "RATE_LIMIT_PER_SECOND": "100",
+      "VERIFY_401": "",
+      "VERIFY_429": "0",
+      "VERIFY_5XX": "0",
+      "VERIFY_LOST": "0",
+      "VERIFY_SLOW": "0",
+      "VERIFY_SLOW_MAX_MS": "0",
+      "VERIFY_SLOW_MIN_MS": "0"
+    },
+    "status": "COMPLETED",
+    "send_seconds": 90.3,
+    "started": "2026-11-24T20:38:41.968099+03:00",
+    "expected": {
+      "email": 4831,
+      "sms": 4287
+    },
+    "final": {
+      "email": {
+        "SENT": 4831
+      },
+      "sms": {
+        "SENT": 4287
+      }
+    },
+    "outcomes": {
+      "email": {
+        "accepted": 4831,
+        "timeout": 23
+      },
+      "sms": {
+        "accepted": 4287,
+        "timeout": 26
+      }
+    },
+    "accepted_twice": 0,
+    "peak_recorded_per_second": {
+      "email": 100,
+      "sms": 100
+    },
+    "provider": {
+      "email": {
+        "accepted": 4831,
+        "duplicates": 6,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "late": 0,
+        "throttled": 0,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-24T17:38:42.943323221Z"
+      },
+      "sms": {
+        "accepted": 4287,
+        "duplicates": 2,
+        "rate_limited": 0,
+        "server_errors": 0,
+        "unauthorized": 0,
+        "late": 0,
+        "throttled": 0,
+        "peak_per_second": 100,
+        "peak_at": "2026-11-24T17:38:42.962067013Z"
+      }
+    },
+    "events": [
+      "campaign.alert_opened sms error_rate",
+      "campaign.alert_opened email error_rate"
+    ],
+    "notes": {
+      "kills": 3,
+      "left_mid_send": "49"
+    }
+  }
+]
